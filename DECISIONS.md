@@ -108,7 +108,22 @@ use **asdcplib**, whose source is present on this dev host at
 `/home/libserv-2/asdcplib`; wiring it in needs a cgo build (see BLOCKERS B7). The
 unwrap stage always exists in the pipeline even when the server returns plain XML.
 
-### D16. RPL/resolver grammar is PROVISIONAL [§5.3, OPEN #4]
+### D17. verify treats a missing IPv6 forwarding sysctl as SECURE (disabled) [§9.3]
+A missing `/proc/sys/net/ipv6/conf/all/forwarding` means IPv6 is disabled at the
+kernel (`ipv6.disable=1`) — forwarding is impossible, which is the secure state,
+not "forwarding enabled". So a missing IPv6 file → disabled; a missing IPv4
+`ip_forward` (which essentially always exists) → fail loud. This avoids a spurious
+critical warning on hardened IPv6-off appliances. (Surfaced by the adversarial
+verification pass; an unknown/empty firewall profile also conservatively requires
+admin isolation rather than failing open.)
+
+### D18. AudioReady requires ≥1 usable stream and NO failed stream [§10.6]
+Independent of caption readiness. A configured stream that Failed makes
+`audio_ready` false AND raises a loud warning — a failure is surfaced, never
+silently tolerated (guardrail #7). No configured audio → `audio_ready` false
+(honest: there is none), while captions can still be ready.
+
+### D19. RPL/resolver grammar is PROVISIONAL [§5.3, OPEN #4]
 The ST 430-11 RPL element grammar and the resource-locator forms are implemented
 from public summaries. The simulator emits the same grammar so parser↔simulator
 agree. The pluggable resolver classifies and counts unresolved (vendor-specific)

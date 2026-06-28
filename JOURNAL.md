@@ -53,3 +53,32 @@ parser (§5.4).
 - Everything race-clean; `acsp-simulator` runs the suite standalone.
 
 Next: audio pipeline (§6) — qualifier + mapper pure-Go tested; encode seam.
+
+## Audio, security, admin, deployment, integration — session complete
+
+- **Deployment (§12)** authored while a workflow ran: four profile descriptors +
+  Loaner overlay + three systemd units encoding privilege separation and the
+  no-core-dump/tmpfs hardening.
+- **Admin (§8)**: first-boot setup wizard (forces credential creation, guards
+  Complete, auto-expiry), Basic-Auth admin gate, and a dashboard rendering
+  caption/audio readiness separately + the loud-warning set.
+- **Audio (§6)**: used a **Workflow** to build + adversarially verify four
+  independent leaf packages in parallel (qualifier, mapper, firewall, verify).
+  The adversarial pass found two genuine MAJOR bugs — the qualifier overclaiming
+  "noise normal" on a continuous calibration tone, and verify misreading a
+  kernel-disabled IPv6 (missing sysctl file) as "forwarding enabled" — both
+  fixed with regression tests, plus the firewall iface-name validation. Added
+  the capture/encode seam (synthetic tone → real GStreamer Opus smoke) and the
+  capture→map→qualify→encode pipeline.
+- **Integration (§3.5, §10.6)**: readiness aggregator (independent verdicts +
+  loud warnings); media helper serves audio status over IPC; firewall helper
+  generates/verifies (apply gated behind root + flag); core drives a
+  self-advancing ACSP demo over a memory-backed resolver and assembles the
+  dashboard from live caption state + polled audio + local self-introspection.
+  Verified the whole three-process system live.
+- **Invariants (§11.6)**: a cross-cutting suite asserting all seven guardrails,
+  run in CI.
+
+Final: 28 packages, 119 tests, race-clean, ~71% coverage. All in-scope backlog
+done; hardware-gated work recorded in BLOCKERS.md. The build is green and the
+appliance runs end-to-end on synthetic/simulated inputs.
