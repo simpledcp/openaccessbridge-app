@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Verify modules tidy
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Vet
+        run: go vet ./...
+
+      # The full suite includes the ST 430-10 simulator scenario suite — the
+      # caption-path regression backbone (§11.1) — and the security/invariant
+      # tests (§11.6). These run headless on every push/PR.
+      - name: Test (race)
+        run: go test -race ./...
+
+      - name: Coverage
+        run: |
+          go test -coverprofile=coverage.txt -covermode=atomic ./...
+          go tool cover -func=coverage.txt | tail -1
+
+      - name: Build all binaries
+        run: |
+          for b in captionbridge-core captionbridge-media captionbridge-firewall acsp-simulator; do
+            go build -o "bin/$b" "./cmd/$b"
+          done

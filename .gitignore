@@ -1,0 +1,24 @@
+# Build artifacts
+/bin/
+/dist/
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Local runtime state (config DB is runtime-only; never commit a populated one)
+*.db
+*.db-wal
+*.db-shm
+/run/
+/tmp/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Go toolchain caches (should never appear in-repo, but guard anyway)
+/go/
+/go-sdk/
