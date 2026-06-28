@@ -62,6 +62,15 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   validated against the simulator scenario suite instead (§11.1), which is the
   documented stand-in until lab time is available.
 
+### B7. Real ST 429-5 MXF timed-text demux (asdcplib)
+- **Present:** asdcplib source at `/home/libserv-2/asdcplib`.
+- **Needed to clear:** build/link asdcplib (cgo) and replace the PROVISIONAL
+  heuristic in `internal/caption/resolver/unwrap.go` with a proper Generic
+  Container essence extractor. Only needed for servers that return MXF-wrapped
+  track files (a Phase 0A finding, B1); servers returning plain XML don't hit it.
+- **Workaround in place:** heuristic XML-essence extraction (DECISIONS D15),
+  behind the same `Unwrap` seam.
+
 ## None of the above block the in-scope software work
 
 The caption path (parser → resolver → timing → state machine → fan-out → patron

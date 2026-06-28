@@ -97,3 +97,20 @@ access-equivalence claim). The default profile for a fresh setup is
 
 ### D14. Module path `github.com/simpledcp/captionbridge`
 Matches the `simpledcp` git identity on this machine. No repo is pushed yet.
+
+### D15. MXF/track-file unwrap is a PROVISIONAL heuristic; asdcplib is the real path [§5.3]
+`internal/caption/resolver/unwrap.go` detects plain XML vs an MXF-wrapped
+timed-text track (ST 429-5) and, for MXF, heuristically extracts the contiguous
+timed-text XML essence (locate XML root open → last root close). This is enough
+for the simulator's synthetic track files and keeps "a track-file-returning
+server is a configuration case, not a rewrite." Real ST 429-5 MXF demuxing should
+use **asdcplib**, whose source is present on this dev host at
+`/home/libserv-2/asdcplib`; wiring it in needs a cgo build (see BLOCKERS B7). The
+unwrap stage always exists in the pipeline even when the server returns plain XML.
+
+### D16. RPL/resolver grammar is PROVISIONAL [§5.3, OPEN #4]
+The ST 430-11 RPL element grammar and the resource-locator forms are implemented
+from public summaries. The simulator emits the same grammar so parser↔simulator
+agree. The pluggable resolver classifies and counts unresolved (vendor-specific)
+locator forms by FORM CLASS (never the raw path, which can embed a title) so
+coverage grows from real Phase 0A observations.

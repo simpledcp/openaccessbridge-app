@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AuxResourcePresentationList xmlns="http://www.smpte-ra.org/schemas/430-11/2010/RPL">
+  <Id>urn:uuid:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</Id>
+  <PlayoutId>1</PlayoutId>
+  <ReelList>
+    <Reel>
+      <ReelNumber>1</ReelNumber>
+      <ResourceList>
+        <Resource>
+          <Id>urn:uuid:res-r1-en-cc</Id>
+          <Type>ClosedCaption</Type>
+          <Language>en-US</Language>
+          <EditRate>24 1</EditRate>
+          <EntryPoint>0</EntryPoint>
+          <IntrinsicDuration>1440</IntrinsicDuration>
+          <Locator>captions/reel1_en.xml</Locator>
+          <MimeType>text/xml</MimeType>
+        </Resource>
+        <Resource>
+          <Id>urn:uuid:res-r1-en-sub</Id>
+          <Type>ClosedSubtitle</Type>
+          <Language>en-US</Language>
+          <EditRate>24 1</EditRate>
+          <EntryPoint>0</EntryPoint>
+          <IntrinsicDuration>1440</IntrinsicDuration>
+          <Locator>captions/reel1_en_sub.xml</Locator>
+        </Resource>
+        <Resource>
+          <Id>urn:uuid:res-r1-es</Id>
+          <Type>ClosedSubtitle</Type>
+          <Language>es-419</Language>
+          <EditRate>24 1</EditRate>
+          <EntryPoint>0</EntryPoint>
+          <IntrinsicDuration>1440</IntrinsicDuration>
+          <Locator>https://mediablock.local/aux/reel1_es.xml</Locator>
+        </Resource>
+      </ResourceList>
+    </Reel>
+    <Reel>
+      <ReelNumber>2</ReelNumber>
+      <ResourceList>
+        <Resource>
+          <Id>urn:uuid:res-r2-en</Id>
+          <Type>ClosedCaption</Type>
+          <Language>en-US</Language>
+          <EditRate>24 1</EditRate>
+          <EntryPoint>0</EntryPoint>
+          <IntrinsicDuration>2880</IntrinsicDuration>
+          <Locator>captions/reel2_en.xml</Locator>
+        </Resource>
+      </ResourceList>
+    </Reel>
+  </ReelList>
+</AuxResourcePresentationList>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AuxResourcePresentationList xmlns="http://www.smpte-ra.org/schemas/430-11/2010/RPL">
+  <Id>urn:uuid:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb</Id>
+  <!-- Playout ID = 0 is the uncaptioned-composition quirk (trailers, etc.) the
+       ACSP layer must NOT treat as a loop-back (§5.2 item 4). -->
+  <PlayoutId>0</PlayoutId>
+  <ReelList>
+    <Reel>
+      <ReelNumber>1</ReelNumber>
+      <ResourceList/>
+    </Reel>
+  </ReelList>
+</AuxResourcePresentationList>
