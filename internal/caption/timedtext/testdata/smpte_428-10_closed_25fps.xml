@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SubtitleReel xmlns="http://www.smpte-ra.org/schemas/428-10/2014/DCST-CC" xml:lang="es-419">
+  <Id>urn:uuid:33333333-3333-3333-3333-333333333333</Id>
+  <ContentTitleText>Known-answer fixture</ContentTitleText>
+  <ReelNumber>1</ReelNumber>
+  <Language>es-419</Language>
+  <EditRate>25 1</EditRate>
+  <SubtitleList>
+    <Font ID="f1" Size="40">
+      <Subtitle SpotNumber="1" TimeIn="00:00:02:00" TimeOut="00:00:05:00">
+        <Text>Primera línea<br/>Segunda línea</Text>
+      </Subtitle>
+    </Font>
+  </SubtitleList>
+</SubtitleReel>

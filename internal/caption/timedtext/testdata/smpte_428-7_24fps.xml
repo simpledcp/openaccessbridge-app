@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dcst:SubtitleReel xmlns:dcst="http://www.smpte-ra.org/schemas/428-7/2010/DCST">
+  <dcst:Id>urn:uuid:11111111-1111-1111-1111-111111111111</dcst:Id>
+  <dcst:ContentTitleText>Known-answer fixture (do not embed real titles)</dcst:ContentTitleText>
+  <dcst:IssueDate>2020-01-01T00:00:00.000-00:00</dcst:IssueDate>
+  <dcst:ReelNumber>1</dcst:ReelNumber>
+  <dcst:Language>en-US</dcst:Language>
+  <dcst:EditRate>24 1</dcst:EditRate>
+  <dcst:TimeCodeRate>24</dcst:TimeCodeRate>
+  <dcst:StartTime>00:00:00:00</dcst:StartTime>
+  <dcst:SubtitleList>
+    <dcst:Font ID="theFont" Color="FFFFFFFF" Weight="normal" Size="42">
+      <dcst:Subtitle SpotNumber="1" TimeIn="00:00:01:00" TimeOut="00:00:04:12" FadeUpTime="00:00:00:00" FadeDownTime="00:00:00:00">
+        <dcst:Text Valign="bottom" Vposition="8">Hello world</dcst:Text>
+      </dcst:Subtitle>
+      <dcst:Subtitle SpotNumber="2" TimeIn="00:00:05:00" TimeOut="00:00:07:00">
+        <dcst:Text>[MUSIC PLAYING]</dcst:Text>
+        <dcst:Text>Second line here</dcst:Text>
+      </dcst:Subtitle>
+      <dcst:Subtitle SpotNumber="3" TimeIn="00:00:08:00" TimeOut="00:00:10:00">
+        <dcst:Text>Line with <dcst:Font Italic="yes">italic run</dcst:Font> inside</dcst:Text>
+      </dcst:Subtitle>
+    </dcst:Font>
+  </dcst:SubtitleList>
+</dcst:SubtitleReel>
