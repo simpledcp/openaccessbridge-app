@@ -347,3 +347,44 @@ func TestEmptySamples(t *testing.T) {
 		t.Fatalf("empty samples during playback: Status=%q Silence=%v", got.Status, got.Silence)
 	}
 }
+
+// TestNearFullScaleIsNotClipping locks in the corrected distinction (adversarial
+// review finding): a clean, unclipped sine peaking just inside the early-warning
+// band must be Marginal with a HEADROOM reason and Clipping=false — never a
+// misleading "audio is clipping" claim.
+func TestNearFullScaleIsNotClipping(t *testing.T) {
+	const sr, frames = 48000, 4800
+	in := Input{
+		Samples:    SineWave(1000, 0.96, sr, 1, frames), // peak ~-0.35 dBFS, no saturation
+		SampleRate: sr, Channels: 1, Present: true, DeviceConnected: true, DuringPlayback: true,
+	}
+	got := Analyze(in, DefaultThresholds())
+	if got.Clipping {
+		t.Errorf("unclipped near-full-scale sine should not report Clipping")
+	}
+	if got.Status != model.QualMarginal {
+		t.Errorf("near-full-scale should be Marginal (headroom), got %q", got.Status)
+	}
+	if !reasonsContain(got.Reasons, "headroom") {
+		t.Errorf("expected a headroom reason, got %v", got.Reasons)
+	}
+	for _, r := range got.Reasons {
+		if r == "audio is clipping — reduce source level or add the inline attenuator" {
+			t.Errorf("must not claim clipping for an unclipped signal")
+		}
+	}
+}
+
+// TestSustainedSaturationClips exercises the now-live ClipSampleFraction path: a
+// signal with a sustained run of truly saturated samples is detected as clipping.
+func TestSustainedSaturationClips(t *testing.T) {
+	const frames = 4800
+	in := Input{
+		Samples: square(1.0, frames), SampleRate: 48000, Channels: 1,
+		Present: true, DeviceConnected: true, DuringPlayback: true,
+	}
+	got := Analyze(in, DefaultThresholds())
+	if !got.Clipping {
+		t.Errorf("sustained full-scale should clip")
+	}
+}

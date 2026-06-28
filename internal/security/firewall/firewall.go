@@ -130,6 +130,15 @@ func validate(cfg Config) (net.IP, string, error) {
 	if cfg.TheaterIface == cfg.ClientIface {
 		return nil, "", fmt.Errorf("firewall: theater and client interfaces must differ (both %q); the zones are never joined", cfg.TheaterIface)
 	}
+	// Interface names are emitted into the ROOT-applied nftables ruleset, so they
+	// are validated against the kernel IFNAMSIZ limit and a safe charset before
+	// they reach a privileged command (defense-in-depth).
+	if err := validIface(cfg.TheaterIface); err != nil {
+		return nil, "", fmt.Errorf("firewall: TheaterIface %w", err)
+	}
+	if err := validIface(cfg.ClientIface); err != nil {
+		return nil, "", fmt.Errorf("firewall: ClientIface %w", err)
+	}
 	ip := net.ParseIP(strings.TrimSpace(cfg.CinemaServerIP))
 	if ip == nil {
 		return nil, "", fmt.Errorf("firewall: CinemaServerIP %q is not a valid IP address", cfg.CinemaServerIP)
@@ -181,6 +190,23 @@ func adminPort(cfg Config) int {
 }
 
 func validPort(p int) bool { return p >= 1 && p <= 65535 }
+
+// validIface validates a Linux interface name: non-empty, at most 15 chars
+// (IFNAMSIZ-1), and limited to [A-Za-z0-9._-] (no whitespace, slash, quote, or
+// control characters that could corrupt or escape the generated ruleset).
+func validIface(name string) error {
+	if len(name) == 0 || len(name) > 15 {
+		return fmt.Errorf("%q must be 1–15 characters", name)
+	}
+	for _, r := range name {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
+		if !ok {
+			return fmt.Errorf("%q contains an invalid character", name)
+		}
+	}
+	return nil
+}
 
 // validateRange checks an nft port-range literal like "10000-20000".
 func validateRange(r string) error {

@@ -21,6 +21,13 @@ import (
 // minDBFS is the floor we report for digital silence so dB arithmetic stays finite.
 const minDBFS = -120.0
 
+// saturationDBFS is the level at/above which a sample is counted as truly saturated
+// (essentially full scale). It is deliberately distinct from the early-warning
+// peak threshold (Thresholds.ClipDBFS, ~-0.5 dBFS): real clipping is sustained
+// saturation near 0 dBFS, while a peak merely inside the early-warning band is a
+// headroom warning, not clipping.
+const saturationDBFS = -0.1
+
 // Thresholds parameterizes the qualifier. All levels are dBFS (0 = full scale).
 // A zero-valued field is treated as its default (see DefaultThresholds), so callers
 // may override only the knobs they care about.
@@ -172,6 +179,8 @@ func Analyze(in Input, th Thresholds) model.AudioStreamState {
 	var reasons []string
 	if m.clipping {
 		reasons = append(reasons, "audio is clipping — reduce source level or add the inline attenuator")
+	} else if m.nearFullScale {
+		reasons = append(reasons, "level is very close to full scale — reduce the source for headroom")
 	}
 	// A high windowed-RMS floor only means "noise" when the signal clearly rides
 	// above it (as speech does over its pauses). A continuous calibration tone has
@@ -196,7 +205,11 @@ func Analyze(in Input, th Thresholds) model.AudioStreamState {
 	// --- Clean input: Excellent in the pristine band, otherwise Usable. ---
 	if m.rmsDBFS >= th.ExcellentMinDBFS && m.rmsDBFS <= th.HotDBFS {
 		st.Status = model.QualExcellent
-		st.Reasons = []string{"input present; level and noise within normal range"}
+		// Only claim what was actually established: a clean, well-levelled signal
+		// with no clipping/DC and no detectable high floor. The noise floor cannot
+		// be independently confirmed on a continuous tone (no quiet gaps), so the
+		// reason does not assert "noise is fine" — it states the verified level.
+		st.Reasons = []string{"input present; level within normal range"}
 		return st
 	}
 	st.Status = model.QualUsable
@@ -218,6 +231,7 @@ type metrics struct {
 	noiseFloorDBFS float64
 	dc             float64
 	clipping       bool
+	nearFullScale  bool
 	silent         bool
 }
 
@@ -235,8 +249,11 @@ func measure(samples []float64, channels, sampleRate int, th Thresholds) metrics
 
 	frames := len(samples) / channels
 
-	// Clipping / peak over every raw sample.
-	clipLevel := dbToLin(th.ClipDBFS)
+	// Clipping / peak over every raw sample. Real clipping is a SUSTAINED fraction
+	// of truly saturated samples (near 0 dBFS); a peak that only reaches the
+	// early-warning band (ClipDBFS) without saturation is a headroom warning, not
+	// clipping (so a clean sine peaking at −0.4 dBFS is not mislabeled "clipping").
+	satLevel := dbToLin(saturationDBFS)
 	var peak float64
 	var saturated int
 	for _, s := range samples {
@@ -244,13 +261,14 @@ func measure(samples []float64, channels, sampleRate int, th Thresholds) metrics
 		if a > peak {
 			peak = a
 		}
-		if a >= clipLevel {
+		if a >= satLevel {
 			saturated++
 		}
 	}
 	m.peakDBFS = linToDB(peak)
 	fullScaleFrac := float64(saturated) / float64(len(samples))
-	m.clipping = m.peakDBFS >= th.ClipDBFS || fullScaleFrac >= th.ClipSampleFraction
+	m.clipping = fullScaleFrac >= th.ClipSampleFraction
+	m.nearFullScale = !m.clipping && m.peakDBFS >= th.ClipDBFS
 
 	if frames == 0 {
 		// Fewer samples than channels: degenerate, treat as silence.

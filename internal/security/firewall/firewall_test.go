@@ -320,3 +320,28 @@ func containsRule(lines []string, want string) bool {
 	}
 	return false
 }
+
+// TestInvalidInterfaceNamesRejected guards the defense-in-depth iface validation
+// (adversarial review finding): names that violate IFNAMSIZ or the safe charset
+// must be rejected before reaching the root-applied ruleset.
+func TestInvalidInterfaceNamesRejected(t *testing.T) {
+	base := Config{
+		Profile: model.ProfileBoothDiagnostic, ClientIface: "wlan0",
+		CinemaServerIP: "10.10.20.15", ACSPPort: 4170, Initiation: model.ACSInitiated,
+		PatronWebPorts: []int{80},
+	}
+	bad := []string{"this-name-is-way-too-long", "eth 0", "eth0;drop", "eth\"0", "eth/0", ""}
+	for _, name := range bad {
+		c := base
+		c.TheaterIface = name
+		if _, err := Generate(c); err == nil {
+			t.Errorf("expected rejection of theater iface %q", name)
+		}
+	}
+	// A normal name still works.
+	c := base
+	c.TheaterIface = "eth0"
+	if _, err := Generate(c); err != nil {
+		t.Errorf("valid iface rejected: %v", err)
+	}
+}

@@ -262,9 +262,9 @@ func TestSeverities(t *testing.T) {
 	}
 }
 
-// TestForwardingMissingFilesFailLoud ensures unreadable sysctl files are treated
-// as NOT disabled (a surfaced problem), never as a silent pass.
-func TestForwardingMissingFilesFailLoud(t *testing.T) {
+// TestForwardingV4MissingFailsLoud: a missing IPv4 ip_forward is suspicious and
+// must fail loud (it essentially always exists on a real kernel).
+func TestForwardingV4MissingFailsLoud(t *testing.T) {
 	root := t.TempDir()
 	p := Paths{
 		ProcSysNet:  filepath.Join(root, "proc", "sys", "net"), // does not exist
@@ -273,16 +273,63 @@ func TestForwardingMissingFilesFailLoud(t *testing.T) {
 	mustMkdir(t, p.SysClassNet)
 
 	rep := Run(Config{Paths: p, Profile: model.ProfileLab, FirewallActive: true})
-	if rep.ForwardingDisabledV4 || rep.ForwardingDisabledV6 {
-		t.Errorf("missing files should not be reported as disabled: v4=%v v6=%v",
-			rep.ForwardingDisabledV4, rep.ForwardingDisabledV6)
+	if rep.ForwardingDisabledV4 {
+		t.Error("missing IPv4 ip_forward should NOT be reported as disabled")
 	}
 	if rep.Pass {
-		t.Error("Pass should be false when forwarding cannot be confirmed disabled")
+		t.Error("Pass should be false when IPv4 forwarding cannot be confirmed disabled")
 	}
 	if got := codes(rep.Warnings); !equalStrings(got, []string{model.WarnForwardingEnabled}) {
 		t.Errorf("warning codes = %v, want [%s]", got, model.WarnForwardingEnabled)
 	}
+}
+
+// TestForwardingV6MissingIsSecure: a missing IPv6 forwarding knob means IPv6 is
+// disabled at the kernel (ipv6.disable=1) — forwarding is impossible, the SECURE
+// state. It must NOT raise a false critical warning (regression guard for a real
+// hardened-appliance configuration).
+func TestForwardingV6MissingIsSecure(t *testing.T) {
+	root := t.TempDir()
+	proc := filepath.Join(root, "proc", "sys", "net")
+	sys := filepath.Join(root, "sys", "class", "net")
+	mustMkdir(t, filepath.Join(proc, "ipv4"))
+	mustMkdir(t, sys)
+	mustWrite(t, filepath.Join(proc, "ipv4", "ip_forward"), "0")
+	// Deliberately do NOT create the ipv6 forwarding file.
+
+	rep := Run(Config{Paths: Paths{ProcSysNet: proc, SysClassNet: sys}, Profile: model.ProfilePatronFacing, FirewallActive: true})
+	if !rep.ForwardingDisabledV4 || !rep.ForwardingDisabledV6 {
+		t.Errorf("v4=0 and v6-absent should both be disabled: v4=%v v6=%v", rep.ForwardingDisabledV4, rep.ForwardingDisabledV6)
+	}
+	if len(rep.Warnings) != 0 || !rep.Pass {
+		t.Errorf("IPv6-disabled-at-kernel must not raise a warning: warnings=%v pass=%v", codes(rep.Warnings), rep.Pass)
+	}
+}
+
+// TestUnknownProfileRequiresAdminIsolation closes the fail-open: an unrecognized
+// profile must not silently permit admin-on-patron.
+func TestUnknownProfileRequiresAdminIsolation(t *testing.T) {
+	rep := Run(Config{
+		Paths:                    fixture(t, "0", "0", false),
+		Profile:                  model.FirewallProfile("mystery"),
+		FirewallActive:           true,
+		AdminReachableFromPatron: true,
+	})
+	if rep.AdminIsolated {
+		t.Error("unknown profile with reachable admin should not be reported isolated")
+	}
+	if !contains(codes(rep.Warnings), model.WarnAdminOnPatronNet) {
+		t.Errorf("unknown profile should warn admin-on-patron, got %v", codes(rep.Warnings))
+	}
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestBridgesMissingSysDir ensures a missing /sys/class/net does not report a

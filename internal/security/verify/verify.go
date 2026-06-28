@@ -80,18 +80,21 @@ func Run(cfg Config) Report {
 		p.SysClassNet = DefaultPaths().SysClassNet
 	}
 
-	disabledV4 := forwardingDisabled(filepath.Join(p.ProcSysNet, "ipv4", "ip_forward"))
-	disabledV6 := forwardingDisabled(filepath.Join(p.ProcSysNet, "ipv6", "conf", "all", "forwarding"))
+	// IPv4 ip_forward essentially always exists; a MISSING file is suspicious and
+	// fails loud. IPv6 forwarding is impossible when IPv6 is disabled at the kernel
+	// (ipv6.disable=1) or compiled out — then the file is absent, which is the
+	// SECURE state, not "forwarding enabled". Treating a missing v6 file as a
+	// failure would spam a false critical warning on hardened IPv6-off appliances.
+	disabledV4 := forwardingDisabled(filepath.Join(p.ProcSysNet, "ipv4", "ip_forward"), false)
+	disabledV6 := forwardingDisabled(filepath.Join(p.ProcSysNet, "ipv6", "conf", "all", "forwarding"), true)
 	bridges := bridgesPresent(p.SysClassNet)
 
-	// In production the admin surface must be off the patron network; in non-
-	// production profiles (Lab, Booth Diagnostic) admin-on-patron is permitted
-	// behind a banner (§8.4), so isolation is not asserted against it.
-	production := cfg.Profile.Production()
-	adminIsolated := true
-	if production {
-		adminIsolated = !cfg.AdminReachableFromPatron
-	}
+	// In production the admin surface must be off the patron network; in the known
+	// non-production profiles (Lab, Booth Diagnostic) admin-on-patron is permitted
+	// behind a banner (§8.4). An UNKNOWN/empty profile requires isolation
+	// conservatively (never fail open on an unrecognized posture).
+	requiresIsolation := adminIsolationRequired(cfg.Profile)
+	adminIsolated := !requiresIsolation || !cfg.AdminReachableFromPatron
 
 	rep := Report{
 		ForwardingDisabledV4: disabledV4,
@@ -105,9 +108,15 @@ func Run(cfg Config) Report {
 
 	var warnings []model.Warning
 	if !disabledV4 || !disabledV6 {
+		which := "IPv4"
+		if !disabledV4 && !disabledV6 {
+			which = "IPv4 and IPv6"
+		} else if !disabledV6 {
+			which = "IPv6"
+		}
 		warnings = append(warnings, model.Warning{
 			Code:     model.WarnForwardingEnabled,
-			Message:  "IP forwarding is enabled; the appliance must never route between interfaces (v4 and v6 forwarding must both be disabled)",
+			Message:  which + " forwarding is enabled (or cannot be confirmed disabled); the appliance must never route between interfaces",
 			Severity: model.SeverityCritical,
 		})
 	}
@@ -125,10 +134,10 @@ func Run(cfg Config) Report {
 			Severity: model.SeverityCritical,
 		})
 	}
-	if cfg.AdminReachableFromPatron && production {
+	if cfg.AdminReachableFromPatron && requiresIsolation {
 		warnings = append(warnings, model.Warning{
 			Code:     model.WarnAdminOnPatronNet,
-			Message:  "The admin surface is reachable from the patron network in a production profile",
+			Message:  "The admin surface is reachable from the patron network where it must be isolated",
 			Severity: model.SeverityCritical,
 		})
 	}
@@ -153,14 +162,33 @@ func Run(cfg Config) Report {
 }
 
 // forwardingDisabled reports whether the sysctl file at path reads exactly "0"
-// (forwarding off). An unreadable file fails loud: it is treated as NOT disabled
-// so the missing assertion surfaces rather than passing silently.
-func forwardingDisabled(path string) bool {
+// (forwarding off). missingMeansDisabled controls the absent-file case: for the
+// IPv6 forwarding knob a missing file means IPv6 is disabled at the kernel
+// (forwarding impossible → secure), so pass true; for IPv4 ip_forward a missing
+// file is suspicious, so pass false to fail loud. Other read errors always fail
+// loud.
+func forwardingDisabled(path string, missingMeansDisabled bool) bool {
 	b, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return missingMeansDisabled
+		}
 		return false
 	}
 	return strings.TrimSpace(string(b)) == "0"
+}
+
+// adminIsolationRequired reports whether admin-on-patron must be treated as a
+// failure. Production profiles require isolation; the known non-production
+// profiles (Lab, Booth Diagnostic) permit admin-on-patron behind a banner. An
+// unknown/empty profile requires isolation conservatively — never fail open.
+func adminIsolationRequired(p model.FirewallProfile) bool {
+	switch p {
+	case model.ProfileLab, model.ProfileBoothDiagnostic:
+		return false
+	default:
+		return true
+	}
 }
 
 // bridgesPresent reports whether any netdev under sysClassNet is a bridge. A
