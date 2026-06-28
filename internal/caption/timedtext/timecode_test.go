@@ -42,9 +42,9 @@ func TestTimecodeToMS_Errors(t *testing.T) {
 	}{
 		{"", 24},
 		{"not-a-time", 24},
-		{"00:00:01:00", 0},   // colon form needs units
-		{"00:00:01:-5", 24},  // negative units
-		{"00:99:00:00", 24},  // minutes out of range
+		{"00:00:01:00", 0},  // colon form needs units
+		{"00:00:01:-5", 24}, // negative units
+		{"00:99:00:00", 24}, // minutes out of range
 	}
 	for _, c := range cases {
 		if _, err := TimecodeToMS(c.tc, c.units); err == nil {

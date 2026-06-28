@@ -24,6 +24,13 @@ jobs:
           go mod download
           go mod verify
 
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l internal/ cmd/)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 

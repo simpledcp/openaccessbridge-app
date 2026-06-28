@@ -37,12 +37,16 @@ vet:
 fmt:
 	$(GO) fmt ./...
 
+fmt-check:
+	@unformatted=$$(gofmt -l internal/ cmd/); \
+	if [ -n "$$unformatted" ]; then echo "not gofmt-clean:"; echo "$$unformatted"; exit 1; fi
+
 tidy:
 	$(GO) mod tidy
 
-# check is what CI gates on: vet + the full test suite (incl. the ACSP simulator
-# scenario suite, the caption-path regression backbone — §11.1).
-check: vet test
+# check is what CI gates on: gofmt + vet + the full test suite (incl. the ACSP
+# simulator scenario suite, the caption-path regression backbone — §11.1).
+check: fmt-check vet test
 
 # Run the ACSP simulator standalone (dev convenience).
 sim: acsp-simulator

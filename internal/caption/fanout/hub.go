@@ -36,12 +36,12 @@ var ErrClosed = errors.New("subscriber closed")
 // complete state (cue + patron status), which fits coalesce-to-latest delivery and
 // lets the patron UI render from a single message.
 type Message struct {
-	Type       string `json:"type"`             // always "state"
-	Visible    bool   `json:"visible"`          // is a cue currently shown
-	Text       string `json:"text,omitempty"`   // caption text (transient content)
+	Type       string `json:"type"`           // always "state"
+	Visible    bool   `json:"visible"`        // is a cue currently shown
+	Text       string `json:"text,omitempty"` // caption text (transient content)
 	Language   string `json:"language,omitempty"`
 	CueID      string `json:"cue_id,omitempty"`
-	Status     string `json:"status"`           // model.PatronCaptionStatus
+	Status     string `json:"status"` // model.PatronCaptionStatus
 	Auditorium string `json:"auditorium,omitempty"`
 	Seq        int64  `json:"seq"`
 }

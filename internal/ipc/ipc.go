@@ -57,16 +57,16 @@ const (
 	TypePong = "pong"
 
 	// Media process (captionbridge-media).
-	TypeMediaStatus    = "media.status"     // helper → core: per-stream AudioStreamState
-	TypeMediaConfigure = "media.configure"  // core → helper: device + mapping
-	TypeMediaStart     = "media.start"      // core → helper: start a named stream
-	TypeMediaStop      = "media.stop"       // core → helper: stop a named stream
-	TypeMediaSignal    = "media.signal"     // WebRTC SDP/ICE signaling relay (opaque)
+	TypeMediaStatus    = "media.status"    // helper → core: per-stream AudioStreamState
+	TypeMediaConfigure = "media.configure" // core → helper: device + mapping
+	TypeMediaStart     = "media.start"     // core → helper: start a named stream
+	TypeMediaStop      = "media.stop"      // core → helper: stop a named stream
+	TypeMediaSignal    = "media.signal"    // WebRTC SDP/ICE signaling relay (opaque)
 
 	// Firewall process (captionbridge-firewall).
-	TypeFirewallApply  = "firewall.apply"   // core → helper: apply a profile's ruleset
-	TypeFirewallVerify = "firewall.verify"  // core → helper: run verification pass
-	TypeFirewallResult = "firewall.result"  // helper → core: VerificationReport
+	TypeFirewallApply  = "firewall.apply"  // core → helper: apply a profile's ruleset
+	TypeFirewallVerify = "firewall.verify" // core → helper: run verification pass
+	TypeFirewallResult = "firewall.result" // helper → core: VerificationReport
 )
 
 // Encode writes a message as a single newline-delimited JSON frame.

@@ -14,13 +14,13 @@ const RedactedPlaceholder = "[REDACTED]"
 // key contains any of these is force-redacted regardless of its value, so a
 // caller cannot leak content by mislabeling a field.
 var deniedKeySubstrings = []string{
-	"text",     // caption text
+	"text", // caption text
 	"caption_body",
 	"cue_text",
-	"sample",   // audio samples
+	"sample", // audio samples
 	"audio_data",
 	"pcm",
-	"sdp",      // WebRTC SDP bodies
+	"sdp", // WebRTC SDP bodies
 	"ice_ufrag",
 	"ice_pwd",
 	"candidate_raw",
@@ -30,7 +30,7 @@ var deniedKeySubstrings = []string{
 	"user_agent",
 	"password",
 	"secret",
-	"token",    // session tokens
+	"token", // session tokens
 	"credential",
 	"asset_path", // paths can embed title names (§9.4)
 	"title",

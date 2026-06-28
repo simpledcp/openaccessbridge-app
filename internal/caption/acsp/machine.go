@@ -153,7 +153,7 @@ func (m *Machine) handleAnnounce(req Request) Response {
 		m.log.Warn(logging.EvServerIdentityMismatch, logging.Field("reason", "fingerprint_mismatch"))
 		if m.onWarn != nil {
 			m.onWarn(model.Warning{Code: model.WarnServerIdentityMismatch,
-				Message: "Connected cinema server does not match this auditorium's pinned identity.",
+				Message:  "Connected cinema server does not match this auditorium's pinned identity.",
 				Severity: model.SeverityCritical})
 		}
 	} else {

@@ -29,9 +29,9 @@ import (
 type Format string
 
 const (
-	FormatST428    Format = "smpte_st428"  // ST 428-7 / 428-10 (SubtitleReel)
-	FormatInterop  Format = "interop"      // legacy CineCanvas (DCSubtitle)
-	FormatUnknown  Format = "unknown"
+	FormatST428   Format = "smpte_st428" // ST 428-7 / 428-10 (SubtitleReel)
+	FormatInterop Format = "interop"     // legacy CineCanvas (DCSubtitle)
+	FormatUnknown Format = "unknown"
 )
 
 // Document is a parsed timed-text document with all cue times normalized to
@@ -91,7 +91,7 @@ func ParseBytes(b []byte) (*Document, error) {
 	// Second pass: stream tokens, capturing header fields and every Subtitle
 	// element at any nesting depth (Subtitles are nested under Font elements).
 	dec := xml.NewDecoder(bytes.NewReader(b))
-	dec.Strict = false       // tolerate quirky entities / namespaces in field content
+	dec.Strict = false // tolerate quirky entities / namespaces in field content
 	dec.AutoClose = xml.HTMLAutoClose
 	dec.Entity = xml.HTMLEntity
 
@@ -158,13 +158,13 @@ func ParseBytes(b []byte) (*Document, error) {
 
 // xmlSubtitle matches a <Subtitle> element by local name regardless of namespace.
 type xmlSubtitle struct {
-	SpotNumber string   `xml:"SpotNumber,attr"`
-	TimeIn     string   `xml:"TimeIn,attr"`
-	TimeOut    string   `xml:"TimeOut,attr"`
-	VPosition  string   `xml:"VPosition,attr"`
-	HPosition  string   `xml:"HPosition,attr"`
-	VAlign     string   `xml:"VAlign,attr"`
-	HAlign     string   `xml:"HAlign,attr"`
+	SpotNumber string       `xml:"SpotNumber,attr"`
+	TimeIn     string       `xml:"TimeIn,attr"`
+	TimeOut    string       `xml:"TimeOut,attr"`
+	VPosition  string       `xml:"VPosition,attr"`
+	HPosition  string       `xml:"HPosition,attr"`
+	VAlign     string       `xml:"VAlign,attr"`
+	HAlign     string       `xml:"HAlign,attr"`
 	Texts      []xmlTextRun `xml:"Text"`
 }
 

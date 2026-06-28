@@ -47,10 +47,10 @@ type Request struct {
 	Type RequestType `json:"type"`
 
 	// Announce
-	ServerID    string `json:"server_id,omitempty"`
+	ServerID     string `json:"server_id,omitempty"`
 	ServerFamily string `json:"server_family,omitempty"`
-	ScreenName  string `json:"screen_name,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
+	ScreenName   string `json:"screen_name,omitempty"`
+	Fingerprint  string `json:"fingerprint,omitempty"`
 
 	// GetNewLease / Status
 	LeaseMS int64 `json:"lease_ms,omitempty"`

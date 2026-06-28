@@ -56,12 +56,12 @@ func itoa(n int) string {
 
 func TestLocatorForm(t *testing.T) {
 	cases := map[string]string{
-		"http://x/y":           "http",
-		"https://x/y":          "https",
-		"file:///srv/a.xml":    "file",
-		"captions/reel1.xml":   "server-relative",
-		"dcp://vendor/asset":   "scheme:dcp",
-		"":                     "empty",
+		"http://x/y":         "http",
+		"https://x/y":        "https",
+		"file:///srv/a.xml":  "file",
+		"captions/reel1.xml": "server-relative",
+		"dcp://vendor/asset": "scheme:dcp",
+		"":                   "empty",
 	}
 	for in, want := range cases {
 		if got := locatorForm(in); got != want {
@@ -178,12 +178,12 @@ func TestLoaderWindowOffsetsAndKind(t *testing.T) {
 		Reels: []rpl.Reel{
 			{ReelNumber: 1, Resources: []rpl.Resource{{
 				ID: "r1en", Kind: model.TrackClosedCaption, Language: "en-US",
-				Locator: "captions/reel1_en.xml",
+				Locator:  "captions/reel1_en.xml",
 				EditRate: rateUnits(24), IntrinsicDurationUnits: 1440, // 60000ms
 			}}},
 			{ReelNumber: 2, Resources: []rpl.Resource{{
 				ID: "r2en", Kind: model.TrackClosedCaption, Language: "en-US",
-				Locator: "captions/reel2_en.xml",
+				Locator:  "captions/reel2_en.xml",
 				EditRate: rateUnits(24), IntrinsicDurationUnits: 1440,
 			}}},
 		},

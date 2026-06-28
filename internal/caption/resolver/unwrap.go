@@ -46,10 +46,10 @@ func isMXF(b []byte) bool {
 
 // xml root markers for the timed-text grammars we support.
 var (
-	xmlDeclMarker  = []byte("<?xml")
-	smpteRootOpen  = []byte("<SubtitleReel")
-	interopRootOpen = []byte("<DCSubtitle")
-	smpteRootClose  = []byte("</SubtitleReel>")
+	xmlDeclMarker    = []byte("<?xml")
+	smpteRootOpen    = []byte("<SubtitleReel")
+	interopRootOpen  = []byte("<DCSubtitle")
+	smpteRootClose   = []byte("</SubtitleReel>")
 	interopRootClose = []byte("</DCSubtitle>")
 )
 

@@ -21,10 +21,10 @@ func ParseBytes(b []byte) (*RPL, error) {
 
 	r := &RPL{}
 	var (
-		sawRoot     bool
-		curReel     *Reel
-		inReel      bool
-		reelNumBuf  string
+		sawRoot    bool
+		curReel    *Reel
+		inReel     bool
+		reelNumBuf string
 	)
 
 	readText := func(se xml.StartElement) string {

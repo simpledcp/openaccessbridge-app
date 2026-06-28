@@ -55,9 +55,9 @@ type Engine struct {
 	onChange func(CueEvent)
 
 	// timer scheduling for production push-on-change.
-	timer    *time.Timer
-	stopCh   chan struct{}
-	running  bool
+	timer   *time.Timer
+	stopCh  chan struct{}
+	running bool
 }
 
 // Options configures an Engine.
