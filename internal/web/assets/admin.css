@@ -1,6 +1,33 @@
-/* Minimal admin styling; full dashboard built in the admin milestone (§8). */
+/* CaptionBridge admin styling (§8.2 dashboard, §8.3 loud warnings). */
 body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #111; background: #f6f7f9; }
 h1 { font-size: 1.4rem; }
-.banner { background: #b00020; color: #fff; padding: 0.75rem 1rem; border-radius: 8px; font-weight: 700; }
-#dashboard { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 1rem; }
+h2 { font-size: 1.05rem; }
+a { color: #1558d6; }
+.muted { color: #666; font-size: 0.9rem; }
+
+.banner { margin: 0 0 1rem; border-radius: 8px; overflow: hidden; }
+.banner .warn-critical { background: #b00020; color: #fff; padding: 0.6rem 1rem; font-weight: 700; }
+.banner .warn-warning { background: #ffb300; color: #222; padding: 0.6rem 1rem; font-weight: 700; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+.tile { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 1rem; }
+.verdict { font-size: 0.8rem; padding: 0.1em 0.5em; border-radius: 999px; vertical-align: middle; }
+.verdict.ok { background: #e6f4ea; color: #137333; }
+.verdict.bad { background: #fce8e6; color: #b00020; }
+
+dl { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0 0; }
+dt { color: #555; }
+dd { margin: 0; font-weight: 600; }
+dd.ok { color: #137333; }
+dd.bad { color: #b00020; }
+
+.audio-row { padding: 0.4rem 0; border-top: 1px solid #eee; }
+.audio-row:first-child { border-top: none; }
+
+/* Setup wizard. */
+#wizard { list-style: none; padding: 0; }
+#wizard li { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+input, select, button { font-size: 1rem; padding: 0.45em 0.6em; margin: 0.2rem 0.3rem 0.2rem 0; border-radius: 8px; border: 1px solid #bbb; }
+button { background: #1558d6; color: #fff; border: none; cursor: pointer; }
+.status { font-weight: 700; margin-left: 0.5rem; }
 pre { white-space: pre-wrap; word-break: break-word; }

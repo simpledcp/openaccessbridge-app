@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
+	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 )
@@ -42,6 +43,10 @@ type Deps struct {
 	Log       *logging.Logger
 	Status    func() model.SystemReadiness // admin readiness snapshot
 	Languages func() []LangOption          // available caption languages
+	Store     config.Store                 // config store (setup wizard, admin auth)
+	// SetupWindow is how long first-boot setup mode stays open before auto-expiry
+	// (§8.1 step 14). Zero uses a default.
+	SetupWindow time.Duration
 }
 
 // Server owns the patron and admin HTTP servers.
@@ -51,6 +56,7 @@ type Server struct {
 	patron *http.Server
 	admin  *http.Server
 	static http.Handler
+	setup  *SetupManager
 }
 
 // NewServer validates the configuration and builds the patron + admin servers.
@@ -69,6 +75,9 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{cfg: cfg, deps: deps, static: http.StripPrefix("/static/", http.FileServer(http.FS(sub)))}
+	if deps.Store != nil {
+		s.setup = NewSetupManager(deps.Store, deps.Log, cfg.Profile, deps.SetupWindow)
+	}
 
 	s.patron = &http.Server{
 		Addr:              cfg.PatronBind,

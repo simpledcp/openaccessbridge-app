@@ -8,14 +8,28 @@
 </head>
 <body>
   <h1>CaptionBridge Admin</h1>
-  <p id="warning-banner" class="banner" hidden></p>
-  <!-- Dashboard tiles report captions and audio readiness SEPARATELY (§8.2). The
-       full dashboard, setup wizard, and loud-warning rendering are built in the
-       admin milestone; this page is the authenticated entry point. -->
-  <section id="dashboard">
-    <h2>Readiness</h2>
-    <pre id="status">loading…</pre>
+  <div id="warning-banner" class="banner" hidden></div>
+
+  <p><a href="/admin/setup">First-boot setup wizard →</a></p>
+
+  <!-- Captions and audio readiness are reported SEPARATELY (§2 asymmetry, §8.2):
+       you can have perfect captions and a dead VI feed, or clean HI audio and no
+       captions. -->
+  <section class="tiles">
+    <div class="tile" id="caption-tile">
+      <h2>Captions <span class="verdict" id="caption-verdict">—</span></h2>
+      <dl id="caption-detail"></dl>
+    </div>
+    <div class="tile" id="audio-tile">
+      <h2>Audio <span class="verdict" id="audio-verdict">—</span></h2>
+      <div id="audio-detail"></div>
+    </div>
+    <div class="tile" id="net-tile">
+      <h2>Network &amp; security</h2>
+      <dl id="net-detail"></dl>
+    </div>
   </section>
+
   <script src="/static/admin.js"></script>
 </body>
 </html>

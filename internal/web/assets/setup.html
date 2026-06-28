@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CaptionBridge — Setup</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <h1>CaptionBridge First-Boot Setup</h1>
+  <p id="expiry" class="muted"></p>
+
+  <ol id="wizard">
+    <li>
+      <h2>1. Create admin credentials</h2>
+      <p class="muted">No default credentials may remain active past setup.</p>
+      <input id="cred-user" placeholder="admin username" autocomplete="off">
+      <input id="cred-pass" type="password" placeholder="password (min 8 chars)" autocomplete="new-password">
+      <button id="cred-save">Create</button>
+      <span class="status" data-step="credentials"></span>
+    </li>
+    <li>
+      <h2>2. Assign network interfaces</h2>
+      <p class="muted">Confirm which NIC faces the theater (cinema server) and which faces patrons.</p>
+      <input id="net-theater" placeholder="theater interface (e.g. eth0)">
+      <input id="net-client" placeholder="client interface (e.g. wlan0)">
+      <button id="net-save">Save</button>
+      <span class="status" data-step="network"></span>
+    </li>
+    <li>
+      <h2>3. Cinema server allowlist + auditorium identity</h2>
+      <input id="srv-aud" placeholder="auditorium id (e.g. screen-3)">
+      <input id="srv-ip" placeholder="cinema server IP (e.g. 10.10.20.15)">
+      <input id="srv-name" placeholder="expected screen name (e.g. Auditorium 3)">
+      <button id="srv-save">Save</button>
+      <span class="status" data-step="server"></span>
+    </li>
+    <li>
+      <h2>4. Firewall / deployment profile</h2>
+      <select id="prof-select">
+        <option value="booth_diagnostic">Booth Diagnostic (recommended first product)</option>
+        <option value="lab">Lab (development only)</option>
+        <option value="patron_facing">Patron-Facing</option>
+        <option value="low_cost_replacement">Low-Cost Replacement (requires Phase 9 review)</option>
+      </select>
+      <button id="prof-save">Save</button>
+      <span class="status" data-step="profile"></span>
+    </li>
+    <li>
+      <h2>5. Finish</h2>
+      <p class="muted">Runs readiness checks and exits setup mode. Setup mode auto-closes on completion or timeout.</p>
+      <button id="finish">Complete setup</button>
+      <span class="status" data-step="complete"></span>
+    </li>
+  </ol>
+
+  <p id="result"></p>
+  <script src="/static/setup.js"></script>
+</body>
+</html>

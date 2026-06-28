@@ -1,0 +1,237 @@
+package web
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/simpledcp/captionbridge/internal/config"
+	"github.com/simpledcp/captionbridge/internal/logging"
+	"github.com/simpledcp/captionbridge/internal/model"
+)
+
+// DefaultSetupWindow is how long first-boot setup mode stays open (§8.1 step 14).
+const DefaultSetupWindow = 30 * time.Minute
+
+// SetupManager drives the first-boot setup workflow (§8.1). It enforces "no
+// default credentials past setup" and the auto-exit on completion/timeout.
+type SetupManager struct {
+	store   config.Store
+	log     *logging.Logger
+	profile model.FirewallProfile
+
+	mu       sync.Mutex
+	openedAt time.Time
+	window   time.Duration
+}
+
+// NewSetupManager builds a SetupManager. The setup window starts now.
+func NewSetupManager(store config.Store, log *logging.Logger, profile model.FirewallProfile, window time.Duration) *SetupManager {
+	if log == nil {
+		log = logging.Nop()
+	}
+	if window <= 0 {
+		window = DefaultSetupWindow
+	}
+	return &SetupManager{store: store, log: log, profile: profile, openedAt: time.Now(), window: window}
+}
+
+// SetupState is the wizard's progress, rendered by the setup page.
+type SetupState struct {
+	Complete             bool   `json:"complete"`
+	HasCredentials       bool   `json:"has_credentials"`
+	HasDefaultCredential bool   `json:"has_default_credential"`
+	NetworkConfigured    bool   `json:"network_configured"`
+	ServerConfigured     bool   `json:"server_configured"`
+	ProfileSelected      bool   `json:"profile_selected"`
+	SetupModeActive      bool   `json:"setup_mode_active"`
+	ExpiresInSec         int    `json:"expires_in_sec"`
+	Profile              string `json:"profile"`
+}
+
+// State computes the current setup state.
+func (s *SetupManager) State() SetupState {
+	st := SetupState{Profile: string(s.profile)}
+	if v, _, _ := s.store.GetSetting(config.SettingSetupComplete); v == "true" {
+		st.Complete = true
+	}
+	st.HasCredentials, _ = s.store.HasAnyAdminCredential()
+	st.HasDefaultCredential, _ = s.store.HasDefaultCredential()
+	if v, ok, _ := s.store.GetSetting(config.SettingTheaterInterface); ok && v != "" {
+		if v2, ok2, _ := s.store.GetSetting(config.SettingClientInterface); ok2 && v2 != "" {
+			st.NetworkConfigured = true
+		}
+	}
+	if profiles, _ := s.store.ListAuditoriumProfiles(); len(profiles) > 0 {
+		for _, p := range profiles {
+			if p.CinemaServerIP != "" {
+				st.ServerConfigured = true
+				break
+			}
+		}
+	}
+	if v, ok, _ := s.store.GetSetting(config.SettingActiveProfile); ok && v != "" {
+		st.ProfileSelected = true
+	}
+
+	s.mu.Lock()
+	remaining := s.window - time.Since(s.openedAt)
+	s.mu.Unlock()
+	if !st.Complete && remaining > 0 {
+		st.SetupModeActive = true
+		st.ExpiresInSec = int(remaining.Seconds())
+	}
+	return st
+}
+
+// canComplete reports whether the wizard's prerequisites are met (§8.1).
+func (st SetupState) canComplete() (bool, string) {
+	switch {
+	case !st.HasCredentials:
+		return false, "admin credentials not created"
+	case st.HasDefaultCredential:
+		return false, "a default credential must be replaced before leaving setup"
+	case !st.NetworkConfigured:
+		return false, "theater/client interfaces not assigned"
+	case !st.ServerConfigured:
+		return false, "cinema server allowlist not configured"
+	case !st.ProfileSelected:
+		return false, "firewall profile not selected"
+	default:
+		return true, ""
+	}
+}
+
+// --- HTTP handlers (mounted on the admin mux) ---
+
+func (s *Server) handleSetupState(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.setup.State())
+}
+
+func (s *Server) handleSetupCredentials(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Username, Password string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	body.Username = strings.TrimSpace(body.Username)
+	if body.Username == "" || len(body.Password) < 8 {
+		http.Error(w, "username required and password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	hash, err := config.HashPassword(body.Password)
+	if err != nil {
+		http.Error(w, "could not set password", http.StatusInternalServerError)
+		return
+	}
+	// Force a real credential — never a lingering default (§8.1).
+	if err := s.deps.Store.PutAdminCredential(config.AdminCredential{Username: body.Username, PWHash: hash, MustChange: false}); err != nil {
+		http.Error(w, "could not save credential", http.StatusInternalServerError)
+		return
+	}
+	s.deps.Log.Info(logging.EvStateTransition, logging.Field("phase", "admin_credential_created"))
+	writeJSON(w, s.setup.State())
+}
+
+func (s *Server) handleSetupNetwork(w http.ResponseWriter, r *http.Request) {
+	var body struct{ TheaterIface, ClientIface string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.TheaterIface == "" || body.ClientIface == "" {
+		http.Error(w, "both interfaces required", http.StatusBadRequest)
+		return
+	}
+	if body.TheaterIface == body.ClientIface {
+		http.Error(w, "theater and client interfaces must differ", http.StatusBadRequest)
+		return
+	}
+	_ = s.deps.Store.PutSetting(config.SettingTheaterInterface, body.TheaterIface)
+	_ = s.deps.Store.PutSetting(config.SettingClientInterface, body.ClientIface)
+	writeJSON(w, s.setup.State())
+}
+
+func (s *Server) handleSetupServer(w http.ResponseWriter, r *http.Request) {
+	var p model.AuditoriumProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if p.AuditoriumID == "" || p.CinemaServerIP == "" {
+		http.Error(w, "auditorium id and cinema server ip required", http.StatusBadRequest)
+		return
+	}
+	if p.ACSPInitiation == "" {
+		p.ACSPInitiation = model.ACSInitiated // Variant A default (D6)
+	}
+	if p.IdentityStrength == "" {
+		p.IdentityStrength = model.IdentityComposite
+	}
+	if err := s.deps.Store.PutAuditoriumProfile(p); err != nil {
+		http.Error(w, "could not save profile", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.setup.State())
+}
+
+func (s *Server) handleSetupProfile(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Profile string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	switch model.FirewallProfile(body.Profile) {
+	case model.ProfileLab, model.ProfileBoothDiagnostic, model.ProfilePatronFacing, model.ProfileLowCostReplacement:
+	default:
+		http.Error(w, "unknown profile", http.StatusBadRequest)
+		return
+	}
+	_ = s.deps.Store.PutSetting(config.SettingActiveProfile, body.Profile)
+	writeJSON(w, s.setup.State())
+}
+
+func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	st := s.setup.State()
+	if ok, reason := st.canComplete(); !ok {
+		http.Error(w, reason, http.StatusPreconditionFailed)
+		return
+	}
+	_ = s.deps.Store.PutSetting(config.SettingSetupComplete, "true")
+	// Record a successful readiness checkpoint (§10.8).
+	if v, err := s.deps.Store.GetSystemConfig(); err == nil {
+		now := time.Now().UTC()
+		v.LastReadinessCheckOK = &now
+		_ = s.deps.Store.PutSystemConfig(v)
+	}
+	s.deps.Log.Info(logging.EvStateTransition, logging.Field("phase", "setup_complete"))
+	writeJSON(w, s.setup.State())
+}
+
+// requireAdmin authenticates admin requests (§8.4). On first boot (no credential
+// yet) it permits access so the operator can create one; once a credential
+// exists, HTTP Basic Auth against the stored PBKDF2 hash is required.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Store == nil {
+			next(w, r) // no store configured (e.g. tests) → open
+			return
+		}
+		hasCred, _ := s.deps.Store.HasAnyAdminCredential()
+		if !hasCred {
+			next(w, r) // first boot: allow until a credential is created
+			return
+		}
+		user, pass, ok := r.BasicAuth()
+		if ok {
+			if cred, found, _ := s.deps.Store.GetAdminCredential(user); found && config.VerifyPassword(cred.PWHash, pass) {
+				next(w, r)
+				return
+			}
+		}
+		w.Header().Set("WWW-Authenticate", `Basic realm="CaptionBridge Admin"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}
+}

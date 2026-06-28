@@ -54,8 +54,8 @@ func TestAdminReachableFromPatron(t *testing.T) {
 		patron, admin string
 		reachable     bool
 	}{
-		{"0.0.0.0:80", "127.0.0.1:8443", false},  // loopback admin: isolated
-		{"0.0.0.0:80", "0.0.0.0:8443", true},      // admin all-interfaces: reachable
+		{"0.0.0.0:80", "127.0.0.1:8443", false},      // loopback admin: isolated
+		{"0.0.0.0:80", "0.0.0.0:8443", true},         // admin all-interfaces: reachable
 		{"192.168.1.1:80", "192.168.1.1:8443", true}, // same interface: reachable
 		{"192.168.1.1:80", "10.0.0.1:8443", false},   // different interface: isolated
 		{"0.0.0.0:80", "192.168.1.1:8443", true},     // patron wildcard covers admin iface
