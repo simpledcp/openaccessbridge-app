@@ -1,0 +1,9 @@
+# captionbridge.target groups the three supervised processes (buildplan §3.5) so
+# the appliance starts/stops them as a unit. Each process still restarts and
+# health-checks independently.
+[Unit]
+Description=CaptionBridge accessibility appliance
+Wants=captionbridge-firewall.service captionbridge-media.service captionbridge-core.service
+
+[Install]
+WantedBy=multi-user.target

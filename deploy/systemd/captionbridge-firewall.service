@@ -1,0 +1,38 @@
+# captionbridge-firewall — the privileged network helper (buildplan §3.5).
+# The ONLY component that runs as root: it applies the nftables ruleset and
+# verifies forwarding/isolation. Kept small and auditable, separate from the large
+# web/parsing surface. Talks to core over a loopback Unix socket only.
+[Unit]
+Description=CaptionBridge privileged firewall/verification helper
+Documentation=https://example.invalid/captionbridge
+Before=captionbridge-core.service
+PartOf=captionbridge.target
+
+[Service]
+Type=simple
+# Needs root for nftables + sysctl forwarding control; restrict capabilities to
+# exactly what network state management requires.
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+ExecStart=/usr/local/bin/captionbridge-firewall --socket-dir=/run/captionbridge
+Restart=on-failure
+RestartSec=2
+
+# Runtime dir is tmpfs (sockets/transient state only — never content; §9.4).
+RuntimeDirectory=captionbridge
+RuntimeDirectoryMode=0700
+
+# Hardening.
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+ProtectKernelTunables=no
+# Core dumps disabled in production — the classic way content leaks to disk (§9.4).
+LimitCORE=0
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=captionbridge.target
