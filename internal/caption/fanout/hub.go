@@ -233,6 +233,14 @@ type Subscriber struct {
 	closed   bool
 }
 
+// Peek returns the most recently delivered state without consuming it. Useful for
+// the simulator harness and diagnostics; delivery still coalesces to the latest.
+func (s *Subscriber) Peek() Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.latest
+}
+
 // Language returns the subscriber's selected language.
 func (s *Subscriber) Language() string {
 	s.mu.Lock()

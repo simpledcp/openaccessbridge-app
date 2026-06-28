@@ -26,3 +26,30 @@ A short running log of what was done and why. Newest at the bottom.
 
 Next: the caption path, simulator-and-test-first, starting with the timed-text
 parser (§5.4).
+
+## Caption path (Phases 1–3) complete
+
+- Built the caption path breadth-first to get an end-to-end slice early, then
+  deepened: timed-text parser → timing engine → fan-out → patron page (a runnable
+  Phase-1 offline player, verified live), then RPL + resolver + cache (Phase 2),
+  then the ACSP state machine + simulator (Phase 3).
+- **Timing engine**: monotonic-clock anchor/predict, re-arming boundary timer
+  (no sleep loop), explicit timeline events incl. comms-loss-continue-until-lease.
+- **Resolver**: pluggable by locator form; mandatory MXF/ST429-5 unwrap seam
+  (PROVISIONAL heuristic; asdcplib noted); bounded LRU cache; windowed reel loader
+  that offsets cues to the composition timeline and stamps the ST 429-12 Kind.
+- **Controller**: one timing engine per language from a single timeline; a cue-less
+  reference engine seeds engines created mid-show (fixes the canonical-order case
+  where Update Timeline precedes the RPL).
+- **ACSP state machine**: deterministic Handle/Tick API (clock-injectable, so the
+  scenario suite is fast + CI-able) plus a production Run loop over a Transport
+  seam. Implements every §5.2 robustness behavior.
+- **Simulator + 17-scenario quirk suite** (the kickoff's emphasized regression
+  backbone): happy-path, mid-playback join, lease near/actual expiry, comms-loss-
+  continue + then-expiry, Playout-ID=0/duplicate no-loopback, empty ReelResources,
+  output-mode toggle/absent, show-change, rewind, pause/resume/stop, multi-language,
+  malformed-asset-degrades, wrong-room fingerprint. Found + fixed two real bugs via
+  the suite (mid-show engine seeding; show-change locator collision).
+- Everything race-clean; `acsp-simulator` runs the suite standalone.
+
+Next: audio pipeline (§6) — qualifier + mapper pure-Go tested; encode seam.

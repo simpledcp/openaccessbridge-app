@@ -15,6 +15,22 @@ make cover     # coverage summary
 
 ## Done
 
+- **Full caption path (Phases 1–3) — the heart of this session — is complete and
+  green end-to-end:**
+  - timed-text parser (ST 428-7/428-10/Interop), monotonic timing engine,
+    RPL parser + pluggable resolver + MXF unwrap + bounded cache + reel loader,
+    multi-language Controller, WS/SSE fan-out, patron page.
+  - **ST 430-10 state machine** (`internal/caption/acsp`): lease-and-timeline
+    machine; half-lease request interval; continue-output-on-comms-loss-until-
+    lease-expiry; Set Output Mode incl. absence; Playout-ID=0/duplicate
+    disambiguation by timeline (no false loop-back); empty ReelResources; new-
+    show Terminate-Lease drop; wrong-room fingerprint guard. Deterministic
+    Handle/Tick API + production Run loop over a Transport seam (PROVISIONAL,
+    Phase-0A-swappable).
+  - **ST 430-10 simulator + 17-scenario quirk suite** (`internal/sim`) wired
+    into CI as the regression backbone (§11.1); standalone `acsp-simulator`
+    binary runs them too. All race-clean.
+
 - **Foundation** (task 1):
   - Repo scaffold, `go.mod` (Go 1.26), Makefile, CI (`.github/workflows/ci.yml`),
     `.gitignore`, README, the four living docs.
@@ -40,19 +56,17 @@ make cover     # coverage summary
 
 ## Next (in plan order)
 
-2. **Timed-text parser** (§5.4) — ST 428-7 + ST 428-10 closed-caption profile +
-   Interop; ST 429-12 track-type; edit-rate/timecode→ms; normalize to cue model.
-3. **RPL parser + resolver** (§5.3) — ST 430-11 parse; pluggable resolver + MXF
-   unwrap seam; bounded transient cache.
-4. **Timing engine** (§5.5) — monotonic anchor/predict; active-cue resolver.
-5. **ACSP state machine + fan-out** (§5.2/§5.6) — lease+timeline machine; WS/SSE.
-6. **ACSP simulator + scenario suite** (§11.1) — the CI regression backbone.
-7. **Web server + patron page** (§7/§8.4).
-8. **Audio pipeline** (§6) — qualifier + mapper (pure-Go tested) + encode seam.
-9. **Firewall manager + verification + security tests** (§9).
+8. **Audio pipeline** (§6) — captionbridge-media: four-state qualifier + channel
+   mapper (pure-Go, unit-tested) + capture/encode seam (gst-launch synthetic tone;
+   webrtcbin hardware-gated).
+9. **Firewall manager + verification + security tests** (§9) — nftables Variant
+   A/B rule-gen; forwarding/isolation self-introspection; security tests in CI.
 10. **Admin UI + setup wizard + loud warnings** (§8).
 11. **Deployment profiles + systemd + Loaner overlay** (§12).
 12. **Final integration + invariant tests + handoff.**
+
+Tasks 2–7 (timed-text, RPL/resolver, timing, ACSP+fan-out, simulator, web) are
+DONE.
 
 ## Key facts for a future session (post-compaction)
 

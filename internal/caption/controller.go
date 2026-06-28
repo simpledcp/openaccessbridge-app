@@ -15,11 +15,15 @@ import (
 )
 
 // Controller maps a single timeline onto per-language timing engines and the hub.
+// A cue-less "reference" engine tracks the timeline so a language engine created
+// mid-show (e.g. when the RPL arrives after Update Timeline) inherits the current
+// play state and position rather than starting idle.
 type Controller struct {
 	mu      sync.Mutex
 	hub     *fanout.Hub
 	clock   timing.Clock
 	budget  int64
+	ref     *timing.Engine
 	engines map[string]*timing.Engine
 	langs   []string
 	started bool
@@ -38,18 +42,20 @@ func NewController(opts Options) *Controller {
 		hub:     opts.Hub,
 		clock:   opts.Clock,
 		budget:  opts.WarnBudgetMS,
+		ref:     timing.New(timing.Options{Clock: opts.Clock, WarnBudgetMS: opts.WarnBudgetMS}),
 		engines: make(map[string]*timing.Engine),
 	}
 }
 
 // LoadReel replaces the active cue set for the current reel/composition, keyed by
 // language. Each language gets its own timing engine driven by the shared
-// timeline. Languages absent from the new set have their engines retired.
+// timeline. Languages absent from the new set have their engines retired. A newly
+// created engine is seeded from the timeline reference so it shows the correct cue
+// immediately even if the RPL arrived after playback started.
 func (c *Controller) LoadReel(cuesByLang map[string][]model.Cue) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Retire engines for languages no longer present.
 	for lang, eng := range c.engines {
 		if _, ok := cuesByLang[lang]; !ok {
 			eng.Close()
@@ -58,10 +64,11 @@ func (c *Controller) LoadReel(cuesByLang map[string][]model.Cue) {
 	}
 
 	c.langs = c.langs[:0]
+	ref := c.ref.Status()
 	for lang, cues := range cuesByLang {
 		c.langs = append(c.langs, lang)
-		eng, ok := c.engines[lang]
-		if !ok {
+		eng, existed := c.engines[lang]
+		if !existed {
 			l := lang
 			eng = timing.New(timing.Options{
 				Clock:        c.clock,
@@ -76,33 +83,29 @@ func (c *Controller) LoadReel(cuesByLang map[string][]model.Cue) {
 			c.engines[lang] = eng
 		}
 		eng.SetCues(lang, cues)
+		if !existed {
+			seedFromRef(eng, ref)
+		}
 	}
 }
 
-// Start launches the boundary schedulers so cue changes are pushed in real time.
-func (c *Controller) Start() {
-	c.mu.Lock()
-	c.started = true
-	for _, eng := range c.engines {
-		eng.Start()
+// seedFromRef applies the reference engine's play state/position to a fresh engine.
+func seedFromRef(eng *timing.Engine, ref timing.Status) {
+	switch ref.State {
+	case "playing":
+		eng.Play(ref.PositionMS)
+	case "paused":
+		eng.Play(ref.PositionMS)
+		eng.Pause()
 	}
-	c.mu.Unlock()
 }
 
-// Close stops all engines.
-func (c *Controller) Close() {
+// applyTimeline forwards a timeline operation to the reference engine and every
+// language engine.
+func (c *Controller) applyTimeline(fn func(*timing.Engine)) {
 	c.mu.Lock()
-	for _, eng := range c.engines {
-		eng.Close()
-	}
-	c.mu.Unlock()
-}
-
-// --- Timeline events, forwarded to every language engine (§5.5) ---
-
-func (c *Controller) eachEngine(fn func(*timing.Engine)) {
-	c.mu.Lock()
-	engs := make([]*timing.Engine, 0, len(c.engines))
+	engs := make([]*timing.Engine, 0, len(c.engines)+1)
+	engs = append(engs, c.ref)
 	for _, e := range c.engines {
 		engs = append(engs, e)
 	}
@@ -112,55 +115,89 @@ func (c *Controller) eachEngine(fn func(*timing.Engine)) {
 	}
 }
 
+// contentEngines returns only the per-language engines (excludes the reference).
+func (c *Controller) contentEngines() []*timing.Engine {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	engs := make([]*timing.Engine, 0, len(c.engines))
+	for _, e := range c.engines {
+		engs = append(engs, e)
+	}
+	return engs
+}
+
+// Start launches the boundary schedulers so cue changes are pushed in real time.
+func (c *Controller) Start() {
+	c.mu.Lock()
+	c.started = true
+	c.ref.Start()
+	for _, eng := range c.engines {
+		eng.Start()
+	}
+	c.mu.Unlock()
+}
+
+// Close stops all engines.
+func (c *Controller) Close() {
+	c.mu.Lock()
+	c.ref.Close()
+	for _, eng := range c.engines {
+		eng.Close()
+	}
+	c.mu.Unlock()
+}
+
+// --- Timeline events, forwarded to the reference + every language engine (§5.5) ---
+
 // Play starts playback at posMS and surfaces an active patron status.
 func (c *Controller) Play(posMS int64) {
-	c.eachEngine(func(e *timing.Engine) { e.Play(posMS) })
+	c.applyTimeline(func(e *timing.Engine) { e.Play(posMS) })
 	c.hub.PublishStatus(model.PatronCaptionActive)
 }
 
 // UpdateTimeline re-anchors all engines to a fresh server position.
 func (c *Controller) UpdateTimeline(posMS int64) {
-	c.eachEngine(func(e *timing.Engine) { e.UpdateTimeline(posMS) })
+	c.applyTimeline(func(e *timing.Engine) { e.UpdateTimeline(posMS) })
 }
 
 // Pause freezes captions.
 func (c *Controller) Pause() {
-	c.eachEngine(func(e *timing.Engine) { e.Pause() })
+	c.applyTimeline(func(e *timing.Engine) { e.Pause() })
 	c.hub.PublishStatus(model.PatronCaptionWaiting)
 }
 
 // Resume continues captions.
 func (c *Controller) Resume() {
-	c.eachEngine(func(e *timing.Engine) { e.Resume() })
+	c.applyTimeline(func(e *timing.Engine) { e.Resume() })
 	c.hub.PublishStatus(model.PatronCaptionActive)
 }
 
 // Stop halts captions.
 func (c *Controller) Stop() {
-	c.eachEngine(func(e *timing.Engine) { e.Stop() })
+	c.applyTimeline(func(e *timing.Engine) { e.Stop() })
 	c.hub.PublishStatus(model.PatronCaptionWaiting)
 }
 
 // SeekTo jumps all engines to posMS.
 func (c *Controller) SeekTo(posMS int64) {
-	c.eachEngine(func(e *timing.Engine) { e.SeekTo(posMS) })
+	c.applyTimeline(func(e *timing.Engine) { e.SeekTo(posMS) })
 }
 
 // CommsLost signals a momentary interruption; captions keep showing (§5.2 item 2).
 func (c *Controller) CommsLost() {
-	c.eachEngine(func(e *timing.Engine) { e.CommsLost() })
+	c.applyTimeline(func(e *timing.Engine) { e.CommsLost() })
 	c.hub.PublishStatus(model.PatronCaptionReconnecting)
 }
 
 // CommsRestored clears the interruption.
 func (c *Controller) CommsRestored() {
-	c.eachEngine(func(e *timing.Engine) { e.CommsRestored() })
+	c.applyTimeline(func(e *timing.Engine) { e.CommsRestored() })
 	c.hub.PublishStatus(model.PatronCaptionActive)
 }
 
 // LeaseExpired blanks captions (only on genuine lease expiry, §5.2 item 2).
 func (c *Controller) LeaseExpired() {
-	c.eachEngine(func(e *timing.Engine) { e.LeaseExpired() })
+	c.applyTimeline(func(e *timing.Engine) { e.LeaseExpired() })
 	c.hub.PublishStatus(model.PatronCaptionUnavailable)
 }
 
@@ -172,7 +209,10 @@ func (c *Controller) SetPatronStatus(s model.PatronCaptionStatus) {
 // Evaluate forces an immediate active-cue re-resolution on every engine. Useful
 // for the ACSP status loop and for deterministic testing with an injected clock.
 func (c *Controller) Evaluate() {
-	c.eachEngine(func(e *timing.Engine) { e.Evaluate() })
+	for _, e := range c.contentEngines() {
+		e.Evaluate()
+	}
+	c.ref.Evaluate()
 }
 
 // Languages returns the currently loaded languages.
@@ -184,10 +224,10 @@ func (c *Controller) Languages() []string {
 	return out
 }
 
-// MaxDriftMS returns the largest absolute drift across engines (diagnostics §5.5).
+// MaxDriftMS returns the largest absolute drift across language engines (§5.5).
 func (c *Controller) MaxDriftMS() int64 {
 	var max int64
-	c.eachEngine(func(e *timing.Engine) {
+	for _, e := range c.contentEngines() {
 		d := e.DriftMS()
 		if d < 0 {
 			d = -d
@@ -195,6 +235,6 @@ func (c *Controller) MaxDriftMS() int64 {
 		if d > max {
 			max = d
 		}
-	})
+	}
 	return max
 }
