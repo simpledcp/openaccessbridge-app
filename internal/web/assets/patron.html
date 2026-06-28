@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>CaptionBridge — Captions</title>
+  <link rel="stylesheet" href="/static/patron.css">
+</head>
+<body class="theme-dark">
+  <!-- Auditorium identity is always visible so a patron or passing staff can spot
+       a wrong-room join or stale QR immediately (§7.2 / §8.5). Room name only —
+       never plot/title detail that would spoil the film. -->
+  <header id="topbar">
+    <div id="auditorium" aria-live="polite">Connecting…</div>
+    <div id="connstate" class="state state-connecting" role="status" aria-live="polite">Connecting…</div>
+  </header>
+
+  <main id="stage" aria-live="polite" aria-atomic="true">
+    <div id="caption" class="caption"></div>
+    <div id="message" class="message"></div>
+  </main>
+
+  <nav id="controls" aria-label="Caption controls">
+    <label class="ctl">
+      Language
+      <select id="lang" aria-label="Caption language"></select>
+    </label>
+    <div class="ctl">
+      Text size
+      <button id="smaller" aria-label="Smaller text">A−</button>
+      <button id="bigger" aria-label="Larger text">A+</button>
+    </div>
+    <button id="theme" class="ctl" aria-label="Toggle theme">Theme</button>
+  </nav>
+
+  <footer id="legal">
+    <span>CaptionBridge · local accessibility · no internet</span>
+  </footer>
+
+  <script src="/static/patron.js"></script>
+</body>
+</html>

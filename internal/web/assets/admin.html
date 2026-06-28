@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CaptionBridge — Admin</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <h1>CaptionBridge Admin</h1>
+  <p id="warning-banner" class="banner" hidden></p>
+  <!-- Dashboard tiles report captions and audio readiness SEPARATELY (§8.2). The
+       full dashboard, setup wizard, and loud-warning rendering are built in the
+       admin milestone; this page is the authenticated entry point. -->
+  <section id="dashboard">
+    <h2>Readiness</h2>
+    <pre id="status">loading…</pre>
+  </section>
+  <script src="/static/admin.js"></script>
+</body>
+</html>
