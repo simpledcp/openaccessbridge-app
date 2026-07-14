@@ -39,11 +39,13 @@ traffic.
 
 ## Build & test
 
-```sh
-# A local Go 1.26 toolchain lives at /home/libserv-2/go-sdk on this dev box.
-export PATH=/home/libserv-2/go-sdk/bin:$PATH
+**New machine? See [`DEVELOPMENT.md`](./DEVELOPMENT.md) for full setup.** The
+build and the entire test suite are pure Go — the only hard requirement is a
+**Go 1.26.x** toolchain on your `PATH` (no cgo, no system libraries; GStreamer
+and nftables are optional runtime seams).
 
-make check     # go vet + full test suite (incl. ACSP simulator scenario suite)
+```sh
+make check     # gofmt + go vet + full race test suite (incl. ACSP simulator scenario suite)
 make build     # build all four binaries into ./bin
 make race      # tests under the race detector
 make cover     # coverage summary
