@@ -218,6 +218,15 @@ func (e *Engine) SeekTo(serverPosMS int64) {
 // captions blanked) so the incoming cue set is never resolved against the old
 // composition's timeline. The engine returns to "idle" and re-anchors on the
 // next Update Timeline.
+//
+// The outgoing composition's CUE SET is discarded with the anchor. It has to be:
+// clearing only the anchor leaves the old cues loaded, and the resolver has no
+// way to tell them apart from the new composition's, so the next Update Timeline
+// would put the PREVIOUS show's captions back on screen — the exact wrong-content
+// failure this event exists to prevent. It matters whenever the incoming reel has
+// not landed yet (fetch in flight, or the fetch failed): the honest state is "no
+// captions", which the patron status already says, not the last show's text.
+// SetCues installs the new composition's cues.
 func (e *Engine) CompositionChanged() {
 	e.mu.Lock()
 	e.anchorServerMS = 0
@@ -226,6 +235,7 @@ func (e *Engine) CompositionChanged() {
 	e.state = "idle"
 	e.driftMS = 0 // drift against a discarded timeline means nothing
 	e.activeIndex = -1
+	e.cues = nil
 	ev := e.blankLocked("timeline_event")
 	e.rearmLocked()
 	e.mu.Unlock()

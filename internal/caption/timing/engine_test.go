@@ -332,6 +332,44 @@ func TestCompositionChangedDiscardsPrediction(t *testing.T) {
 	}
 }
 
+// TestCompositionChangedDiscardsTheOldCueSet is the other half of the §5.5
+// SPL/CPL event: clearing only the anchor is not enough. If the incoming reel has
+// not landed yet — fetch in flight, or the fetch failed — the outgoing
+// composition's cues are still loaded, and the next Update Timeline resolves
+// against them and puts the PREVIOUS show's captions back on screen.
+func TestCompositionChangedDiscardsTheOldCueSet(t *testing.T) {
+	clk := newFakeClock()
+	rec := &recorder{}
+	e := newEngine(clk, rec)
+	e.SetCues("en", []model.Cue{{StartMS: 1000, EndMS: 9000, Text: "OLDSHOW", Language: "en"}})
+	e.Play(0)
+	clk.advance(2 * time.Second)
+	e.Evaluate()
+	if ev, _ := rec.last(); !ev.Visible || ev.Cue.Text != "OLDSHOW" {
+		t.Fatalf("setup: expected OLDSHOW at 2000, got %+v", ev)
+	}
+
+	e.CompositionChanged()
+	if st := e.Status(); st.CueCount != 0 {
+		t.Fatalf("the outgoing composition's cues must be discarded, got %+v", st)
+	}
+
+	// The new reel has NOT loaded. A fresh timeline arrives anyway.
+	e.UpdateTimeline(2000)
+	if st := e.Status(); st.Visible {
+		t.Fatalf("the previous composition's caption must not come back, got %+v", st)
+	}
+	if ev, _ := rec.last(); ev.Visible {
+		t.Fatalf("no cue may be pushed before the new reel loads, got %+v", ev)
+	}
+
+	// Once the new composition's cues arrive they resolve normally.
+	e.SetCues("en", []model.Cue{{StartMS: 1500, EndMS: 4000, Text: "NEWSHOW", Language: "en"}})
+	if ev, _ := rec.last(); !ev.Visible || ev.Cue.Text != "NEWSHOW" {
+		t.Fatalf("expected NEWSHOW once the reel lands, got %+v", ev)
+	}
+}
+
 // TestBudgetDefaultsAndOverride pins D9: the warn budget defaults to 500 ms and
 // the target to 400 ms, both configurable, both surfaced to diagnostics.
 func TestBudgetDefaultsAndOverride(t *testing.T) {

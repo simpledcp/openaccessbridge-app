@@ -187,6 +187,39 @@ func TestParseCarriesOpaqueStyleAndPosition(t *testing.T) {
 	}
 }
 
+// TestParseAllCuesBeforeStartTimeWarnsLoudly: if the origin swallows EVERY cue
+// the asset's <StartTime> does not mean what this PROVISIONAL grammar assumes and
+// the reel loses all captions. That is a different failure class from one stray
+// early cue and must be reported as such, not as n per-cue warnings (§5.4).
+func TestParseAllCuesBeforeStartTimeWarnsLoudly(t *testing.T) {
+	xmlDoc := `<?xml version="1.0"?>
+<SubtitleReel xmlns="x"><Language>en</Language><EditRate>24 1</EditRate>
+<TimeCodeRate>24</TimeCodeRate><StartTime>01:00:00:00</StartTime>
+<SubtitleList><Font>
+<Subtitle TimeIn="00:00:01:00" TimeOut="00:00:04:00"><Text>one</Text></Subtitle>
+<Subtitle TimeIn="00:00:05:00" TimeOut="00:00:07:00"><Text>two</Text></Subtitle>
+</Font></SubtitleList></SubtitleReel>`
+	doc, err := ParseBytes([]byte(xmlDoc))
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	if len(doc.Cues) != 0 {
+		t.Fatalf("cues = %+v, want none", doc.Cues)
+	}
+	if !hasWarning(doc.Warnings, "all_cues_before_start_time") {
+		t.Errorf("expected all_cues_before_start_time, got %v", doc.Warnings)
+	}
+}
+
+// TestParseOneEarlyCueIsNotAWholeAssetFailure is the counterpart: a single
+// dropped cue must NOT raise the asset-wide class.
+func TestParseOneEarlyCueIsNotAWholeAssetFailure(t *testing.T) {
+	doc := parseFixture(t, "smpte_428-7_starttime_24fps.xml")
+	if hasWarning(doc.Warnings, "all_cues_before_start_time") {
+		t.Errorf("one early cue must not read as a whole-asset failure: %v", doc.Warnings)
+	}
+}
+
 func hasWarning(warnings []string, want string) bool {
 	for _, w := range warnings {
 		if w == want {

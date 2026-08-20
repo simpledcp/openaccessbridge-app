@@ -206,6 +206,35 @@ func TestControllerCompositionChangedDiscardsPrediction(t *testing.T) {
 	}
 }
 
+// TestControllerFailedReelLoadAfterCompositionChange: LoadReel can legitimately
+// never arrive after a composition change (the RPL fetch failed). The patron must
+// then see nothing rather than the previous show's captions (§5.5, guardrail #7).
+func TestControllerFailedReelLoadAfterCompositionChange(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(5000, 0)}
+	hub := fanout.NewHub(fanout.Options{})
+	c := NewController(Options{Hub: hub, Clock: clk.now})
+	c.LoadReel(map[string][]model.Cue{"en": {{StartMS: 0, EndMS: 9000, Text: "OldShow", Kind: model.TrackClosedCaption}}})
+	sub, _ := hub.Subscribe("en")
+	_, _ = sub.Next(context.Background())
+	c.Play(1000)
+	if m := drainTo(t, sub, "OldShow", time.Second); m.Text != "OldShow" {
+		t.Fatalf("setup: expected the old composition's cue, got %+v", m)
+	}
+
+	c.CompositionChanged()
+	if m := waitVisibleFalse(t, sub, time.Second); m.Visible {
+		t.Fatalf("composition change must blank, got %+v", m)
+	}
+
+	// No LoadReel: the new composition's RPL never resolved. Timeline keeps flowing.
+	c.UpdateTimeline(2000)
+	clk.advance(2 * time.Second)
+	c.Evaluate()
+	if m := sub.Peek(); m.Visible {
+		t.Fatalf("the previous composition's caption must stay off, got %+v", m)
+	}
+}
+
 // TestControllerDriftBudget pins D9 on the controller: the budget is
 // configurable, defaults to the D9 numbers, and over-budget drift is reportable
 // rather than only measurable.

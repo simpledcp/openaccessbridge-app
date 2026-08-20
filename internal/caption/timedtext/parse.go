@@ -301,6 +301,7 @@ func (d *Document) resolveTimes() {
 		}
 	}
 	origin := d.StartTimeMS
+	droppedBeforeOrigin := 0
 	for _, rc := range d.raw {
 		startMS, err1 := TimecodeToMS(rc.timeIn, rate)
 		endMS, err2 := TimecodeToMS(rc.timeOut, rate)
@@ -319,6 +320,7 @@ func (d *Document) resolveTimes() {
 				// Ends at or before the origin: never displayable. Drop it loudly
 				// rather than emit a negative interval.
 				d.Warnings = append(d.Warnings, "cue_before_start_time")
+				droppedBeforeOrigin++
 				continue
 			}
 			if startMS < 0 {
@@ -331,6 +333,15 @@ func (d *Document) resolveTimes() {
 		c.StartMS = startMS
 		c.EndMS = endMS
 		d.Cues = append(d.Cues, c)
+	}
+	// The origin swallowing EVERY cue is a different failure class from one stray
+	// early cue: it means the asset's <StartTime> does not mean what this
+	// PROVISIONAL grammar assumes, and the reel silently loses all captions.
+	// Recorded as its own class so the caller can escalate it rather than read it
+	// as n ordinary per-cue warnings (guardrail #7, §5.4 "degrade to no caption"
+	// — but never quietly).
+	if droppedBeforeOrigin > 0 && len(d.Cues) == 0 {
+		d.Warnings = append(d.Warnings, "all_cues_before_start_time")
 	}
 	d.raw = nil
 	d.rawStartTime = ""

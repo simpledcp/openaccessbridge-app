@@ -152,13 +152,20 @@ func (h *Hub) PublishCue(language string, visible bool, cue model.Cue) {
 		cs.cueID = cue.ResourceID + "@" + strconv.FormatInt(cue.StartMS, 10)
 	}
 	h.cueByLang[language] = cs
-	// A cue proves the language is being served; its ST 429-12 kind carries the
-	// caption-vs-subtitle grade through to the patron copy (§5.4). Kind is
-	// sticky: it must outlive the cue so the label is right between cues too.
-	if cue.Kind != "" && cue.Kind != model.TrackUnknown {
+	// A VISIBLE cue proves the language is being served; its ST 429-12 kind
+	// carries the caption-vs-subtitle grade through to the patron copy (§5.4).
+	// Kind is sticky: it must outlive the cue so the label is right between cues
+	// too. A cue-OUT proves nothing and must never mark a language available —
+	// otherwise a retired engine's in-flight boundary timer, firing after
+	// ClearLanguage, silently re-advertises a language the show no longer
+	// carries (guardrail #7).
+	switch {
+	case cue.Kind != "" && cue.Kind != model.TrackUnknown:
 		h.kindByLang[language] = cue.Kind
-	} else if _, known := h.kindByLang[language]; !known {
-		h.kindByLang[language] = model.TrackUnknown
+	case visible:
+		if _, known := h.kindByLang[language]; !known {
+			h.kindByLang[language] = model.TrackUnknown
+		}
 	}
 	msg := h.buildLocked(language)
 	targets := h.subsForLocked(language)

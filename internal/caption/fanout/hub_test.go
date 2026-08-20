@@ -183,6 +183,36 @@ func TestClearLanguageRetiresStaleCue(t *testing.T) {
 	}
 }
 
+// TestCueOutDoesNotReviveRetiredLanguage: a retired engine's boundary timer can
+// still be in flight when Controller.LoadReel drops its language, and it lands as
+// a blank PublishCue. A cue-out proves nothing about what the show carries, so it
+// must not re-advertise the language as available (guardrail #7).
+func TestCueOutDoesNotReviveRetiredLanguage(t *testing.T) {
+	h := NewHub(Options{})
+	h.PublishCue("fr", true, model.Cue{Text: "Bonjour", Kind: model.TrackClosedCaption})
+	s, _ := h.Subscribe("fr")
+	_ = mustNext(t, s)
+
+	h.ClearLanguage("fr")
+	if m := mustNext(t, s); m.LanguageAvailable {
+		t.Fatalf("setup: expected fr retired, got %+v", m)
+	}
+
+	// The straggler push from the closed engine.
+	h.PublishCue("fr", false, model.Cue{})
+	if h.HasLanguage("fr") {
+		t.Fatalf("a cue-out must not revive a retired language")
+	}
+	if m := mustNext(t, s); m.LanguageAvailable || m.Visible {
+		t.Fatalf("expected fr still retired and blank, got %+v", m)
+	}
+	for _, o := range h.Languages() {
+		if o.Code == "fr" {
+			t.Fatalf("retired language must not be offered: %+v", h.Languages())
+		}
+	}
+}
+
 // TestLanguagesOrderedByAccessibilityRank pins the ordering NegotiateLanguage
 // relies on for D8 steps 3 and 4: closed captions first, then subtitles, with
 // codes breaking ties so the patron list is stable across reloads.
