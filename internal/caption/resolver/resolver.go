@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/simpledcp/captionbridge/internal/logging"
 )
@@ -57,6 +58,13 @@ func (m *MemoryFetcher) Fetch(_ context.Context, ref string) ([]byte, error) {
 // maxAssetBytes bounds a single fetched asset to protect appliance memory.
 const maxAssetBytes = 8 << 20 // 8 MiB
 
+// DefaultHTTPTimeout bounds a single HTTP asset fetch. An unresponsive media block
+// must never hang a fetch forever: asset fetches run on the ACSP request path, and
+// a stalled fetch there starves the lease/comms checks the caption link depends on
+// (§5.2 items 1-2, §5.3 "on demand"). http.DefaultClient has NO timeout, so it is
+// never used here.
+const DefaultHTTPTimeout = 15 * time.Second
+
 // Pluggable dispatches a locator to the right handler by form, and classifies +
 // logs any unresolved (vendor-specific) form by class — never the full locator,
 // which can embed a title (§9.4).
@@ -72,7 +80,7 @@ type Pluggable struct {
 // NewPluggable builds a Pluggable resolver.
 func NewPluggable(mb MediaBlockFetcher, httpc *http.Client, log *logging.Logger) *Pluggable {
 	if httpc == nil {
-		httpc = http.DefaultClient
+		httpc = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
 	if log == nil {
 		log = logging.Nop()

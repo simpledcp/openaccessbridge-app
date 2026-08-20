@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AuxResourcePresentationList xmlns="http://www.smpte-ra.org/schemas/430-11/2010/RPL">
+  <Id>urn:uuid:cccccccc-cccc-cccc-cccc-cccccccccccc</Id>
+  <PlayoutId>4</PlayoutId>
+  <ReelList>
+    <!-- Reel 2 is an uncaptioned reel between two captioned reels: a legitimate
+         empty ResourceList (§5.2 item 5). Only the REEL-level Duration keeps
+         reel 3 anchored at 120000 ms on the composition timeline (§5.3). -->
+    <Reel>
+      <ReelNumber>1</ReelNumber>
+      <EditRate>24 1</EditRate>
+      <EntryPoint>0</EntryPoint>
+      <Duration>1440</Duration>
+      <ResourceList>
+        <Resource>
+          <Id>urn:uuid:11111111-1111-1111-1111-111111111111</Id>
+          <Type>ClosedCaption</Type>
+          <Language>en-US</Language>
+          <EditRate>24 1</EditRate>
+          <EntryPoint>0</EntryPoint>
+          <IntrinsicDuration>1440</IntrinsicDuration>
+          <Locator>captions/reel1_en.xml</Locator>
+        </Resource>
+      </ResourceList>
+    </Reel>
+    <Reel>
+      <ReelNumber>2</ReelNumber>
+      <EditRate>24 1</EditRate>
+      <EntryPoint>0</EntryPoint>
+      <Duration>1440</Duration>
+      <ResourceList/>
+    </Reel>
+    <Reel>
+      <ReelNumber>3</ReelNumber>
+      <EditRate>24 1</EditRate>
+      <EntryPoint>48</EntryPoint>
+      <Duration>1440</Duration>
+      <ResourceList>
+        <Resource>
+          <Id>urn:uuid:33333333-3333-3333-3333-333333333333</Id>
+          <Type>ClosedCaption</Type>
+          <Language>en-US</Language>
+          <EditRate>24 1</EditRate>
+          <EntryPoint>0</EntryPoint>
+          <IntrinsicDuration>1488</IntrinsicDuration>
+          <Locator>captions/reel3_en.xml</Locator>
+        </Resource>
+      </ResourceList>
+    </Reel>
+  </ReelList>
+</AuxResourcePresentationList>

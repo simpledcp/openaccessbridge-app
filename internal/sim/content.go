@@ -26,7 +26,13 @@ type ResSpec struct {
 type ReelSpec struct {
 	Number     int
 	DurationMS int64 // reel duration on the composition timeline
-	Resources  []ResSpec
+	// EntryPointMS is where the reel starts inside its assets (0 for untrimmed).
+	EntryPointMS int64
+	Resources    []ResSpec
+	// OmitReelTiming emits a reel with no reel-level <Duration>/<EntryPoint>, the
+	// way content from a server that does not declare them arrives — the duration
+	// then falls back to the longest resource (§5.3).
+	OmitReelTiming bool
 }
 
 // TimedText builds a SMPTE-428-style timed-text document where the editable-unit
@@ -59,6 +65,14 @@ func RPL(playoutID string, reels []ReelSpec) []byte {
 	for _, r := range reels {
 		sb.WriteString(`<Reel>`)
 		fmt.Fprintf(&sb, `<ReelNumber>%d</ReelNumber>`, r.Number)
+		// Reel-level timing. An uncaptioned reel legitimately has no resources at
+		// all (§5.2 item 5), so this is the only thing that keeps the reels after
+		// it anchored on the composition timeline (§5.3).
+		if !r.OmitReelTiming {
+			sb.WriteString(`<EditRate>1000 1</EditRate>`)
+			fmt.Fprintf(&sb, `<EntryPoint>%d</EntryPoint>`, r.EntryPointMS)
+			fmt.Fprintf(&sb, `<Duration>%d</Duration>`, r.DurationMS)
+		}
 		sb.WriteString(`<ResourceList>`)
 		for _, res := range r.Resources {
 			sb.WriteString(`<Resource>`)
@@ -128,6 +142,14 @@ func SetOutputMode(enabled bool) acsp.Request {
 // Status builds a periodic status keepalive request (half-lease cadence).
 func Status(leaseMS int64) acsp.Request {
 	return acsp.Request{Type: acsp.ReqStatus, LeaseMS: leaseMS}
+}
+
+// StatusAt builds a periodic status that also carries timeline state, which the
+// §5.2 request list says the status request does. Servers that push the timeline
+// only on status must still keep the caption link anchored.
+func StatusAt(leaseMS, timelineMS int64, playoutID string, state acsp.PlayState) acsp.Request {
+	return acsp.Request{Type: acsp.ReqStatus, LeaseMS: leaseMS,
+		TimelineMS: timelineMS, PlayoutID: playoutID, PlayState: state}
 }
 
 // TerminateLease builds a Terminate Lease request (new-show boundary).

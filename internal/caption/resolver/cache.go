@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"container/list"
+	"strings"
 	"sync"
 )
 
@@ -94,7 +95,30 @@ func (c *Cache) removeLocked(key string) {
 	}
 }
 
-// Clear empties the cache (called at reel and show boundaries — §5.3).
+// RetainOnly drops every entry whose key does not start with one of the given
+// prefixes. This is the reel-boundary half of the §5.3 eviction policy: the reels
+// still inside the fetch-ahead window keep their assets — evicting those would
+// force a re-fetch at exactly the moment the boundary is crossed — while every
+// reel already played, and every other show's content, is dropped. An empty
+// prefix list clears the cache.
+func (c *Cache) RetainOnly(prefixes []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.items {
+		keep := false
+		for _, p := range prefixes {
+			if strings.HasPrefix(key, p) {
+				keep = true
+				break
+			}
+		}
+		if !keep {
+			c.removeLocked(key)
+		}
+	}
+}
+
+// Clear empties the cache (called at show boundaries — §5.3).
 func (c *Cache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
