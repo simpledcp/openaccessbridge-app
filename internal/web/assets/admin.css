@@ -94,6 +94,9 @@ dd .note { display: block; font-weight: 400; font-size: 0.8rem; color: var(--mut
 .audio-row { padding: 0.55rem 0; border-top: 1px solid var(--line); }
 .audio-row:first-child { border-top: none; padding-top: 0; }
 .audio-row .name { font-weight: 700; margin-right: 0.4rem; }
+/* A second tag in the head row is the synthetic-source marker; it must sit
+ * clear of the quality verdict rather than crowding it (§8.2). */
+.audio-row .tag + .tag { margin-left: 0.35rem; }
 .audio-row dl { margin-top: 0.35rem; }
 .audio-row .reasons { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--warn); }
 

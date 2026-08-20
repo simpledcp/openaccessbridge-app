@@ -284,6 +284,24 @@ func (c *Controller) Timeline() model.TimelineState {
 	}
 }
 
+// DriftMeasured reports whether MaxDriftMS is a MEASUREMENT rather than a
+// vacuous zero.
+//
+// MaxDriftMS ranges over the per-language engines, so a caption path with no
+// language loaded returns 0 by having nothing to range over. The dashboard row
+// is an int64 with no "unset", so without this the same "0 ms" is printed for
+// perfect sync and for a link that is not running at all — a plausible number
+// standing in for an unknown, which is the failure the honest-measurement waves
+// exist to prevent (guardrail #7).
+//
+// SEAM: an engine that IS loaded but has not yet re-anchored also holds drift 0,
+// and internal/caption/timing records no flag for "a drift measurement has
+// happened" (it is assigned only in Engine.UpdateTimeline, and only when the
+// engine was already anchored and rolling). Closing that window wants a
+// driftMeasured flag inside the timing engine, which this lane does not own; the
+// dashboard note names the window instead of hiding it.
+func (c *Controller) DriftMeasured() bool { return len(c.contentEngines()) > 0 }
+
 // MaxDriftMS returns the largest absolute drift across language engines (§5.5).
 func (c *Controller) MaxDriftMS() int64 {
 	var max int64

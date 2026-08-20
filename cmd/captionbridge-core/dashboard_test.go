@@ -224,3 +224,35 @@ func TestAudioRowsAreDerivedFromTheMediaProcess(t *testing.T) {
 		t.Errorf("no measurements is not readiness")
 	}
 }
+
+// TestDriftMeasuredReachesTheDashboard: §8.2's drift row against §5.5. A
+// supervisor with no show loaded reports drift 0 because MaxDriftMS has no
+// language engine to range over, and the dashboard has to be told that the zero
+// is not a reading — otherwise a DISCONNECTED link renders as perfect sync.
+func TestDriftMeasuredReachesTheDashboard(t *testing.T) {
+	dir := t.TempDir()
+	store := testStore(t, model.AuditoriumProfile{AuditoriumID: "screen-3"})
+	sup, fetcher := newSupervisorWithFetcher(t, store, dir)
+	fetcher.Files["tt_en.xml"] = sim.TimedText("en", []sim.CueSpec{{StartMS: 1000, EndMS: 4000, Text: "Hello"}})
+	rplBytes := sim.RPL("show-1", []sim.ReelSpec{{Number: 1, DurationMS: 60000, Resources: []sim.ResSpec{
+		{ID: "res-en", Type: "ClosedCaption", Language: "en", Locator: "tt_en.xml"},
+	}}})
+
+	st := sup.status()
+	if st.CaptionLink.DriftMSEstimate != 0 {
+		t.Fatalf("precondition: an idle controller reports 0 drift, got %d", st.CaptionLink.DriftMSEstimate)
+	}
+	if st.CaptionDriftMeasured != model.TriNo {
+		t.Errorf("with no show loaded the drift figure is vacuous, got %q", st.CaptionDriftMeasured)
+	}
+
+	sup.machine.Connected()
+	sup.machine.Handle(sim.Announce("srv", "Auditorium 3", ""))
+	sup.machine.Handle(sim.GetNewLease(30000))
+	sup.machine.Handle(sim.SetRPLInline(rplBytes))
+	sup.machine.Handle(sim.SetOutputMode(true))
+	sup.machine.Handle(sim.UpdateTimeline(0, "show-1", acsp.PlayPlaying))
+	if st := sup.status(); st.CaptionDriftMeasured != model.TriYes {
+		t.Errorf("a loaded show has a timing engine to measure drift against, got %q", st.CaptionDriftMeasured)
+	}
+}

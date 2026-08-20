@@ -110,6 +110,11 @@ type Inputs struct {
 	// DriftBudgetMS is the §5.5 / D9 warn budget the link's drift estimate is
 	// judged against, so the dashboard can show the number against its limit.
 	DriftBudgetMS int64
+	// DriftMeasured says whether the link's drift estimate is a MEASUREMENT.
+	// The estimate ranges over the per-language timing engines, so with none
+	// loaded it is 0 by having nothing to range over — see
+	// caption.Controller.DriftMeasured.
+	DriftMeasured model.Tri
 }
 
 // Assemble builds the composite readiness from the measured inputs.
@@ -149,6 +154,7 @@ func Assemble(in Inputs) model.SystemReadiness {
 		Timeline:             in.Timeline,
 		CueVisible:           in.CueVisible,
 		CaptionDriftBudgetMS: in.DriftBudgetMS,
+		CaptionDriftMeasured: in.DriftMeasured,
 
 		AudioStreams:          summarizeAudio(in.Audio),
 		ConnectedAudioClients: audioClients(in.Audio),
@@ -226,7 +232,14 @@ func summarizeAudio(audio []model.AudioStreamState) []model.AudioStreamSummary {
 	out := make([]model.AudioStreamSummary, 0, len(audio))
 	for _, a := range audio {
 		s := model.AudioStreamSummary{
-			StreamType:           a.StreamType,
+			StreamType: a.StreamType,
+			// §8.2's audio rows are read as "how the auditorium's feed measured",
+			// so the identity they were measured FROM travels with them. A
+			// synthetic stand-in that qualified "excellent" and arrived on the
+			// dashboard without its source would be this codebase's first
+			// fabrication rebuilt at the display layer (BLOCKERS B3/B4).
+			InputDeviceID:        a.InputDeviceID,
+			SyntheticSource:      model.SyntheticDevice(a.InputDeviceID),
 			InputPresent:         model.TriOf(a.Present),
 			StreamActive:         streamActive(a),
 			Quality:              a.Status,

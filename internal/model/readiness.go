@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Warning is a single loud-warning condition for the dashboard (§8.3). The
 // dashboard must shout, not whisper.
@@ -116,6 +119,19 @@ func (t Tri) Label() string {
 // derivation is where honesty about what was not measured has to live.
 type AudioStreamSummary struct {
 	StreamType StreamType `json:"stream_type"`
+	// InputDeviceID is the identity of the input these figures were measured
+	// from, and SyntheticSource says that identity is a STAND-IN the media
+	// process generated rather than a real capture device (BLOCKERS B3/B4).
+	//
+	// They are on the summary because §8.2's audio rows are read as "how the
+	// AUDITORIUM's feed measured". captionbridge-media refuses to report a
+	// synthetic tone under a real device's id — that refusal is the fix for this
+	// codebase's first fabrication — but the refusal is worth nothing if the
+	// surface that shows "excellent" drops the identity on the way out. A
+	// dashboard that hides the source turns a generated tone back into the
+	// booth's feed one layer further out.
+	InputDeviceID   string `json:"input_device_id,omitempty"`
+	SyntheticSource bool   `json:"synthetic_source,omitempty"`
 	// InputPresent is §8.2's "HI/VI input present" — measured by the capture
 	// health seam, never assumed.
 	InputPresent Tri `json:"input_present"`
@@ -139,6 +155,23 @@ type AudioStreamSummary struct {
 	// row above.
 	EncodePathEstimateMS int    `json:"encode_path_estimate_ms,omitempty"`
 	EncoderState         string `json:"encoder_state,omitempty"`
+}
+
+// SyntheticDevicePrefix marks the stand-in input identities captionbridge-media
+// generates when it has no capture backend for a real device (BLOCKERS B3/B4).
+// That process refuses to report a synthetic tone under a real device's id, so
+// the prefix is the ONLY signal that a green "excellent" describes a generated
+// tone rather than the auditorium.
+//
+// SEAM: captionbridge-media declares the same literal privately. The two must
+// not drift; the constant lives here so every reader derives the fact once, and
+// wiring the media process to this one is a one-line change in a package this
+// lane does not own.
+const SyntheticDevicePrefix = "synthetic-"
+
+// SyntheticDevice reports whether an input identity is a generated stand-in.
+func SyntheticDevice(deviceID string) bool {
+	return strings.HasPrefix(deviceID, SyntheticDevicePrefix)
 }
 
 // Process names used for per-process liveness reporting (§3.5).
@@ -245,6 +278,12 @@ type SystemReadiness struct {
 	// server seek or show loop produces a large "drift" that is not a fault, and
 	// a banner that fires on every seek is a banner a booth learns to ignore.
 	CaptionDriftBudgetMS int64 `json:"caption_drift_budget_ms,omitempty"`
+	// CaptionDriftMeasured says whether CaptionLinkState.DriftMSEstimate is a
+	// MEASUREMENT. That field has no "unset": it is an int64 that reads 0 both
+	// for perfect sync and for a caption path with no language engine to measure
+	// anything, and a dashboard that printed the second as "0 ms" would be
+	// reporting perfect sync for a path that is not running (guardrail #7).
+	CaptionDriftMeasured Tri `json:"caption_drift_measured,omitempty"`
 
 	// AudioStreams are the derived §8.2 audio rows (present / active / clients /
 	// latency), and ConnectedAudioClients is their total.

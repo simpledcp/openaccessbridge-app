@@ -181,3 +181,65 @@ func mustAsset(t *testing.T, name string) string {
 	}
 	return string(b)
 }
+
+// TestSyntheticAudioSourceIsNamedOnThePage: this codebase's first fabrication
+// was a synthetic tone reported under a real device's identity. The media
+// process refuses to do that now, and the readiness layer carries the marker —
+// but a page that renders "HI · excellent · −13 dBFS" without the source makes
+// the same claim about the auditorium's feed at the last step. Every place a
+// booth tech reads an audio verdict has to carry the attribution.
+func TestSyntheticAudioSourceIsNamedOnThePage(t *testing.T) {
+	script := mustAsset(t, "assets/admin.js")
+	for _, want := range []string{
+		"synthetic_source", // the server-derived marker
+		"input_device_id",  // the identity the figures were measured from
+		"SYNTHETIC SOURCE", // beside the quality verdict
+		"BLOCKER B3",       // and why there is no real measurement
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("admin.js never renders %q — a generated tone reads as the booth feed", want)
+		}
+	}
+	// The §10.6 verdict card is where a tech stops reading, so the caveat has to
+	// reach it too, not only the detail tile.
+	if !strings.Contains(script, "syntheticWhy") {
+		t.Errorf("the audio verdict's reason line drops the synthetic attribution")
+	}
+	// And §10.8's persisted device profile is a bare string with no summary
+	// beside it; recorded without a caveat it reads as qualified hardware.
+	if !strings.Contains(script, "audioDeviceRow") {
+		t.Errorf("the §10.8 audio device profile row does not distinguish a stand-in from hardware")
+	}
+}
+
+// TestSyntheticPrefixIsTheOnePrefixTheMediaProcessUses: admin.js recognises the
+// stand-in marker for §10.8's bare persisted string. If model's canonical prefix
+// ever changes, that literal silently stops matching and the caveat disappears.
+func TestSyntheticPrefixIsTheOnePrefixTheMediaProcessUses(t *testing.T) {
+	script := mustAsset(t, "assets/admin.js")
+	if !strings.Contains(script, `"`+model.SyntheticDevicePrefix+`"`) {
+		t.Errorf("admin.js does not use %q, so the §10.8 stand-in caveat cannot fire",
+			model.SyntheticDevicePrefix)
+	}
+}
+
+// TestZeroIsNotRenderedAsAMeasurement: the two payload fields that carry a
+// plausible-looking number where they mean "nothing measured this" —
+// drift_ms_estimate (an int64 that is 0 both for perfect sync and for a caption
+// path with no timing engine) and level_dbfs (cleared to the silence floor
+// whenever the media process reports a failure). Both are always present in the
+// JSON, so a null check alone is dead code and the number always prints.
+func TestZeroIsNotRenderedAsAMeasurement(t *testing.T) {
+	script := mustAsset(t, "assets/admin.js")
+	if !strings.Contains(script, "caption_drift_measured") {
+		t.Errorf("the drift row trusts the figure alone — a dead link then reads as flawless sync")
+	}
+	// The gate itself, not merely the helper's name: a helper that exists but is
+	// never consulted leaves the sentinel on screen.
+	if !strings.Contains(script, `sum.input_present === "no"`) {
+		t.Errorf("the level row prints the payload figure unconditionally, sentinel and all")
+	}
+	if !strings.Contains(script, "cleared rather than measured") {
+		t.Errorf("a cleared level must say it was cleared, not print the silence floor as a reading")
+	}
+}

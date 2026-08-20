@@ -144,9 +144,20 @@
     if (!inputs.length) return "The media process reported no audio inputs.";
     var failed = inputs.filter(function (a) { return a.status === "failed"; })
       .map(function (a) { return a.stream_type; });
-    if (failed.length) return failed.join(" and ") + " failed qualification.";
-    if (s.audio_ready) return inputs.length + " input(s) qualified usable or better.";
-    return "No input reached a usable verdict.";
+    if (failed.length) return failed.join(" and ") + " failed qualification." + syntheticWhy(s);
+    if (s.audio_ready) return inputs.length + " input(s) qualified usable or better." + syntheticWhy(s);
+    return "No input reached a usable verdict." + syntheticWhy(s);
+  }
+
+  /* A READY verdict earned by a generated tone is not a statement about this
+   * auditorium, and the verdict card is where a booth tech stops reading. */
+  function syntheticWhy(s) {
+    var syn = (s.audio_streams || []).filter(function (a) { return a.synthetic_source; })
+      .map(function (a) { return a.stream_type; });
+    if (!syn.length) return "";
+    return " " + syn.join(" and ") +
+      (syn.length > 1 ? " are SYNTHETIC test tones" : " is a SYNTHETIC test tone") +
+      ", not the booth feed (BLOCKER B3).";
   }
 
   /* ---- §8.2 caption-path rows --------------------------------------------- */
@@ -169,7 +180,7 @@
       row("Connected caption clients",
         (s.connected_caption_clients || 0) + " of " + (s.max_concurrent_clients ? s.max_concurrent_clients : "unlimited"),
         capState(s), s.max_concurrent_clients ? "" : "no per-profile cap is configured (D11)"),
-      driftRow(cl, s.caption_drift_budget_ms),
+      driftRow(cl, s.caption_drift_budget_ms, s.caption_drift_measured),
     ]);
   }
 
@@ -201,11 +212,20 @@
    * drift is measured at each re-anchor, so a legitimate server seek or a show
    * loop yields a large figure that is not a fault. The budget is shown so a
    * tech can judge it; escalating it to a red row would cry wolf on every seek. */
-  function driftRow(cl, budget) {
-    if (cl.drift_ms_estimate == null) {
-      return row("Drift at last re-anchor", "not measured", STATE_UNKNOWN);
+  function driftRow(cl, budget, measured) {
+    // drift_ms_estimate is an int64 with no "unset": it reads 0 both for perfect
+    // sync and for a caption path with no language engine to measure anything.
+    // caption_drift_measured is the backend's answer to which one this is, and
+    // without it a dead link renders as flawless sync.
+    if (measured !== "yes" || cl.drift_ms_estimate == null) {
+      return row("Drift at last re-anchor", "not measured", STATE_UNKNOWN,
+        "no caption timing engine is loaded, so there is nothing to measure drift against");
     }
     var note = budget ? "warn budget " + budget + " ms — a server seek or show loop also shows here" : "";
+    // The engine measures drift ON a re-anchor, so a freshly anchored link
+    // legitimately holds 0 until the next one. Say so rather than letting the
+    // figure imply more than it is.
+    note += (note ? "; " : "") + "0 until the first re-anchor";
     return row("Drift at last re-anchor", cl.drift_ms_estimate + " ms", null, note);
   }
 
@@ -315,18 +335,28 @@
       q.textContent = sum.quality || "not judged";
       head.appendChild(name);
       head.appendChild(q);
+      // THE ATTRIBUTION. captionbridge-media refuses to report a generated tone
+      // under a real device's identity — that refusal is this codebase's first
+      // fabrication fix — and it buys nothing if the surface showing "excellent"
+      // drops the identity. A synthetic stand-in says so beside its verdict.
+      if (sum.synthetic_source) {
+        var syn = document.createElement("span");
+        syn.className = "tag warn";
+        syn.textContent = "SYNTHETIC SOURCE";
+        head.appendChild(syn);
+      }
       d.appendChild(head);
 
       var facts = document.createElement("dl");
       dl(facts, [
+        deviceRow(sum),
         triRow("Input present", sum.input_present, true),
         // §8.2 "HI stream active / VI stream active". With no WebRTC subscriber
         // transport (BLOCKERS B2/B4) a proven encoder still reaches nobody, so
         // the honest answer is "no" with the reason attached.
         triRow("Stream active", sum.stream_active, true, encoderNote(sum.encoder_state)),
         row("Connected audio clients", String(sum.connected_clients || 0), null),
-        row("Level", raw.level_dbfs != null ? raw.level_dbfs.toFixed(1) + " dBFS" : "not measured",
-          raw.level_dbfs != null ? null : STATE_UNKNOWN),
+        levelRow(sum, raw),
         latencyRow(sum),
       ]);
       d.appendChild(facts);
@@ -339,6 +369,35 @@
       }
       host.appendChild(d);
     });
+  }
+
+  /* deviceRow names the input these figures were measured FROM. §8.2's audio
+   * rows are read as "how the auditorium's feed measured", so a green
+   * "excellent" with no source is the same claim about the wrong thing. */
+  function deviceRow(sum) {
+    if (!sum.input_device_id) {
+      return row("Input device", "not reported", STATE_UNKNOWN);
+    }
+    if (sum.synthetic_source) {
+      return row("Input device", sum.input_device_id, STATE_WARN,
+        "a generated test tone standing in for the booth feed (BLOCKER B3) — " +
+        "every figure below describes the tone, not this auditorium");
+    }
+    return row("Input device", sum.input_device_id, null);
+  }
+
+  /* levelRow. level_dbfs is always present in the payload, so "no level" cannot
+   * be told from "level 0" by absence. The media process CLEARS the level to its
+   * silence floor whenever it reports a failure rather than carrying the last
+   * good one, so an input that is not delivering audio has no measured level at
+   * all — printing the floor for it would be a sentinel dressed as a reading. */
+  function levelRow(sum, raw) {
+    if (sum.input_present === "no") {
+      return row("Level", "not measured", STATE_UNKNOWN,
+        "the input is not delivering audio, so its level was cleared rather than measured");
+    }
+    if (raw.level_dbfs == null) return row("Level", "not measured", STATE_UNKNOWN);
+    return row("Level", raw.level_dbfs.toFixed(1) + " dBFS", null);
   }
 
   /* latencyRow is the sharpest honesty case in the audio block. §8.2 asks for
@@ -482,8 +541,7 @@
         v.firewall_profile_version ? null : STATE_UNKNOWN),
       row("Server family profile", v.server_family_compat_profile || "not recorded",
         v.server_family_compat_profile ? null : STATE_UNKNOWN),
-      row("Audio device profile", v.audio_device_compat_profile || "not recorded",
-        v.audio_device_compat_profile ? null : STATE_UNKNOWN),
+      audioDeviceRow(v.audio_device_compat_profile),
       // §10.8 exists to answer "what changed since this last worked". A stamp
       // nothing wrote must say so — this field was fabricated once already, by
       // being stamped when an operator clicked Finish.
@@ -496,6 +554,20 @@
         fail && fail.reason ? "reason: " + fail.reason : ""),
       row("Update channel", v.update_channel || "not recorded", null),
     ]);
+  }
+
+  /* §10.8's audio_device_compat_profile is the persisted identity of the input
+   * in play. It is a bare string with no summary beside it, so the synthetic
+   * marker has to be recognised here — it is captionbridge-media's prefix for a
+   * stand-in it generated, and model.SyntheticDevicePrefix is its canonical
+   * home. Recorded as a device profile with no caveat, it reads as hardware. */
+  function audioDeviceRow(id) {
+    if (!id) return row("Audio device profile", "not recorded", STATE_UNKNOWN);
+    if (id.indexOf("synthetic-") === 0) {
+      return row("Audio device profile", id, STATE_WARN,
+        "a generated stand-in, not a real input device — nothing has qualified this booth's hardware (BLOCKER B3)");
+    }
+    return row("Audio device profile", id, null);
   }
 
   function render(s) {

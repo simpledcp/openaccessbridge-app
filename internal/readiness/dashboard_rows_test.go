@@ -293,3 +293,47 @@ func TestIdentityCheckVocabularyMatchesTheACSPLayer(t *testing.T) {
 		}
 	}
 }
+
+// TestSyntheticSourceTravelsWithTheVerdict: the first fabrication this codebase
+// caught was a synthetic tone reported under a real hardware device's identity.
+// captionbridge-media now refuses to do that, but the refusal only helps if the
+// identity survives the derivation on its way to §8.2's audio rows: "HI —
+// excellent, −13 dBFS" with no source is the same false claim about the
+// auditorium's feed, made one layer further out (BLOCKER B3).
+func TestSyntheticSourceTravelsWithTheVerdict(t *testing.T) {
+	audio := []model.AudioStreamState{
+		{StreamType: model.StreamHI, InputDeviceID: "synthetic-HI", Status: model.QualExcellent, Present: true},
+		{StreamType: model.StreamVIN, InputDeviceID: "hw:1,0", Status: model.QualExcellent, Present: true},
+	}
+	r := Assemble(Inputs{Verify: cleanVerify(), Audio: audio})
+	if len(r.AudioStreams) != 2 {
+		t.Fatalf("expected two derived rows, got %+v", r.AudioStreams)
+	}
+	if got := r.AudioStreams[0]; got.InputDeviceID != "synthetic-HI" || !got.SyntheticSource {
+		t.Errorf("a generated stand-in must reach the dashboard as one, got %+v", got)
+	}
+	// And the opposite error matters as much: a real device marked synthetic
+	// would teach a booth to ignore the marker.
+	if got := r.AudioStreams[1]; got.InputDeviceID != "hw:1,0" || got.SyntheticSource {
+		t.Errorf("a real capture device must not be flagged synthetic, got %+v", got)
+	}
+}
+
+// TestDriftIsNotMeasuredWithNoTimingEngine: CaptionLinkState.DriftMSEstimate is
+// an int64 with no "unset" — it reads 0 for perfect sync AND for a caption path
+// with no language engine for MaxDriftMS to range over. Rendering the second as
+// "0 ms" reports flawless sync for a link that is not running.
+func TestDriftIsNotMeasuredWithNoTimingEngine(t *testing.T) {
+	link := model.CaptionLinkState{State: model.StateDisconnected, DriftMSEstimate: 0}
+	r := Assemble(Inputs{Verify: cleanVerify(), Link: link, DriftBudgetMS: 500, DriftMeasured: model.TriNo})
+	if r.CaptionDriftMeasured != model.TriNo {
+		t.Errorf("a vacuous zero must be reported as unmeasured, got %q", r.CaptionDriftMeasured)
+	}
+	// A caller that does not know leaves it unmeasured rather than measured-true.
+	if got := Assemble(Inputs{Verify: cleanVerify(), Link: link}); got.CaptionDriftMeasured != model.TriUnknown {
+		t.Errorf("an unfilled drift-measured field must stay unknown, got %q", got.CaptionDriftMeasured)
+	}
+	if got := Assemble(Inputs{Verify: cleanVerify(), Link: link, DriftMeasured: model.TriYes}); got.CaptionDriftMeasured != model.TriYes {
+		t.Errorf("a real measurement must be carried, got %q", got.CaptionDriftMeasured)
+	}
+}

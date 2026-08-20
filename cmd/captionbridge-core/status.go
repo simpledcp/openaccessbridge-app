@@ -210,6 +210,7 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 		Timeline:      s.ctrl.Timeline(),
 		CueVisible:    triIfKnown(cueVisible, cueKnown),
 		DriftBudgetMS: s.ctrl.WarnBudgetMS(),
+		DriftMeasured: model.TriOf(s.ctrl.DriftMeasured()),
 		// §8.2 "Discovery mode". This build runs no discovery/advertisement
 		// responder in any of the three processes — grep for mDNS/SSDP and there
 		// is none — so "off" is a fact about the code, not an assumption about

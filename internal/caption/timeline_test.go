@@ -81,3 +81,31 @@ func TestServerConnectedIsFalseForFaultedLinks(t *testing.T) {
 		}
 	}
 }
+
+// TestDriftIsUnmeasuredUntilAnEngineExists: MaxDriftMS ranges over the
+// per-language engines, so a controller with none returns 0 by having nothing to
+// range over. §8.2's drift row is an int64 with no "unset", so a dashboard that
+// trusted the figure alone would print "0 ms" — perfect sync — for a caption
+// path that is not running at all.
+func TestDriftIsUnmeasuredUntilAnEngineExists(t *testing.T) {
+	c := NewController(Options{Hub: fanout.NewHub(fanout.Options{})})
+	defer c.Close()
+
+	if c.MaxDriftMS() != 0 {
+		t.Fatalf("precondition: an empty controller reports 0 drift")
+	}
+	if c.DriftMeasured() {
+		t.Errorf("with no timing engine loaded there is nothing to measure drift against")
+	}
+	// Driving the transport does not conjure an engine either: Play on an empty
+	// controller still has no language to compare against.
+	c.Play(0)
+	if c.DriftMeasured() {
+		t.Errorf("a transport state is not a drift measurement")
+	}
+
+	c.LoadReel(map[string][]model.Cue{"en": {{StartMS: 0, EndMS: 1000, Text: "x"}}})
+	if !c.DriftMeasured() {
+		t.Errorf("once a language engine is loaded the drift figure is a measurement")
+	}
+}
