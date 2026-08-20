@@ -16,7 +16,23 @@ import (
 type Network struct {
 	TheaterInterface string
 	ClientInterface  string
-	AllowedServer    string
+	// AllowedServer is the CONFIGURED cinema server pinned for this auditorium
+	// (§8.2 "Allowed cinema server", §10.5) — NOT the connected server's own
+	// claim about itself, which cannot contradict itself and so can never expose
+	// a wrong-room error (§8.5).
+	AllowedServer string
+	// ConnectedServer is what the connected server announced.
+	ConnectedServer string
+	// IdentityStrength labels how the pinned identity is established (§10.5:
+	// a composite identity must be labelled as such in the UI).
+	IdentityStrength string
+}
+
+// Clients carries §8.2's connected-client counts and the D11 per-profile cap in
+// force in the fan-out.
+type Clients struct {
+	Caption int
+	Max     int
 }
 
 // LatencyBudgets are the per-stream over-threshold limits (§6.7 / D10).
@@ -28,36 +44,116 @@ type LatencyBudgets struct {
 // DefaultLatencyBudgets returns the aspirational §6.7 budgets.
 func DefaultLatencyBudgets() LatencyBudgets { return LatencyBudgets{HIMaxMS: 150, VINMaxMS: 250} }
 
-// Assemble builds the composite readiness from the caption-link state, the audio
-// stream states, the security verification report, and the network facts.
-func Assemble(link model.CaptionLinkState, audio []model.AudioStreamState, rep verify.Report, net Network, budgets LatencyBudgets) model.SystemReadiness {
+// Inputs is everything the composite verdict is assembled from (§10.6:
+// caption-link state, per-input audio state, firewall/verification state, and
+// network/interface assignment — plus the §8.3 loud-warning set and the §3.5
+// per-process liveness). It is a struct rather than a parameter list because the
+// dashboard grows facts; a caller that does not have one leaves it zero and the
+// report says nothing about it rather than guessing.
+type Inputs struct {
+	Link    model.CaptionLinkState
+	Audio   []model.AudioStreamState
+	Verify  verify.Report
+	Network Network
+	Budgets LatencyBudgets
+	// CaptionWarnings are the live caption-path warnings (§8.3). They come from
+	// CaptionWarnings.Snapshot, i.e. from conditions the ACSP link actually
+	// raised — guardrail #7 applies to the caption path exactly as it does to
+	// audio.
+	CaptionWarnings []model.Warning
+	// HelperWarnings are conditions core observed about the supervised helpers
+	// themselves — a refused command, a rejected input profile — which no
+	// snapshot of measurements can be derived from.
+	HelperWarnings []model.Warning
+	// Processes is the measured liveness of the supervised processes (§3.5).
+	Processes []model.ProcessLiveness
+	Clients   Clients
+	// Versions is the persisted §10.8 record, surfaced so a tech can see what
+	// changed since this last worked.
+	Versions model.SystemConfigVersion
+}
+
+// Assemble builds the composite readiness from the measured inputs.
+func Assemble(in Inputs) model.SystemReadiness {
+	budgets := in.Budgets
 	if budgets.HIMaxMS == 0 {
 		budgets = DefaultLatencyBudgets()
 	}
+	rep := in.Verify
 	r := model.SystemReadiness{
-		CaptionReady: link.CaptionReady(),
-		AudioReady:   audioReady(audio),
-		CaptionLink:  link,
-		AudioInputs:  audio,
+		CaptionReady: in.Link.CaptionReady(),
+		AudioReady:   audioReady(in.Audio),
+		CaptionLink:  in.Link,
+		AudioInputs:  in.Audio,
 
-		ForwardingDisabled: rep.ForwardingDisabledV4 && rep.ForwardingDisabledV6,
-		FirewallActive:     rep.FirewallActive,
-		BridgesPresent:     rep.BridgesPresent,
-		AdminIsolated:      rep.AdminIsolated,
-		DefaultCreds:       !rep.NoDefaultCreds,
-		SSHDisabled:        rep.SSHCorrect,
+		ForwardingDisabled:   rep.ForwardingDisabledV4 && rep.ForwardingDisabledV6,
+		FirewallActive:       rep.FirewallActive,
+		FirewallIntrospected: rep.FirewallIntrospected,
+		BridgesPresent:       rep.BridgesPresent,
+		AdminIsolated:        rep.AdminIsolated,
+		DefaultCreds:         !rep.NoDefaultCreds,
+		SSHDisabled:          rep.SSHCorrect,
 
-		TheaterInterface: net.TheaterInterface,
-		ClientInterface:  net.ClientInterface,
-		AllowedServer:    net.AllowedServer,
+		TheaterInterface: in.Network.TheaterInterface,
+		ClientInterface:  in.Network.ClientInterface,
+		AllowedServer:    in.Network.AllowedServer,
+		ConnectedServer:  in.Network.ConnectedServer,
+		IdentityStrength: in.Network.IdentityStrength,
+
+		Processes:               in.Processes,
+		ConnectedCaptionClients: in.Clients.Caption,
+		MaxConcurrentClients:    in.Clients.Max,
+		Versions:                in.Versions,
 	}
 
-	// Loud-warning set (§8.3): start with the security warnings, then add the
-	// audio ones. The dashboard must shout, not whisper.
+	// Loud-warning set (§8.3): the security warnings, then the caption-link ones,
+	// then the audio ones, then the process-liveness ones. The dashboard must
+	// shout, not whisper.
 	warnings := append([]model.Warning{}, rep.Warnings...)
-	warnings = append(warnings, audioWarnings(audio, budgets)...)
+	warnings = append(warnings, postureWarnings(rep)...)
+	warnings = append(warnings, in.CaptionWarnings...)
+	warnings = append(warnings, in.HelperWarnings...)
+	warnings = append(warnings, audioWarnings(in.Audio, budgets)...)
+	warnings = append(warnings, processWarnings(in.Processes)...)
 	r.Warnings = warnings
 	return r
+}
+
+// postureWarnings adds the security findings the verification pass reports as
+// facts but has no §8.3 code for.
+func postureWarnings(rep verify.Report) []model.Warning {
+	var ws []model.Warning
+	// "Active but nobody read the ruleset" is a different fact from "inactive",
+	// and verify deliberately does not reuse WarnFirewallInactive for it (that
+	// would tell an operator the firewall is DOWN when it may be up). Surface it
+	// as its own condition: the dashboard must not present an unverified claim as
+	// a verified one (§9.3, D17).
+	if rep.FirewallActive && !rep.FirewallIntrospected {
+		ws = append(ws, model.Warning{
+			Code:     model.WarnFirewallUnverified,
+			Message:  "The firewall is reported active but the loaded ruleset was never read — the posture is asserted, not verified",
+			Severity: model.SeverityWarning,
+		})
+	}
+	return ws
+}
+
+// processWarnings raises §3.5's per-process liveness failures. Core supervises
+// the media and firewall helpers; a helper that is not answering is a named
+// fault, not an unexplained "audio not ready" or "firewall inactive".
+func processWarnings(procs []model.ProcessLiveness) []model.Warning {
+	var ws []model.Warning
+	for _, p := range procs {
+		if p.Alive {
+			continue
+		}
+		ws = append(ws, model.Warning{
+			Code:     model.WarnProcessUnreachable,
+			Message:  p.Name + " is not answering on the loopback socket — restart it before the show (see systemd status)",
+			Severity: model.SeverityCritical,
+		})
+	}
+	return ws
 }
 
 // audioReady reports whether the audio path is serviceable: at least one stream is
@@ -90,10 +186,32 @@ func audioWarnings(audio []model.AudioStreamState, budgets LatencyBudgets) []mod
 				Message: label + " input is silent during playback — contact theater staff",
 			})
 		}
-		if reasonHas(a.Reasons, "requires two channels") || reasonHas(a.Reasons, "requires") {
+		// The mapping fault §8.3 names is specifically "a configured stereo
+		// mapping impossible on a detected mono input". Match that reason and
+		// nothing else: a bare "requires" would raise a CRITICAL mapping fault for
+		// any future reason string that happens to contain the word.
+		if reasonHas(a.Reasons, "requires two channels") {
 			ws = append(ws, model.Warning{
 				Code: model.WarnImpossibleMapping, Severity: model.SeverityCritical,
 				Message: label + " channel mapping is impossible on the detected input (caught before show)",
+			})
+		}
+		// §6.6 reports device connect/disconnect; §8.3 has to shout the cause. A
+		// failed stream whose device is not connected is "the dongle fell out",
+		// not "the input is silent" — the booth needs the actual cause named.
+		if a.Status == model.QualFailed && !a.DeviceConnected {
+			ws = append(ws, model.Warning{
+				Code: model.WarnAudioDeviceDisconnected, Severity: model.SeverityCritical,
+				Message: label + " capture device is not connected — check the input cable/adapter",
+			})
+		}
+		// An unavailable encoder means nothing is being encoded for this stream,
+		// however clean the input measures (§6.6 "encoder state"). Without this,
+		// a perfectly qualified input reads as ready while patrons get silence.
+		if a.EncoderState == model.EncoderStateUnavailable {
+			ws = append(ws, model.Warning{
+				Code: model.WarnAudioEncoderUnavailable, Severity: model.SeverityCritical,
+				Message: label + " has no working audio encoder — no audio can reach patrons",
 			})
 		}
 		if a.Clipping {
@@ -106,6 +224,9 @@ func audioWarnings(audio []model.AudioStreamState, budgets LatencyBudgets) []mod
 		if a.StreamType == model.StreamHI {
 			max = budgets.HIMaxMS
 		}
+		// One-sided test: LatencyMSEst is the appliance-side ENCODE-PATH estimate
+		// only (§6.7 / D10 budgets are glass-to-ear), so it can prove the budget
+		// is blown but never that it is met. Re-base once B3 measures end to end.
 		if a.LatencyMSEst > max && max > 0 {
 			ws = append(ws, model.Warning{
 				Code: model.WarnAudioLatencyOver, Severity: model.SeverityWarning,

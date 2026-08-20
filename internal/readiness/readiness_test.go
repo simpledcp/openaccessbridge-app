@@ -10,7 +10,8 @@ import (
 func cleanVerify() verify.Report {
 	return verify.Report{
 		ForwardingDisabledV4: true, ForwardingDisabledV6: true,
-		FirewallActive: true, AdminIsolated: true, NoDefaultCreds: true, SSHCorrect: true, Pass: true,
+		FirewallActive: true, FirewallIntrospected: true,
+		AdminIsolated: true, NoDefaultCreds: true, SSHCorrect: true, Pass: true,
 	}
 }
 
@@ -22,7 +23,7 @@ func TestIndependentReadiness(t *testing.T) {
 		{StreamType: model.StreamHI, Status: model.QualUsable, LevelDBFS: -18},
 		{StreamType: model.StreamVIN, Status: model.QualFailed, Silence: true, Reasons: []string{"configured input is silent during playback"}},
 	}
-	r := Assemble(link, audio, cleanVerify(), Network{}, DefaultLatencyBudgets())
+	r := Assemble(Inputs{Link: link, Audio: audio, Verify: cleanVerify()})
 	if !r.CaptionReady {
 		t.Errorf("captions should be ready")
 	}
@@ -44,7 +45,7 @@ func TestCleanAudioReady(t *testing.T) {
 		{StreamType: model.StreamHI, Status: model.QualExcellent, LevelDBFS: -16, LatencyMSEst: 60},
 		{StreamType: model.StreamVIN, Status: model.QualUsable, LevelDBFS: -20, LatencyMSEst: 90},
 	}
-	r := Assemble(model.CaptionLinkState{}, audio, cleanVerify(), Network{}, DefaultLatencyBudgets())
+	r := Assemble(Inputs{Audio: audio, Verify: cleanVerify()})
 	if !r.AudioReady {
 		t.Errorf("two usable streams should be audio_ready")
 	}
@@ -62,7 +63,7 @@ func TestSecurityWarningsPropagate(t *testing.T) {
 		Warnings: []model.Warning{{Code: model.WarnForwardingEnabled, Severity: model.SeverityCritical, Message: "x"}},
 		Pass:     false,
 	}
-	r := Assemble(model.CaptionLinkState{}, nil, rep, Network{TheaterInterface: "eth0"}, DefaultLatencyBudgets())
+	r := Assemble(Inputs{Verify: rep, Network: Network{TheaterInterface: "eth0"}})
 	if r.ForwardingDisabled {
 		t.Errorf("forwarding should be reported not-fully-disabled")
 	}
@@ -79,7 +80,7 @@ func TestClippingAndLatencyWarnings(t *testing.T) {
 	audio := []model.AudioStreamState{
 		{StreamType: model.StreamHI, Status: model.QualMarginal, Clipping: true, LatencyMSEst: 400},
 	}
-	r := Assemble(model.CaptionLinkState{}, audio, cleanVerify(), Network{}, DefaultLatencyBudgets())
+	r := Assemble(Inputs{Audio: audio, Verify: cleanVerify()})
 	if !hasCode(r.Warnings, model.WarnAudioClipping) {
 		t.Errorf("expected clipping warning")
 	}

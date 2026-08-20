@@ -3,7 +3,9 @@ package resolver
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/simpledcp/captionbridge/internal/caption/rpl"
 	"github.com/simpledcp/captionbridge/internal/caption/timedtext"
@@ -89,12 +91,43 @@ func (p *Pipeline) Purge() {
 	p.Cache.Clear()
 }
 
+// EvAssetParseDegraded records that a timed-text asset parsed with non-fatal
+// degradation — classes and counts only, never a cue. internal/logging's taxonomy
+// is "the documented minimum set; callers may add events following the same dotted
+// convention" (§9.4); its canonical home is internal/logging.
+const EvAssetParseDegraded = logging.Event("caption.asset.parse_degraded")
+
+// ParseWarning reports one asset's non-fatal timed-text parse degradation,
+// attributed to the reel and language it came from (§5.4).
+//
+// The classes matter operationally: a defaulted edit rate, cues clamped to the
+// <StartTime> origin, or a whole asset's cues falling before it all change what a
+// patron sees. Dropping them on the floor is exactly the silent degradation
+// guardrail #7 forbids. It carries CLASSES AND COUNTS ONLY — no cue text, no
+// locator, no title-bearing identifier (§9.4).
+type ParseWarning struct {
+	ReelNumber int
+	Language   string
+	// Classes are the distinct warning classes, sorted so a dashboard/log line is
+	// stable between loads.
+	Classes []string
+	// Count is the total number of warnings the document raised, which is how a
+	// single stray cue is told apart from a whole asset going wrong.
+	Count int
+}
+
 // Loader turns an RPL into composition-timeline-relative cues per language, with a
 // bounded fetch-ahead window (§5.3): it fetches the current and next reel(s), not
 // the whole composition, and skips reels already past.
 type Loader struct {
 	Pipeline        *Pipeline
 	FetchAheadReels int // default 1 (current + next reel)
+	// OnParseWarning receives every asset's parse degradation as it is loaded, so
+	// the condition can reach the dashboard instead of dying in the parser
+	// (guardrail #7). It is deliberately NOT folded into Load's returned warning
+	// list: that list means "this asset would not serve at all", and a degraded
+	// asset that DID serve must not be reported as a missing one. nil discards.
+	OnParseWarning func(ParseWarning)
 }
 
 // NewLoader builds a Loader.
@@ -202,6 +235,7 @@ func (l *Loader) Load(ctx context.Context, req WindowRequest) (map[string][]mode
 				warnings = append(warnings, fmt.Sprintf("reel%d_%s_fetch_failed", reel.ReelNumber, lang))
 				continue
 			}
+			l.noteParseWarnings(reel.ReelNumber, lang, doc.Warnings)
 			for _, c := range doc.Cues {
 				c.StartMS += offset
 				c.EndMS += offset
@@ -215,4 +249,36 @@ func (l *Loader) Load(ctx context.Context, req WindowRequest) (map[string][]mode
 		}
 	}
 	return out, warnings, nil
+}
+
+// noteParseWarnings reports one document's parse degradation to OnParseWarning
+// and to the log. Repeats of a class are collapsed — a hundred cues clamped to
+// the same origin is one condition with a count, not a hundred conditions.
+func (l *Loader) noteParseWarnings(reelNumber int, lang string, classes []string) {
+	if len(classes) == 0 {
+		return
+	}
+	seen := make(map[string]bool, len(classes))
+	distinct := make([]string, 0, len(classes))
+	for _, c := range classes {
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		distinct = append(distinct, c)
+	}
+	sort.Strings(distinct)
+	if l.Pipeline != nil {
+		l.Pipeline.Log.Warn(EvAssetParseDegraded,
+			logging.Field("reel", reelNumber),
+			logging.Field("language", lang),
+			logging.Field("classes", strings.Join(distinct, ",")),
+			logging.Field("count", len(classes)))
+	}
+	if l.OnParseWarning != nil {
+		l.OnParseWarning(ParseWarning{
+			ReelNumber: reelNumber, Language: lang,
+			Classes: distinct, Count: len(classes),
+		})
+	}
 }

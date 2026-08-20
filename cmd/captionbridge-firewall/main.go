@@ -6,7 +6,9 @@
 // SAFETY: applying rules / toggling sysctls is gated behind BOTH running as root
 // AND an explicit --allow-apply flag, so the helper never mutates a developer
 // host's live firewall by accident. Without it, apply is a dry-run that returns
-// the generated ruleset for inspection.
+// the generated ruleset for inspection. READING the loaded ruleset is not gated —
+// BLOCKER B5 is about changing kernel state, not observing it — so the posture is
+// measured on every pass either way (§9.3).
 package main
 
 import (
@@ -21,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,6 +34,9 @@ import (
 	"github.com/simpledcp/captionbridge/internal/security/firewall"
 	"github.com/simpledcp/captionbridge/internal/security/verify"
 )
+
+// watchdogInterval is how often §3.3's runtime watchdog re-checks the posture.
+const watchdogInterval = 30 * time.Second
 
 func main() {
 	sockDir := flag.String("socket-dir", ipc.DefaultSocketDir(), "loopback socket directory")
@@ -44,7 +50,7 @@ func main() {
 		logging.Field("root", os.Geteuid() == 0),
 		logging.Field("apply_enabled", *allowApply && os.Geteuid() == 0))
 
-	h := &helper{log: log, allowApply: *allowApply && os.Geteuid() == 0}
+	h := newHelper(log, *allowApply && os.Geteuid() == 0)
 
 	// This helper runs as root while core runs unprivileged, so an owner-only
 	// socket would be unreachable from core (§3.5). Hand the socket to the shared
@@ -72,6 +78,39 @@ func main() {
 type helper struct {
 	log        *logging.Logger
 	allowApply bool
+
+	// paths, ruleset, applyRules and applySysctls are the injectable edges of the
+	// helper: production wires them to the real kernel, the tests to fixtures, so
+	// the watchdog's re-assert can be exercised without root (§9.3 "all
+	// filesystem roots and the ruleset reader are injectable").
+	paths        verify.Paths
+	ruleset      verify.RulesetReader
+	applyRules   func(script string) error
+	applySysctls func() error
+
+	mu sync.Mutex
+	// lastScript is the ruleset last generated from core's configuration. The
+	// watchdog re-applies THIS on a flip rather than re-deriving one, so a
+	// re-assert can never install a posture core did not ask for (§3.3).
+	lastScript  string
+	lastProfile model.FirewallProfile
+	// lastFacts are the caller-supplied facts from the most recent verify
+	// request. Carrying them into the watchdog is what keeps the profile,
+	// credential and SSH assertions from silently checking a zero value.
+	lastFacts model.PostureFacts
+}
+
+func newHelper(log *logging.Logger, allowApply bool) *helper {
+	return &helper{
+		log:        log,
+		allowApply: allowApply,
+		paths:      verify.DefaultPaths(),
+		// Read the LOADED ruleset on every pass: §9.3's posture is proven, never
+		// asserted. Listing needs no ruleset change and no --allow-apply gate.
+		ruleset:      verify.NFTRulesetReader(),
+		applyRules:   applyRuleset,
+		applySysctls: applySysctls,
+	}
 }
 
 // socketOptions resolves the shared socket group. On the appliance the group
@@ -104,17 +143,6 @@ func socketOptions(group string, log *logging.Logger) ipc.ListenOptions {
 	}
 }
 
-// verifyFacts is the caller-supplied half of a verification pass (§9.3): facts
-// about the appliance's own firewall/admin/cred/ssh state that the kernel does not
-// expose.
-type verifyFacts struct {
-	Profile                  model.FirewallProfile `json:"profile"`
-	FirewallActive           bool                  `json:"firewall_active"`
-	AdminReachableFromPatron bool                  `json:"admin_reachable_from_patron"`
-	DefaultCredentials       bool                  `json:"default_credentials"`
-	SSHEnabledOutsideSupport bool                  `json:"ssh_enabled_outside_support"`
-}
-
 func (h *helper) handle(m ipc.Message) *ipc.Message {
 	switch m.Type {
 	case ipc.TypePing:
@@ -139,16 +167,23 @@ func (h *helper) apply(m ipc.Message) *ipc.Message {
 	}
 	applied := false
 	if h.allowApply {
-		if err := applyRuleset(script); err != nil {
+		if err := h.applyRules(script); err != nil {
 			h.log.Error(logging.EvVerificationFailed, logging.Field("error", err.Error()))
 			return errResp(m, "apply failed: "+err.Error())
 		}
-		if err := applySysctls(); err != nil {
+		if err := h.applySysctls(); err != nil {
 			h.log.Error(logging.EvVerificationFailed, logging.Field("error", err.Error()))
 			return errResp(m, "sysctl apply failed: "+err.Error())
 		}
 		applied = true
 	}
+	// Remember what core asked for even in dry-run: the watchdog re-asserts the
+	// last requested posture, and a helper that is later granted apply rights
+	// must not have forgotten it.
+	h.mu.Lock()
+	h.lastScript, h.lastProfile = script, cfg.Profile
+	h.mu.Unlock()
+
 	h.log.Info(logging.EvFirewallProfileApplied,
 		logging.Field("profile", string(cfg.Profile)),
 		logging.Field("initiation", string(cfg.Initiation)),
@@ -158,18 +193,15 @@ func (h *helper) apply(m ipc.Message) *ipc.Message {
 }
 
 func (h *helper) verify(m ipc.Message) *ipc.Message {
-	var f verifyFacts
+	var f model.PostureFacts
 	if len(m.Payload) > 0 {
 		_ = json.Unmarshal(m.Payload, &f)
 	}
-	rep := verify.Run(verify.Config{
-		Paths:                    verify.DefaultPaths(),
-		Profile:                  f.Profile,
-		FirewallActive:           f.FirewallActive,
-		AdminReachableFromPatron: f.AdminReachableFromPatron,
-		DefaultCredentials:       f.DefaultCredentials,
-		SSHEnabledOutsideSupport: f.SSHEnabledOutsideSupport,
-	})
+	h.mu.Lock()
+	h.lastFacts = f
+	h.mu.Unlock()
+
+	rep := verify.Run(h.verifyConfig(f))
 	if rep.Pass {
 		h.log.Info(logging.EvVerificationPassed)
 	} else {
@@ -182,20 +214,117 @@ func (h *helper) verify(m ipc.Message) *ipc.Message {
 	return &ipc.Message{Type: ipc.TypeFirewallResult, ID: m.ID, Payload: payload}
 }
 
+// verifyConfig builds a verification pass from the caller-supplied facts. Both
+// call sites — the request handler and the watchdog — go through here, so the
+// watchdog can never run a weaker pass than the one core asked for.
+func (h *helper) verifyConfig(f model.PostureFacts) verify.Config {
+	return verify.Config{
+		Paths:                    h.paths,
+		Ruleset:                  h.ruleset,
+		Profile:                  f.Profile,
+		TheaterIface:             f.TheaterIface,
+		ClientIface:              f.ClientIface,
+		TheaterAllowlist:         f.TheaterAllowlist,
+		AdminReachableFromPatron: f.AdminReachableFromPatron,
+		DefaultCredentials:       f.DefaultCredentials,
+		SSHEnabledOutsideSupport: f.SSHEnabledOutsideSupport,
+	}
+}
+
 func (h *helper) runtimeVerifyLoop(ctx context.Context) {
-	t := time.NewTicker(30 * time.Second)
+	t := time.NewTicker(watchdogInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			rep := verify.Run(verify.Config{Paths: verify.DefaultPaths(), FirewallActive: h.allowApply})
-			if !rep.ForwardingDisabledV4 || !rep.ForwardingDisabledV6 {
-				h.log.Warn(logging.EvForwardingEnabledDetected, logging.Field("source", "runtime_watchdog"))
-			}
+			h.watchdogPass()
 		}
 	}
+}
+
+// watchdogPass is one iteration of §3.3's runtime watchdog: "A runtime watchdog
+// re-asserts these and the dashboard screams if any flip."
+//
+// Detecting the flip is only half of that sentence. When the helper is permitted
+// to apply, it re-asserts the sysctls and the last requested ruleset and then
+// re-measures; when it is not, it says so at error level rather than logging a
+// warning that reads as if something was done about it. Either way the flip
+// stands in the report core polls, so the dashboard screams.
+func (h *helper) watchdogPass() verify.Report {
+	h.mu.Lock()
+	facts, script := h.lastFacts, h.lastScript
+	h.mu.Unlock()
+
+	rep := verify.Run(h.verifyConfig(facts))
+	if !postureFlipped(rep) {
+		return rep
+	}
+	if !rep.ForwardingDisabledV4 || !rep.ForwardingDisabledV6 {
+		h.log.Warn(logging.EvForwardingEnabledDetected,
+			logging.Field("source", "runtime_watchdog"),
+			logging.Field("knobs", strings.Join(rep.ForwardingKnobsEnabled, ",")))
+	}
+	if !h.allowApply {
+		// Loud, and honest about what did NOT happen: this build cannot restore
+		// the posture, so somebody has to (guardrail #7).
+		h.log.Error(logging.EvVerificationFailed,
+			logging.Field("source", "runtime_watchdog"),
+			logging.Field("reason", "posture_flipped_reassert_not_permitted"))
+		return rep
+	}
+
+	reasserted := []string{}
+	if err := h.applySysctls(); err != nil {
+		h.log.Error(logging.EvVerificationFailed,
+			logging.Field("source", "runtime_watchdog"),
+			logging.Field("error", err.Error()))
+	} else {
+		reasserted = append(reasserted, "sysctls")
+	}
+	if script != "" && (!rep.FirewallActive || rep.ForwardAccepts > 0) {
+		if err := h.applyRules(script); err != nil {
+			h.log.Error(logging.EvVerificationFailed,
+				logging.Field("source", "runtime_watchdog"),
+				logging.Field("error", err.Error()))
+		} else {
+			reasserted = append(reasserted, "ruleset")
+		}
+	}
+	h.log.Warn(logging.EvFirewallProfileApplied,
+		logging.Field("source", "runtime_watchdog"),
+		logging.Field("profile", string(h.profile())),
+		logging.Field("reasserted", strings.Join(reasserted, ",")))
+
+	// Re-measure: a re-assert that did not take is a worse failure than one that
+	// was never attempted, and must not be reported as a fix.
+	after := verify.Run(h.verifyConfig(facts))
+	if postureFlipped(after) {
+		h.log.Error(logging.EvVerificationFailed,
+			logging.Field("source", "runtime_watchdog"),
+			logging.Field("reason", "reassert_did_not_restore_posture"))
+	} else {
+		h.log.Info(logging.EvVerificationPassed, logging.Field("source", "runtime_watchdog"))
+	}
+	return after
+}
+
+func (h *helper) profile() model.FirewallProfile {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.lastProfile != "" {
+		return h.lastProfile
+	}
+	return h.lastFacts.Profile
+}
+
+// postureFlipped reports whether the kernel-level guarantees this helper exists
+// to hold have moved: forwarding back on, a forward-chain accept, or the
+// default-deny table gone (§3.3, §9.1).
+func postureFlipped(rep verify.Report) bool {
+	return !rep.ForwardingDisabledV4 || !rep.ForwardingDisabledV6 ||
+		rep.ForwardAccepts > 0 || !rep.FirewallActive
 }
 
 // applyRuleset pipes the generated nft script into `nft -f -`.

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/simpledcp/captionbridge/internal/model"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
@@ -55,18 +57,83 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	s := &SQLiteStore{db: db}
-	if err := s.ensureSchemaVersion(); err != nil {
+	if err := s.migrateSchema(); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
-func (s *SQLiteStore) ensureSchemaVersion() error {
+// schemaVersionKey is the schema_meta row §10.8's config_schema_version lives in.
+const schemaVersionKey = "config_schema_version"
+
+// SchemaVersion returns the config schema version recorded in this database.
+func (s *SQLiteStore) SchemaVersion() (int, error) {
+	v, _, err := s.storedSchemaVersion()
+	return v, err
+}
+
+// migrateSchema reconciles the database's recorded schema version with the one
+// this build understands (§10.8 config_schema_version).
+//
+// Stamping the current version unconditionally — what an INSERT … DO NOTHING
+// does — means bumping model.CurrentConfigSchemaVersion silently opens an older
+// database and reads it as if it were new. Three cases, all explicit:
+//
+//   - no row: a fresh database; stamp it.
+//   - older: run the migration steps for the versions in between, then stamp.
+//     There are none yet (v1 is the first schema), so this is a stamp with a
+//     home for the steps to live when a v2 lands.
+//   - newer: a later build wrote this database. Refuse to open it rather than
+//     misinterpret configuration written by a schema we do not know (D17 /
+//     guardrail #7 — an appliance must not degrade silently, least of all into
+//     the wrong firewall posture).
+func (s *SQLiteStore) migrateSchema() error {
+	stored, ok, err := s.storedSchemaVersion()
+	if err != nil {
+		return err
+	}
+	switch {
+	case !ok:
+		return s.stampSchemaVersion(model.CurrentConfigSchemaVersion)
+	case stored > model.CurrentConfigSchemaVersion:
+		return fmt.Errorf(
+			"config database schema version %d is newer than this build understands (%d): refusing to open it (§10.8)",
+			stored, model.CurrentConfigSchemaVersion)
+	case stored < model.CurrentConfigSchemaVersion:
+		// Migration steps for stored+1 … CurrentConfigSchemaVersion go here, each
+		// in its own transaction, before the stamp.
+		return s.stampSchemaVersion(model.CurrentConfigSchemaVersion)
+	default:
+		return nil
+	}
+}
+
+// storedSchemaVersion reads the recorded version. The second result is false when
+// the database has never been stamped (a brand-new file).
+func (s *SQLiteStore) storedSchemaVersion() (int, bool, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM schema_meta WHERE key=?`, schemaVersionKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	v, convErr := strconv.Atoi(strings.TrimSpace(raw))
+	if convErr != nil {
+		// An unreadable version is not "assume it is ours": that is exactly the
+		// silent misinterpretation this function exists to prevent.
+		return 0, false, fmt.Errorf("config database schema version %q is not a number (§10.8)", raw)
+	}
+	return v, true, nil
+}
+
+func (s *SQLiteStore) stampSchemaVersion(v int) error {
 	_, err := s.db.Exec(
-		`INSERT INTO schema_meta(key,value) VALUES('config_schema_version',?)
-         ON CONFLICT(key) DO NOTHING`,
-		fmt.Sprint(model.CurrentConfigSchemaVersion))
+		`INSERT INTO schema_meta(key,value) VALUES(?,?)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+		schemaVersionKey, fmt.Sprint(v))
 	return err
 }
 
@@ -149,10 +216,21 @@ func (s *SQLiteStore) GetSystemConfig() (model.SystemConfigVersion, error) {
 	if err := json.Unmarshal([]byte(data), &v); err != nil {
 		return model.SystemConfigVersion{}, err
 	}
+	if v.ConfigSchemaVersion == 0 {
+		// Records written before the field was maintained: report the schema the
+		// database is actually stamped with rather than a zero (§10.8 exists so a
+		// tech can see the revisions in play).
+		if stored, ok, err := s.storedSchemaVersion(); err == nil && ok {
+			v.ConfigSchemaVersion = stored
+		}
+	}
 	return v, nil
 }
 
 func (s *SQLiteStore) PutSystemConfig(v model.SystemConfigVersion) error {
+	// The schema version is a property of the database, not of the caller's
+	// record: stamp it from the build that is writing (§10.8).
+	v.ConfigSchemaVersion = model.CurrentConfigSchemaVersion
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
