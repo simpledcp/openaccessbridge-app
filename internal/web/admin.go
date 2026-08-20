@@ -48,12 +48,29 @@ func (s *Server) serveAsset(w http.ResponseWriter, name string) {
 	_, _ = w.Write(b)
 }
 
+// adminStatus is the dashboard payload (§8.2): the composite readiness verdict
+// plus the room this appliance serves.
+//
+// The room identity is added HERE rather than in model.SystemReadiness because
+// it is web configuration, not a measurement — but the dashboard header needs it
+// so a tech with two booth laptops open can see which auditorium each page
+// describes (§8.5 wrong-room protection begins with knowing the room).
+type adminStatus struct {
+	model.SystemReadiness
+	Auditorium   string `json:"auditorium,omitempty"`
+	AuditoriumID string `json:"auditorium_id,omitempty"`
+}
+
 func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	var st model.SystemReadiness
 	if s.deps.Status != nil {
 		st = s.deps.Status()
 	}
-	writeJSON(w, st)
+	writeJSON(w, adminStatus{
+		SystemReadiness: st,
+		Auditorium:      s.cfg.Auditorium,
+		AuditoriumID:    s.cfg.AuditoriumID,
+	})
 }
 
 func postOnly(next http.HandlerFunc) http.HandlerFunc {

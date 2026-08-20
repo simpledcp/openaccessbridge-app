@@ -90,7 +90,7 @@ func main() {
 		patronBind: *patronBind, adminBind: *adminBind,
 		media:    newMediaClient(socketPath(*socketDir, ipc.SocketMedia), log),
 		firewall: newFirewallClient(socketPath(*socketDir, ipc.SocketFirewall), log),
-		machine:  machine, hub: hub, captionWarnings: captionWarnings,
+		machine:  machine, hub: hub, ctrl: ctrl, captionWarnings: captionWarnings,
 	}
 	// Install-time verification and the firewall apply happen BEFORE the surfaces
 	// come up, so the dashboard's first answer is a measurement rather than a

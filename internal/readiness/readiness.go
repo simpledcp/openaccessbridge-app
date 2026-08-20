@@ -26,6 +26,28 @@ type Network struct {
 	// IdentityStrength labels how the pinned identity is established (§10.5:
 	// a composite identity must be labelled as such in the UI).
 	IdentityStrength string
+	// IdentityCheck is the OUTCOME of the §8.5 wrong-room guard (acsp.IdentityState
+	// as a string). Empty means the guard has not reported at all, which renders
+	// as "not checked" — never as a pass.
+	IdentityCheck string
+}
+
+// Deploy is the §12 posture in force, as far as the dashboard has to render it.
+// §8.4 permits an admin surface on the patron network ONLY in Lab and Booth
+// Diagnostic and ONLY behind a prominent warning banner, so the banner is a
+// dashboard obligation, not merely a profile attribute.
+type Deploy struct {
+	Profile model.FirewallProfile
+	Title   string
+	// WarningBanner is deploy.Profile.WarningBanner: this posture must not be
+	// operated without a visible banner saying what it is.
+	WarningBanner bool
+	// AdminOnPatronNet is the MEASURED §8.4 fact — the admin surface's bind
+	// address is reachable from the patron network. verify.Report.AdminIsolated
+	// cannot answer this: it reports whether the binding meets the active
+	// profile's requirement, and Lab and Booth Diagnostic have no such
+	// requirement, so it reads "isolated" in precisely the case §8.4 exists for.
+	AdminOnPatronNet model.Tri
 }
 
 // Clients carries §8.2's connected-client counts and the D11 per-profile cap in
@@ -71,6 +93,23 @@ type Inputs struct {
 	// Versions is the persisted §10.8 record, surfaced so a tech can see what
 	// changed since this last worked.
 	Versions model.SystemConfigVersion
+	// Deploy is the §12 posture and its §8.4 banner obligation.
+	Deploy Deploy
+	// Timeline is §8.2's play/pause/stop row, MEASURED from the caption
+	// controller's reference engine — the thing the server's transport state
+	// actually drives — rather than inferred from the handshake state.
+	Timeline model.TimelineState
+	// CueVisible is §8.2's "Current cue: visible / none", taken from the fan-out
+	// hub. VISIBILITY ONLY: the cue text never leaves the hub for a diagnostic
+	// surface, a log or a persisted record (§9.4 caption.cue.visible_no_text).
+	CueVisible model.Tri
+	// Discovery and Support are §8.2's last two rows. Both are Tri so an
+	// un-observed one renders "not measured" rather than a reassuring "Off".
+	Discovery model.Tri
+	Support   model.Tri
+	// DriftBudgetMS is the §5.5 / D9 warn budget the link's drift estimate is
+	// judged against, so the dashboard can show the number against its limit.
+	DriftBudgetMS int64
 }
 
 // Assemble builds the composite readiness from the measured inputs.
@@ -99,6 +138,22 @@ func Assemble(in Inputs) model.SystemReadiness {
 		AllowedServer:    in.Network.AllowedServer,
 		ConnectedServer:  in.Network.ConnectedServer,
 		IdentityStrength: in.Network.IdentityStrength,
+		IdentityCheck:    in.Network.IdentityCheck,
+
+		DeploymentProfile: in.Deploy.Profile,
+		DeploymentTitle:   in.Deploy.Title,
+		DeploymentBanner:  deploymentBanner(in.Deploy),
+		AdminOnPatronNet:  in.Deploy.AdminOnPatronNet,
+
+		ServerConnected:      model.TriOf(in.Link.ServerConnected()),
+		Timeline:             in.Timeline,
+		CueVisible:           in.CueVisible,
+		CaptionDriftBudgetMS: in.DriftBudgetMS,
+
+		AudioStreams:          summarizeAudio(in.Audio),
+		ConnectedAudioClients: audioClients(in.Audio),
+		DiscoveryMode:         in.Discovery,
+		SupportSession:        in.Support,
 
 		Processes:               in.Processes,
 		ConnectedCaptionClients: in.Clients.Caption,
@@ -115,8 +170,112 @@ func Assemble(in Inputs) model.SystemReadiness {
 	warnings = append(warnings, in.HelperWarnings...)
 	warnings = append(warnings, audioWarnings(in.Audio, budgets)...)
 	warnings = append(warnings, processWarnings(in.Processes)...)
+	warnings = append(warnings, supportWarnings(in.Support)...)
 	r.Warnings = warnings
 	return r
+}
+
+// deploymentBanner is §8.4's prominent warning banner. The profiles that carry
+// WarningBanner are exactly the two that are not for public installs; when the
+// admin surface really is reachable from the patron side the banner says THAT,
+// because "admin on the patron network" is the specific condition §8.4 allows
+// only here and only behind a banner. An empty string means no banner is due.
+//
+// The admin-on-patron fact comes from Deploy, not from verify's AdminIsolated:
+// AdminIsolated answers "does this binding meet the active profile's
+// requirement", and these two profiles impose none — so it reads true in exactly
+// the case this branch has to catch.
+func deploymentBanner(d Deploy) string {
+	if !d.WarningBanner {
+		return ""
+	}
+	title := d.Title
+	if title == "" {
+		title = string(d.Profile)
+	}
+	if d.AdminOnPatronNet == model.TriYes {
+		return title + " profile: the admin surface is reachable from the PATRON network. " +
+			"§8.4 permits this only in Lab and Booth Diagnostic — never on a public install."
+	}
+	return title + " profile: diagnostic posture, not a public install. " +
+		"Switch to Patron-Facing or Low-Cost Replacement before serving an audience."
+}
+
+// supportWarnings raises §8.3's last condition — "debug capture / support mode
+// active". §9.4 makes support mode outbound-only, time-limited and audited, and
+// "visibly indicated"; the indication is this warning. Nothing raised it before,
+// so the code existed and the condition did not.
+func supportWarnings(support model.Tri) []model.Warning {
+	if support != model.TriYes {
+		return nil
+	}
+	return []model.Warning{{
+		Code:     model.WarnDebugCaptureActive,
+		Message:  "A support session is open — it is time-limited and audited, but close it before the show",
+		Severity: model.SeverityWarning,
+	}}
+}
+
+// summarizeAudio derives §8.2's per-stream audio rows from what the media
+// process measured (§10.2). Nothing here invents a value: an input the media
+// process never reported produces no row at all, and the dashboard says so.
+func summarizeAudio(audio []model.AudioStreamState) []model.AudioStreamSummary {
+	if len(audio) == 0 {
+		return nil
+	}
+	out := make([]model.AudioStreamSummary, 0, len(audio))
+	for _, a := range audio {
+		s := model.AudioStreamSummary{
+			StreamType:           a.StreamType,
+			InputPresent:         model.TriOf(a.Present),
+			StreamActive:         streamActive(a),
+			Quality:              a.Status,
+			Clients:              a.ConnectedClients,
+			LatencyMeasured:      a.LatencyMeasured,
+			EncodePathEstimateMS: a.LatencyMSEst,
+			EncoderState:         a.EncoderState,
+		}
+		// §8.2's "Estimated audio latency" is a glass-to-ear figure (§6.7 / D10).
+		// Only an END-TO-END measurement may fill it; the encode-path estimate is
+		// reported under its own name and never promoted into this field, which
+		// is precisely the substitution the second fabrication made.
+		if a.LatencyMeasured {
+			s.LatencyMS = a.LatencyMSEst
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// streamActive derives §8.2's "HI stream active / VI stream active".
+//
+// A stream is active only when something is genuinely encoding AND there is a
+// transport to carry it. Neither of the two states this build can reach is that,
+// so today the honest answers are "no" and "not measured" — and an encoder state
+// this build does not recognise is NOT evidence of a live stream (guardrail #7).
+func streamActive(a model.AudioStreamState) model.Tri {
+	switch a.EncoderState {
+	case model.EncoderStateUnavailable:
+		// No encoder ran: nothing can reach a patron however clean the input is.
+		return model.TriNo
+	case model.EncoderStateReadyNoTransport:
+		// A real encode was proven locally, but there is no WebRTC subscriber
+		// transport (BLOCKERS B2/B4), so no patron is receiving this stream.
+		return model.TriNo
+	default:
+		// "unknown" (the encode path has not been exercised) and anything a later
+		// media build introduces: not measured, never a green tick.
+		return model.TriUnknown
+	}
+}
+
+// audioClients totals §8.2's "Connected audio clients" across the streams.
+func audioClients(audio []model.AudioStreamState) int {
+	n := 0
+	for _, a := range audio {
+		n += a.ConnectedClients
+	}
+	return n
 }
 
 // postureWarnings adds the security findings the verification pass reports as

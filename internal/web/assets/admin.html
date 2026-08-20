@@ -7,28 +7,67 @@
   <link rel="stylesheet" href="/static/admin.css">
 </head>
 <body>
-  <h1>CaptionBridge Admin</h1>
+  <!-- §8.4: admin reachable over the patron network exists ONLY in Lab and Booth
+       Diagnostic and ONLY behind a prominent warning banner. The deploy profile
+       carries WarningBanner for exactly this; this element is where it lands. -->
+  <div id="deploy-banner" class="banner deploy" hidden></div>
+
+  <header class="head">
+    <h1>CaptionBridge <span class="room" id="room"></span></h1>
+    <p class="muted" id="profile-line">&nbsp;</p>
+  </header>
+
+  <!-- §8.3: the dashboard must SHOUT, not whisper. -->
   <div id="warning-banner" class="banner" hidden></div>
 
-  <p><a href="/admin/setup">First-boot setup wizard →</a></p>
+  <!-- §10.6: two INDEPENDENT top-line verdicts. Captions and audio are never
+       merged into one health light — a room can have perfect captions and a dead
+       VI feed, or clean HI audio and no captions. -->
+  <section class="verdicts">
+    <div class="bigverdict" id="caption-big">
+      <span class="label">Captions</span>
+      <strong class="value" id="caption-verdict">—</strong>
+      <span class="why muted" id="caption-why"></span>
+    </div>
+    <div class="bigverdict" id="audio-big">
+      <span class="label">Audio</span>
+      <strong class="value" id="audio-verdict">—</strong>
+      <span class="why muted" id="audio-why"></span>
+    </div>
+  </section>
 
-  <!-- Captions and audio readiness are reported SEPARATELY (§2 asymmetry, §8.2):
-       you can have perfect captions and a dead VI feed, or clean HI audio and no
-       captions. -->
+  <!-- The §8.2 rows, grouped the way a booth tech reads them. -->
   <section class="tiles">
-    <div class="tile" id="caption-tile">
-      <h2>Captions <span class="verdict" id="caption-verdict">—</span></h2>
+    <div class="tile">
+      <h2>Caption path</h2>
       <dl id="caption-detail"></dl>
     </div>
-    <div class="tile" id="audio-tile">
-      <h2>Audio <span class="verdict" id="audio-verdict">—</span></h2>
+    <div class="tile">
+      <h2>Cinema server <span class="tag" id="identity-tag"></span></h2>
+      <dl id="server-detail"></dl>
+    </div>
+    <div class="tile">
+      <h2>Audio streams</h2>
       <div id="audio-detail"></div>
     </div>
-    <div class="tile" id="net-tile">
+    <div class="tile">
       <h2>Network &amp; security</h2>
       <dl id="net-detail"></dl>
     </div>
+    <div class="tile">
+      <h2>Processes <span class="muted small">(§3.5)</span></h2>
+      <dl id="process-detail"></dl>
+    </div>
+    <div class="tile">
+      <h2>Appliance <span class="muted small">(§10.8)</span></h2>
+      <dl id="version-detail"></dl>
+    </div>
   </section>
+
+  <footer class="foot">
+    <a href="/admin/setup">First-boot setup wizard →</a>
+    <span class="muted small" id="refreshed">&nbsp;</span>
+  </footer>
 
   <script src="/static/admin.js"></script>
 </body>

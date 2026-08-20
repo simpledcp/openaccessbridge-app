@@ -100,3 +100,51 @@ func (s CaptionLinkState) CaptionReady() bool {
 		return false
 	}
 }
+
+// ServerConnected reports §8.2's "Server connected: yes/no" — whether an ACSP
+// link to the cinema server is up at all.
+//
+// DISCONNECTED and ERROR both answer no: ERROR is a fault the link cannot carry
+// on from, and rendering a faulted link as connected is exactly the silent
+// degradation guardrail #7 forbids.
+func (s CaptionLinkState) ServerConnected() bool {
+	switch s.State {
+	case StateDisconnected, StateError, "":
+		return false
+	default:
+		return true
+	}
+}
+
+// TimelineState is §8.2's "Timeline: playing / paused / stopped" row — the
+// transport state the cinema server last drove the caption path with.
+//
+// It is deliberately NOT derived from ACSPState. ACSPState answers "where is the
+// lease-and-timeline handshake up to", which is a different question: a link can
+// sit in TIMELINE_ACTIVE having been told a position but never a play state. A
+// row that answered "stopped" for "nobody has said" would be inventing a
+// transport state the server never sent (guardrail #7).
+type TimelineState string
+
+const (
+	// TimelineNone: no play state is being driven — the show has not started, the
+	// lease died, or the composition changed and the next anchor has not landed.
+	TimelineNone    TimelineState = "no_timeline"
+	TimelinePlaying TimelineState = "playing"
+	TimelinePaused  TimelineState = "paused"
+	TimelineStopped TimelineState = "stopped"
+)
+
+// Label renders the timeline row for a booth tech.
+func (t TimelineState) Label() string {
+	switch t {
+	case TimelinePlaying:
+		return "playing"
+	case TimelinePaused:
+		return "paused"
+	case TimelineStopped:
+		return "stopped"
+	default:
+		return "no timeline"
+	}
+}

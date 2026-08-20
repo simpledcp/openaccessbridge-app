@@ -217,6 +217,29 @@ func (h *Hub) ClearLanguage(language string) {
 	}
 }
 
+// CueVisible reports §8.2's "Current cue: visible / none" — whether ANY served
+// language currently has a cue on screen, and whether that question can be
+// answered at all (false, false = no language is loaded, so there is nothing to
+// be visible or not).
+//
+// It returns VISIBILITY ONLY and deliberately exposes no way to reach the text:
+// the admin dashboard is a diagnostic surface and §9.4's caption.cue.visible_no_text
+// principle is that a cue's occurrence may be recorded, its words never. Caption
+// text stays inside the hub, bound for authorized patrons alone.
+func (h *Hub) CueVisible() (visible, known bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.kindByLang) == 0 {
+		return false, false
+	}
+	for _, cs := range h.cueByLang {
+		if cs.visible {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 // HasLanguage reports whether the show currently carries a track for a language.
 func (h *Hub) HasLanguage(language string) bool {
 	h.mu.Lock()

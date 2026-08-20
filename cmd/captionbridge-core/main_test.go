@@ -136,7 +136,7 @@ func newSupervisorWithFetcher(t *testing.T, store *config.SQLiteStore, dir strin
 		patronBind: "0.0.0.0:8080", adminBind: "127.0.0.1:8090",
 		media:    newMediaClient(filepath.Join(dir, ipc.SocketMedia), log),
 		firewall: newFirewallClient(filepath.Join(dir, ipc.SocketFirewall), log),
-		machine:  acsp.New(opts), hub: hub, captionWarnings: cw,
+		machine:  acsp.New(opts), hub: hub, ctrl: ctrl, captionWarnings: cw,
 	}, fetcher
 }
 

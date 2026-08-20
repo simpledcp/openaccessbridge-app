@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/simpledcp/captionbridge/internal/caption"
 	"github.com/simpledcp/captionbridge/internal/caption/acsp"
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
 	"github.com/simpledcp/captionbridge/internal/config"
@@ -46,13 +47,21 @@ type supervisor struct {
 	firewall *firewallClient
 	machine  *acsp.Machine
 	hub      *fanout.Hub
+	// ctrl is the caption controller. The dashboard reads §8.2's timeline row
+	// from it: the reference timing engine is what the server's transport state
+	// actually drives, so it is a measurement rather than an inference.
+	ctrl *caption.Controller
 
 	captionWarnings *readiness.CaptionWarnings
 
 	mu sync.Mutex
 	// network and versions are refreshed by reconcile and read by status, which
 	// runs on the web goroutine.
-	network      readiness.Network
+	network readiness.Network
+	// support is §8.2's "Support session" row, read from the config store by
+	// reconcile. status must not touch the store (an admin page load cannot be
+	// allowed to stall on it), so it reads this cache.
+	support      model.Tri
 	versions     model.SystemConfigVersion
 	lastRecordAt time.Time
 	lastRecordOK bool
@@ -140,6 +149,11 @@ func (s *supervisor) reconcile(ctx context.Context) {
 		AllowedServer:    aud.CinemaServerIP,
 		IdentityStrength: aud.IdentityStrength,
 	}
+	// §8.2 "Support session". §9.4 has it off by default and nothing in this
+	// build can open one, so an absent setting is a genuine "no" rather than an
+	// unmeasured fact — the appliance owns this switch and can read it.
+	support, _, _ := s.store.GetSetting(config.SettingSupportMode)
+	s.support = model.TriOf(support == "true")
 	s.mu.Unlock()
 
 	if !reconfigured {
@@ -168,9 +182,15 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 	s.mu.Lock()
 	net := s.network
 	versions := s.versions
+	support := s.support
 	s.mu.Unlock()
 	net.ConnectedServer = link.Server
+	// §8.5: the OUTCOME of the wrong-room guard, not just the strength of the pin.
+	// "Nothing pinned" and "pinned but the server answered nothing" must not
+	// render like a match (§10.5).
+	net.IdentityCheck = string(s.machine.Identity())
 
+	cueVisible, cueKnown := s.hub.CueVisible()
 	return readiness.Assemble(readiness.Inputs{
 		Link:            link,
 		Audio:           s.media.audio(),
@@ -178,6 +198,25 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 		Network:         net,
 		CaptionWarnings: s.captionWarnings.Snapshot(),
 		HelperWarnings:  append(s.media.warnings(), s.firewall.warnings()...),
+		Deploy: readiness.Deploy{
+			Profile: s.deployed.Name, Title: s.deployed.Title,
+			WarningBanner: s.deployed.WarningBanner,
+			// §8.4's actual condition, measured from the two bind addresses this
+			// process is serving on. verify.Report.AdminIsolated cannot stand in
+			// for it: it answers "does this meet the profile's requirement", and
+			// Lab and Booth Diagnostic impose none.
+			AdminOnPatronNet: model.TriOf(web.AdminReachableFromPatron(s.patronBind, s.adminBind)),
+		},
+		Timeline:      s.ctrl.Timeline(),
+		CueVisible:    triIfKnown(cueVisible, cueKnown),
+		DriftBudgetMS: s.ctrl.WarnBudgetMS(),
+		// §8.2 "Discovery mode". This build runs no discovery/advertisement
+		// responder in any of the three processes — grep for mDNS/SSDP and there
+		// is none — so "off" is a fact about the code, not an assumption about
+		// the network. Any host-level responder (avahi and friends) is outside
+		// the appliance and outside what this row claims.
+		Discovery: model.TriNo,
+		Support:   support,
 		Processes: []model.ProcessLiveness{
 			// Core reports itself alive by construction: it is the reporter, and
 			// a process that could answer this request is running (§3.5).
@@ -188,6 +227,15 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 		Clients:  readiness.Clients{Caption: s.hub.ClientCount(), Max: s.hub.MaxClients()},
 		Versions: versions,
 	})
+}
+
+// triIfKnown keeps an unanswerable question unanswered. A "no" that really means
+// "nothing could tell" is the fabrication this whole surface exists to avoid.
+func triIfKnown(v, known bool) model.Tri {
+	if !known {
+		return model.TriUnknown
+	}
+	return model.TriOf(v)
 }
 
 // recordAudioQualification writes the §10.5 last_qualification back to the

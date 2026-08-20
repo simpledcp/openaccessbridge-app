@@ -258,6 +258,32 @@ func (c *Controller) Languages() []string {
 	return out
 }
 
+// Timeline reports §8.2's "Timeline: playing / paused / stopped" row.
+//
+// It reads the REFERENCE engine, which is the one thing that tracks the server
+// timeline whether or not any language is loaded, and which the ACSP layer
+// drives through Play/Pause/Stop/Resume. That makes this a measurement of the
+// transport state the caption path is actually running on, not an inference from
+// the handshake state: a link can hold a lease and a position while the server
+// has never said whether it is rolling.
+//
+// "idle" and "lease_expired" both report no timeline. Neither is a transport
+// state the server sent, and a lease-expired link is no longer being told one at
+// all, so echoing the last value would be reporting a stale fact as current
+// (guardrail #7).
+func (c *Controller) Timeline() model.TimelineState {
+	switch c.ref.Status().State {
+	case "playing":
+		return model.TimelinePlaying
+	case "paused":
+		return model.TimelinePaused
+	case "stopped":
+		return model.TimelineStopped
+	default:
+		return model.TimelineNone
+	}
+}
+
 // MaxDriftMS returns the largest absolute drift across language engines (§5.5).
 func (c *Controller) MaxDriftMS() int64 {
 	var max int64
