@@ -233,9 +233,19 @@ func TestAdminRule_CustomPort(t *testing.T) {
 	}
 }
 
+// TestSysctlSettings_DisablesForwarding: the global knobs are not enough. IPv6
+// forwarding is per-device (conf.<iface>.forwarding forwards on that device while
+// conf.all reads 0) and a NIC appearing after boot inherits conf.default, so the
+// `all` and `default` knobs of BOTH families must be written too (§9.1, §9.3).
 func TestSysctlSettings_DisablesForwarding(t *testing.T) {
 	s := SysctlSettings()
-	for _, k := range []string{"net.ipv4.ip_forward", "net.ipv6.conf.all.forwarding"} {
+	for _, k := range []string{
+		"net.ipv4.ip_forward",
+		"net.ipv4.conf.all.forwarding",
+		"net.ipv4.conf.default.forwarding",
+		"net.ipv6.conf.all.forwarding",
+		"net.ipv6.conf.default.forwarding",
+	} {
 		v, ok := s[k]
 		if !ok {
 			t.Fatalf("SysctlSettings missing key %q", k)
@@ -243,6 +253,10 @@ func TestSysctlSettings_DisablesForwarding(t *testing.T) {
 		if v != "0" {
 			t.Fatalf("SysctlSettings[%q] = %q, want \"0\"", k, v)
 		}
+	}
+	// Nothing else may be in here: this map is written by a root helper.
+	if len(s) != 5 {
+		t.Fatalf("SysctlSettings has %d keys, want exactly the 5 forwarding knobs: %v", len(s), s)
 	}
 }
 

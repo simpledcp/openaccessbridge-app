@@ -162,10 +162,33 @@ func TestRun(t *testing.T) {
 			wantPass: false, wantCodes: []string{model.WarnDefaultPassword},
 		},
 		{
-			name: "ssh_enabled_is_noncritical", v4: "0", v6: "0",
+			// §9.2: Lab is the one profile where "local SSH ok", so SSH-on there is
+			// CORRECT and must not raise a dashboard warning at all.
+			name: "ssh_enabled_ok_in_lab", v4: "0", v6: "0",
 			profile: model.ProfileLab, firewall: true, ssh: true,
 			wantDisV4: true, wantDisV6: true, wantAdminIso: true,
+			wantPass: true, wantCodes: nil,
+		},
+		{
+			// §9.2: Booth Diagnostic disables SSH "by default" — loud, not blocking.
+			name: "ssh_enabled_warns_in_booth_diagnostic", v4: "0", v6: "0",
+			profile: model.ProfileBoothDiagnostic, firewall: true, ssh: true,
+			wantDisV4: true, wantDisV6: true, wantAdminIso: true,
 			wantPass: true, wantCodes: []string{model.WarnSSHEnabled},
+		},
+		{
+			// §9.2/§9.3: the locked profiles require SSH disabled, and a failure
+			// there is grounds to refuse to leave setup — so it must be CRITICAL.
+			name: "ssh_enabled_blocks_patron_facing", v4: "0", v6: "0",
+			profile: model.ProfilePatronFacing, firewall: true, ssh: true,
+			wantDisV4: true, wantDisV6: true, wantAdminIso: true,
+			wantPass: false, wantCodes: []string{model.WarnSSHEnabled},
+		},
+		{
+			name: "ssh_enabled_blocks_low_cost_replacement", v4: "0", v6: "0",
+			profile: model.ProfileLowCostReplacement, firewall: true, ssh: true,
+			wantDisV4: true, wantDisV6: true, wantAdminIso: true,
+			wantPass: false, wantCodes: []string{model.WarnSSHEnabled},
 		},
 		{
 			name: "everything_wrong", v4: "1", v6: "1", bridge: true,
@@ -213,8 +236,11 @@ func TestRun(t *testing.T) {
 			if rep.NoDefaultCreds != !tc.defCreds {
 				t.Errorf("NoDefaultCreds = %v, want %v", rep.NoDefaultCreds, !tc.defCreds)
 			}
-			if rep.SSHCorrect != !tc.ssh {
-				t.Errorf("SSHCorrect = %v, want %v", rep.SSHCorrect, !tc.ssh)
+			// SSH is correct exactly when the case expects no SSH warning: the
+			// assertion is profile-scoped, not "SSH on is always wrong" (§9.2).
+			wantSSHCorrect := !contains(tc.wantCodes, model.WarnSSHEnabled)
+			if rep.SSHCorrect != wantSSHCorrect {
+				t.Errorf("SSHCorrect = %v, want %v", rep.SSHCorrect, wantSSHCorrect)
 			}
 			if rep.Pass != tc.wantPass {
 				t.Errorf("Pass = %v, want %v", rep.Pass, tc.wantPass)
@@ -226,8 +252,9 @@ func TestRun(t *testing.T) {
 	}
 }
 
-// TestSeverities pins the severity of each warning code: every isolation/forwarding/
-// firewall/admin/creds failure is critical, SSH is a non-critical warning.
+// TestSeverities pins the severity of each warning code in a LOCKED profile:
+// every isolation/forwarding/firewall/admin/creds failure is critical, and so is
+// SSH-enabled there (§9.3 lets a locked profile refuse to leave setup over it).
 func TestSeverities(t *testing.T) {
 	cfg := Config{
 		Paths:                    fixture(t, "1", "1", true),
@@ -245,7 +272,7 @@ func TestSeverities(t *testing.T) {
 		model.WarnFirewallInactive:  model.SeverityCritical,
 		model.WarnAdminOnPatronNet:  model.SeverityCritical,
 		model.WarnDefaultPassword:   model.SeverityCritical,
-		model.WarnSSHEnabled:        model.SeverityWarning,
+		model.WarnSSHEnabled:        model.SeverityCritical,
 	}
 	for _, w := range rep.Warnings {
 		exp, ok := want[w.Code]
@@ -332,8 +359,10 @@ func contains(xs []string, want string) bool {
 	return false
 }
 
-// TestBridgesMissingSysDir ensures a missing /sys/class/net does not report a
-// bridge (no false positive when introspection is unavailable).
+// TestBridgesMissingSysDir: an unreadable /sys/class/net means the bridge scan
+// COULD NOT BE PERFORMED. Reporting "no bridges present" because we could not
+// look would fail open on guardrail #2, so it must surface as a loud critical
+// warning instead (same fail-loud stance as a missing ip_forward, D17).
 func TestBridgesMissingSysDir(t *testing.T) {
 	root := t.TempDir()
 	proc := filepath.Join(root, "proc", "sys", "net")
@@ -345,20 +374,36 @@ func TestBridgesMissingSysDir(t *testing.T) {
 
 	rep := Run(Config{Paths: p, Profile: model.ProfileLab, FirewallActive: true})
 	if rep.BridgesPresent {
-		t.Error("BridgesPresent should be false when /sys/class/net is absent")
+		t.Error("BridgesPresent should not claim a bridge when the scan could not run")
 	}
-	if !rep.Pass {
-		t.Error("clean config with missing sys dir should still pass")
+	if rep.BridgesConfirmed {
+		t.Error("BridgesConfirmed must be false when /sys/class/net is unreadable")
+	}
+	if rep.Pass {
+		t.Error("an unconfirmable bridge scan must fail the pass, not pass silently")
+	}
+	if !contains(codes(rep.Warnings), model.WarnInterfacesBridged) {
+		t.Errorf("expected a bridge warning, got %v", codes(rep.Warnings))
 	}
 }
 
 func TestDefaultPaths(t *testing.T) {
 	p := DefaultPaths()
-	if p.ProcSysNet != "/proc/sys/net" {
-		t.Errorf("ProcSysNet = %q, want /proc/sys/net", p.ProcSysNet)
+	for _, tc := range []struct{ got, want string }{
+		{p.ProcSysNet, "/proc/sys/net"},
+		{p.SysClassNet, "/sys/class/net"},
+		{p.ProcNet, "/proc/net"},
+		{p.ResolvConf, "/etc/resolv.conf"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("path = %q, want %q", tc.got, tc.want)
+		}
 	}
-	if p.SysClassNet != "/sys/class/net" {
-		t.Errorf("SysClassNet = %q, want /sys/class/net", p.SysClassNet)
+	// A partially-specified Paths must fill the rest from the defaults rather
+	// than building relative paths against the test's working directory.
+	filled := Paths{ProcSysNet: "/x"}.withDefaults()
+	if filled.ProcSysNet != "/x" || filled.ProcNet != "/proc/net" || filled.ResolvConf != "/etc/resolv.conf" {
+		t.Errorf("withDefaults() = %+v", filled)
 	}
 }
 

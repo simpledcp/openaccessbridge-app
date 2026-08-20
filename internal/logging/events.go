@@ -48,6 +48,14 @@ const (
 	EvVerificationPassed        Event = "security.verification_passed"
 	EvServerIdentityMismatch    Event = "security.server_identity_mismatch"
 
+	// Debug capture (§9.4). The audit trail for the one sanctioned way content
+	// may be written down: who granted it (hashed), its bounds, and its end.
+	// Emitted by internal/logging/debugcapture; the content itself never passes
+	// through the logger.
+	EvDebugCaptureStarted Event = "security.debug_capture.started"
+	EvDebugCaptureStopped Event = "security.debug_capture.stopped"
+	EvDebugCaptureCapped  Event = "security.debug_capture.limit_reached"
+
 	// Process supervision.
 	EvProcessStarted   Event = "process.started"
 	EvProcessRestarted Event = "process.restarted"
