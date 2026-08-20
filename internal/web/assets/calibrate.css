@@ -1,0 +1,51 @@
+/* CaptionBridge audio calibration wizard (§6.4). Layered on admin.css. */
+
+h3 { font-size: 0.95rem; margin: 0.8rem 0 0.2rem; }
+
+/* PROVENANCE. The banner that says what actually produced the numbers below it.
+   Synthetic is styled as a warning, not as a neutral note: a figure measured
+   from a stand-in must never be mistakable for a measurement of the booth. */
+.provenance { border-radius: 8px; padding: 0.7rem 1rem; margin: 0 0 1rem; font-weight: 700; }
+.provenance.synthetic { background: #ffb300; color: #222; }
+.provenance.hardware { background: #e6f4ea; color: #137333; border: 1px solid #137333; }
+.provenance.none { background: #eceff1; color: #37474f; border: 1px solid #b0bec5; }
+.provenance .sub { display: block; font-weight: 400; margin-top: 0.3rem; }
+
+/* The same fact, repeated next to every individual figure. */
+.chip { font-size: 0.75rem; padding: 0.1em 0.5em; border-radius: 999px; vertical-align: middle; }
+.chip.synthetic { background: #ffb300; color: #222; }
+.chip.hardware { background: #e6f4ea; color: #137333; }
+.chip.none { background: #eceff1; color: #37474f; }
+
+.loud { background: #b00020; color: #fff; padding: 0.6rem 1rem; border-radius: 8px; font-weight: 700; }
+
+.verdict.warn { background: #fff3cd; color: #7a5300; }
+.verdict.none { background: #eceff1; color: #37474f; }
+
+/* Per-stream meter (§6.4 step 5: the qualifier's real-time output). */
+.meter { border-top: 1px solid #eee; padding: 0.6rem 0; }
+.meter:first-child { border-top: none; }
+.meter .name { font-weight: 700; }
+.meter .bar {
+  position: relative; height: 1.1rem; background: #eceff1; border-radius: 4px;
+  margin: 0.35rem 0 0.2rem; overflow: hidden;
+}
+.meter .bar .level { height: 100%; width: 0; background: #1558d6; }
+.meter .bar .level.hot { background: #b00020; }
+.meter .bar .level.low { background: #ffb300; }
+.meter .bar .floor {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: #37474f;
+}
+.meter .figures { font-size: 0.85rem; color: #444; }
+.meter .flags { font-size: 0.85rem; font-weight: 700; color: #b00020; }
+.meter .reasons { font-size: 0.85rem; color: #555; margin: 0.2rem 0 0; }
+
+.rec { border-left: 4px solid #b0bec5; padding: 0.4rem 0.7rem; margin: 0.5rem 0; background: #fff; }
+.rec.blocking { border-left-color: #b00020; }
+.rec.important { border-left-color: #ffb300; }
+.rec.advisory { border-left-color: #1558d6; }
+.rec .action { font-weight: 700; }
+.rec .why { font-size: 0.85rem; color: #555; }
+
+#summary { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; }
+#save-note { font-weight: 700; }

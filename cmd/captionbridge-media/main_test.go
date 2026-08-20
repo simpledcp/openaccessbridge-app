@@ -15,9 +15,7 @@ import (
 func newManager(t *testing.T, synthetic bool) *manager {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &manager{
-		log: logging.Nop(), backend: encode.Select(), synthetic: synthetic, parent: ctx,
-	}
+	m := newManagerFor(ctx, logging.Nop(), encode.Select(), "", synthetic)
 	t.Cleanup(func() {
 		m.stopAll()
 		cancel()

@@ -62,6 +62,16 @@ type Deps struct {
 	// Signaler relays WebRTC SDP/ICE to captionbridge-media (§6.7). Nil in the
 	// shipped binary — see the SEAM note on AudioSignaler (BLOCKERS B4/B2).
 	Signaler AudioSignaler
+	// Calibration drives the §6.4 audio calibration wizard: the device list and
+	// the live input meter both come from captionbridge-media, which owns every
+	// capture device. Nil builds the loopback driver for MediaSocketDir, so the
+	// wizard works on a default deployment with no wiring; injecting one is how
+	// tests (and any non-default transport) substitute for it.
+	Calibration CalibrationDriver
+	// MediaSocketDir is the loopback socket directory captionbridge-media listens
+	// in (§3.5). Empty uses ipc.DefaultSocketDir(); the core process should pass
+	// the --socket-dir it actually supervises so the two cannot drift apart.
+	MediaSocketDir string
 	// SetupWindow is how long first-boot setup mode stays open before auto-expiry
 	// (§8.1 step 14). Zero uses a default.
 	SetupWindow time.Duration
@@ -95,6 +105,13 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 		// displayed room name is better than an empty binding, which would make
 		// every code valid in every room.
 		cfg.AuditoriumID = slugAuditorium(cfg.Auditorium)
+	}
+	if deps.Calibration == nil {
+		// §6.4's wizard needs the process that owns the audio devices. Building
+		// the loopback driver here (it dials lazily, per request) means a default
+		// deployment needs no extra wiring; a caller that supervises a media
+		// helper on a non-default socket dir passes MediaSocketDir.
+		deps.Calibration = NewMediaCalibrationDriver(defaultMediaSocket(deps.MediaSocketDir))
 	}
 	if err := validateBindSeparation(cfg); err != nil {
 		return nil, err
@@ -133,7 +150,7 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	if cfg.AdminBind != "" {
 		s.admin = &http.Server{
 			Addr:              cfg.AdminBind,
-			Handler:           s.adminSurface(),
+			Handler:           s.calibrationSurface(),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 	}
@@ -269,4 +286,4 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) PatronHandler() http.Handler { return s.patronMux() }
 
 // AdminHandler exposes the admin surface (used by tests via httptest).
-func (s *Server) AdminHandler() http.Handler { return s.adminSurface() }
+func (s *Server) AdminHandler() http.Handler { return s.calibrationSurface() }

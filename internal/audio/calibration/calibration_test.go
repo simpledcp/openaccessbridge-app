@@ -241,9 +241,9 @@ func TestModesForNeverOffersAnImpossibleMapping(t *testing.T) {
 	mono := usbDevice(1)
 	for _, use := range []Use{UseHI, UseVIN, UseDual} {
 		for _, m := range ModesFor(mono, use) {
-			if requiredChannels(m) > 1 {
+			if RequiredChannels(m) > 1 {
 				t.Errorf("use %q on a mono device offered %q, which needs %d channels",
-					use, m, requiredChannels(m))
+					use, m, RequiredChannels(m))
 			}
 			if ModeLabel(m) == string(m) && m != mapper.MultiDevice {
 				t.Errorf("mode %q has no human label for the admin selector", m)
