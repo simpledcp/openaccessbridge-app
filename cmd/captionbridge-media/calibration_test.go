@@ -273,3 +273,41 @@ func TestDeviceListOffersNoStandInWithoutASource(t *testing.T) {
 		t.Errorf("stand-in id = %q, want none when no source exists", id)
 	}
 }
+
+// §6.5's "Device A = HI, Device B = VI-N" is TWO physical inputs, and the wizard
+// opens the one the installer selected. Left alone, mapper.PlanFor returns both
+// named streams for that mode (correctly — the pairing is configured elsewhere),
+// so the run would build two lanes out of ONE device and report HI and VI-N as
+// measured while the second device was never opened. A tech reads two green
+// lanes as "both feeds are qualified". Refuse instead, and say how to calibrate
+// the pair.
+func TestMultiDeviceMappingIsNotMeasuredFromASingleInput(t *testing.T) {
+	m := newManager(t, true)
+	rep := m.cal.measure(calibration.Request{
+		DeviceID: syntheticStandInID, Mode: mapper.MultiDevice,
+		Use: calibration.UseDual, Tier: qualifier.Tier2USBInterface,
+	})
+	if rep.Running {
+		t.Error("a multi-device mapping must not start a run: only one of its two inputs is here")
+	}
+	if len(rep.Streams) != 0 {
+		t.Errorf("a multi-device run measured %d streams from one input; both lanes would be fiction",
+			len(rep.Streams))
+	}
+	if rep.SourceKind != calibration.SourceNone {
+		t.Errorf("source kind = %q, want none: nothing was measured", rep.SourceKind)
+	}
+	if rep.Error == "" {
+		t.Fatal("the refusal must reach the screen (guardrail #7: fail loudly)")
+	}
+	// The refusal has to be ACTIONABLE, not just a denial.
+	for _, want := range []string{"two separate inputs", "one input at a time"} {
+		if !strings.Contains(rep.Error, want) {
+			t.Errorf("refusal %q does not tell the installer what to do instead (missing %q)", rep.Error, want)
+		}
+	}
+	// And it must not have qualified anything on the way past.
+	if rep.Qualified() {
+		t.Error("a refused multi-device run must never qualify an input")
+	}
+}

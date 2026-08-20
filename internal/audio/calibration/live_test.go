@@ -180,3 +180,47 @@ func TestSyntheticProvenanceLabelSaysItMeasuredNoInput(t *testing.T) {
 		t.Errorf("synthetic label = %q; it must say it is not a measurement of an input", got)
 	}
 }
+
+// Settledness is part of the gate, not a separate check a caller may forget.
+// Qualified() previously stopped at "hardware, right device, some streams", and
+// the 1500 ms rule lived only in the web layer's own copy of the decision — two
+// gates, the exported one weaker. A rule this load-bearing gets exactly one home.
+func TestQualifiedRefusesAMeasurementThatHasNotSettled(t *testing.T) {
+	base := Report{
+		SourceKind: SourceHardware, RequestedDeviceID: "usb-X", DeviceID: "usb-X",
+		Streams: []model.AudioStreamState{healthyStream(model.StreamHI, model.ChannelMono)},
+	}
+	for _, tc := range []struct {
+		ms   int
+		want bool
+	}{
+		{0, false},
+		{MinMeasureMS - 1, false},
+		{MinMeasureMS, true},
+		{MinMeasureMS + 5000, true},
+	} {
+		rep := base
+		rep.MeasuredMS = tc.ms
+		if got := rep.Qualified(); got != tc.want {
+			t.Errorf("Qualified() at %d ms = %v, want %v (§6.4 step 9 needs %d ms before a verdict describes the input)",
+				tc.ms, got, tc.want, MinMeasureMS)
+		}
+		if rep.Qualified() != rep.Settled() {
+			t.Errorf("at %d ms Qualified()=%v disagrees with Settled()=%v on an otherwise perfect report",
+				tc.ms, rep.Qualified(), rep.Settled())
+		}
+	}
+}
+
+// A report with no device identity at all must not qualify one. An empty
+// RequestedDeviceID equals an empty DeviceID, so an "ids match" test on its own
+// says yes to a run that named nothing.
+func TestQualifiedRefusesAReportWithNoDeviceIdentity(t *testing.T) {
+	rep := Report{
+		SourceKind: SourceHardware, MeasuredMS: 5000,
+		Streams: []model.AudioStreamState{healthyStream(model.StreamHI, model.ChannelMono)},
+	}
+	if rep.Qualified() {
+		t.Error("a measurement that names no device must never qualify one")
+	}
+}

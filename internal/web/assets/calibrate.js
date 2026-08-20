@@ -228,7 +228,7 @@
       fig.textContent =
         "level " + fmtDb(st.level_dbfs) + " · noise floor " + fmtDb(st.noise_floor_dbfs) +
         " · DC offset " + (st.dc_offset != null ? st.dc_offset.toFixed(3) : "—") +
-        " · " + (st.sample_rate || 0) + " Hz / " + (st.channels || 0) + " ch" +
+        " · " + fmtCount(st.sample_rate, " Hz") + " / " + fmtCount(st.channels, " ch") +
         " · dropouts " + (st.dropouts || 0);
       row.appendChild(fig);
 
@@ -252,15 +252,29 @@
     return v.toFixed(1) + " dBFS";
   }
 
+  /* Sample rate and channel width are 0 when no analysis window has closed yet.
+   * "0 Hz / 0 ch" is a reading nobody took printed as a figure, and 0 channels
+   * is exactly the value §6.1 forbids rendering as if it were a detected shape.
+   * Say "not measured" and let the installer keep the signal playing. */
+  function fmtCount(v, unit) {
+    if (!v) return "not measured";
+    return v + unit;
+  }
+
   /* §6.4 step 6: what was detected, per stream, in the qualifier's own words. */
   function renderDefects(r) {
     var box = el("defects");
     box.textContent = "";
+    // §6.5's caveat about the mapping belongs on the screen whether or not the
+    // mapping was judged impossible: "this device feeds one stream; pair a
+    // second device for the other" is carried on a FEASIBLE mapping, and hiding
+    // it behind !ok meant the one sentence telling an installer they have
+    // calibrated half a pair never rendered at all.
+    if (r.feasibility && r.feasibility.reason) {
+      box.appendChild(muted(r.feasibility.reason));
+    }
     if (!r.measured) {
       box.appendChild(muted(r.error || "Nothing measured yet."));
-      if (r.feasibility && !r.feasibility.ok && r.feasibility.reason) {
-        box.appendChild(muted(r.feasibility.reason));
-      }
       return;
     }
     var any = false;
@@ -309,9 +323,19 @@
       el("summary").textContent = r.error ||
         (r.running ? "Starting the capture — no reading yet." : "Not measured.");
     } else {
-      var ok = r.verdict === "excellent" || r.verdict === "usable";
-      v.className = "verdict " + (ok ? "ok" : (r.verdict === "marginal" ? "warn" : "bad"));
-      v.textContent = r.verdict;
+      // The GREEN pill is the one thing on this page a hurried booth tech reads,
+      // so it is reserved for a verdict measured on the selected hardware. A
+      // synthetic run really did measure something and keeps its verdict text,
+      // but it must not paint the same green tick a qualified input does —
+      // an unverified state that looks identical to a verified one is the whole
+      // defect class this screen exists to close.
+      var ok = (r.verdict === "excellent" || r.verdict === "usable") &&
+        r.source_kind === "hardware";
+      var bad = r.verdict !== "excellent" && r.verdict !== "usable" && r.verdict !== "marginal";
+      v.className = "verdict " + (ok ? "ok" : (bad ? "bad" : "warn"));
+      v.textContent = r.source_kind === "hardware"
+        ? r.verdict
+        : r.verdict + " (of the test source — this input is unqualified)";
       el("summary").textContent = (r.summary_lines || []).join("\n");
     }
     var vp = el("verdict-provenance");

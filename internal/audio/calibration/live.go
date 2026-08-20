@@ -118,15 +118,19 @@ type Report struct {
 //   - the measurement came from hardware, not the synthetic stand-in;
 //   - the device measured is the device the installer selected, so a report from
 //     a previous selection cannot qualify the current one;
-//   - at least one stream was actually measured.
+//   - at least one stream was actually measured;
+//   - it measured for long enough to describe the input rather than the moment
+//     the capture opened (Settled).
 //
 // Anything else leaves the input UNQUALIFIED. A codebase that has already had a
 // synthetic tone persisted under a real device's identity does not get to decide
-// this loosely.
+// this loosely — so this is the ONE gate, and every caller asks it rather than
+// re-deriving the rule. A second copy of a rule this load-bearing is a second
+// place for it to be quietly loosened.
 func (r Report) Qualified() bool {
 	return r.SourceKind == SourceHardware &&
 		r.DeviceID != "" && r.DeviceID == r.RequestedDeviceID &&
-		len(r.Streams) > 0
+		len(r.Streams) > 0 && r.Settled()
 }
 
 // MinMeasureMS is how long a run must have been measuring before its verdict is

@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/simpledcp/captionbridge/internal/audio/calibration"
 	"github.com/simpledcp/captionbridge/internal/audio/capture"
@@ -512,5 +515,250 @@ func TestCalibratePageAndAssetsAreServed(t *testing.T) {
 		if !strings.Contains(buf.String(), tc.want) {
 			t.Errorf("GET %s did not contain %q", tc.path, tc.want)
 		}
+	}
+}
+
+// qualificationOf owns the WORDING; calibration.Report.Qualified() owns the RULE.
+// The previous shape re-derived the rule here, and the two copies had already
+// drifted: the exported gate did not check settledness at all, so the tests that
+// exercised it were green about a bar it was not enforcing. Pin them together
+// across the whole decision surface, including both sides of the 1500 ms edge.
+func TestQualificationWordingNeverDisagreesWithTheGate(t *testing.T) {
+	stream := []model.AudioStreamState{measuredStream(model.StreamHI, model.ChannelMono, testScarlett)}
+	for _, rep := range []calibration.Report{
+		{},
+		{SourceKind: calibration.SourceNone, RequestedDeviceID: testScarlett},
+		{SourceKind: calibration.SourceSynthetic, RequestedDeviceID: testScarlett,
+			DeviceID: testScarlett, Streams: stream, MeasuredMS: 9000},
+		{SourceKind: calibration.SourceHardware, RequestedDeviceID: testScarlett,
+			DeviceID: "by-id:some-other-input", Streams: stream, MeasuredMS: 9000},
+		{SourceKind: calibration.SourceHardware, RequestedDeviceID: testScarlett,
+			DeviceID: testScarlett, MeasuredMS: 9000},
+		{SourceKind: calibration.SourceHardware, RequestedDeviceID: testScarlett,
+			DeviceID: testScarlett, Streams: stream, MeasuredMS: calibration.MinMeasureMS - 1},
+		{SourceKind: calibration.SourceHardware, RequestedDeviceID: testScarlett,
+			DeviceID: testScarlett, Streams: stream, MeasuredMS: calibration.MinMeasureMS},
+		{SourceKind: calibration.SourceHardware, Streams: stream, MeasuredMS: 9000},
+	} {
+		ok, why := qualificationOf(rep)
+		if ok != rep.Qualified() {
+			t.Errorf("qualificationOf=%v but Report.Qualified()=%v for %+v; the screen and the gate must never disagree",
+				ok, rep.Qualified(), rep)
+		}
+		if !ok && why == "" {
+			t.Errorf("a refusal with no reason for %+v: a booth tech has to be told why nothing was recorded", rep)
+		}
+		if ok && why != "" {
+			t.Errorf("a qualifying measurement carried a refusal reason %q", why)
+		}
+	}
+}
+
+// --- what the SCREEN actually renders (§6.4) -------------------------------
+//
+// Every test above proves the API emits an honest field. None of them proves the
+// page renders it honestly, and a script that paints a green tick for an input
+// nobody measured passes all of them. So run the REAL calibrate.js against
+// hand-built frames under a DOM shim and assert on the text a booth tech reads.
+
+type domSnapshot map[string]struct {
+	Text  string `json:"text"`
+	Class string `json:"class"`
+}
+
+func renderFrames(t *testing.T, frames ...CalibrationReport) []domSnapshot {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed; the rendered-page assertions need a JS runtime")
+	}
+	in, err := json.Marshal(frames)
+	if err != nil {
+		t.Fatalf("encode frames: %v", err)
+	}
+	cmd := exec.Command(node, "testdata/calibrate_dom_harness.js", "assets/calibrate.js")
+	cmd.Stdin = bytes.NewReader(in)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("run calibrate.js: %v\n%s", err, stderr.String())
+	}
+	var snaps []domSnapshot
+	if err := json.Unmarshal(out, &snaps); err != nil {
+		t.Fatalf("decode snapshots: %v (%s)", err, out)
+	}
+	return snaps
+}
+
+// THE GREEN TICK. A synthetic run measures a real tone and gets a real verdict,
+// so "excellent" is not a lie — but painting it in the same green pill a
+// qualified input gets makes an unverified state look identical to a verified
+// one, which is the defect class this whole screen exists to close.
+func TestScreenNeverPaintsASyntheticVerdictAsAQualifiedOne(t *testing.T) {
+	stream := measuredStream(model.StreamHI, model.ChannelMono, "synthetic-tone")
+	synthetic := CalibrationReport{
+		Running: true, Measured: true, SourceKind: string(calibration.SourceSynthetic),
+		Verdict: model.QualExcellent, MeasuredMS: 4000, Settled: true,
+		Streams: []model.AudioStreamState{stream}, SummaryLines: []string{"Verdict: Excellent"},
+		QualifiedDetail: "these figures come from the synthetic test source",
+	}
+	hardware := synthetic
+	hardware.SourceKind = string(calibration.SourceHardware)
+	hardware.Qualified = true
+	hardware.QualifiedDetail = ""
+
+	snaps := renderFrames(t, synthetic, hardware)
+
+	syn, hw := snaps[0]["verdict"], snaps[1]["verdict"]
+	if strings.Contains(syn.Class, "ok") {
+		t.Errorf("the synthetic verdict rendered class %q; the green pill is reserved for a hardware measurement", syn.Class)
+	}
+	if !strings.Contains(hw.Class, "ok") {
+		t.Errorf("a qualified hardware verdict rendered class %q, want the green pill", hw.Class)
+	}
+	if syn.Class == hw.Class && syn.Text == hw.Text {
+		t.Error("a synthetic verdict and a hardware verdict rendered identically — the distinction is the point")
+	}
+	if !strings.Contains(syn.Text, "unqualified") {
+		t.Errorf("the synthetic verdict reads %q; it must say the input is unqualified", syn.Text)
+	}
+	// And the provenance must be loud on the synthetic frame, not a footnote.
+	if !strings.Contains(snaps[0]["provenance"].Text, "SYNTHETIC") {
+		t.Errorf("provenance banner = %q, want the synthetic warning", snaps[0]["provenance"].Text)
+	}
+}
+
+// A figure nobody measured must render as "not measured", never as 0. Zero
+// channels in particular is the value §6.1 forbids presenting as a detected
+// shape, and "0 Hz" is a sample rate nobody read printed as a reading.
+func TestScreenRendersAnUnmeasuredFigureAsNotMeasured(t *testing.T) {
+	st := measuredStream(model.StreamHI, model.ChannelMono, "synthetic-tone")
+	st.SampleRate, st.Channels = 0, 0
+	st.NoiseFloorDBFS = -120 // the qualifier's floor sentinel
+	snaps := renderFrames(t, CalibrationReport{
+		Running: true, Measured: true, SourceKind: string(calibration.SourceSynthetic),
+		Verdict: model.QualUsable, MeasuredMS: 2000, Settled: true,
+		Streams: []model.AudioStreamState{st},
+	})
+	meters := snaps[0]["meters"].Text
+	for _, bad := range []string{"0 Hz", "0 ch"} {
+		if strings.Contains(meters, bad) {
+			t.Errorf("the meter printed %q as a reading: %q", bad, meters)
+		}
+	}
+	if !strings.Contains(meters, "not measured") {
+		t.Errorf("an unread sample rate/channel count must say so: %q", meters)
+	}
+	if !strings.Contains(meters, "not measurable") {
+		t.Errorf("the -120 dBFS floor sentinel must not render as a number: %q", meters)
+	}
+}
+
+// §6.5 attaches a caveat to a mapping that is FEASIBLE but incomplete — "this
+// device feeds one stream; pair a second device for the other". It was only ever
+// rendered when the mapping was judged impossible, so the one sentence telling
+// an installer they have calibrated half a pair never reached the screen.
+func TestScreenShowsTheMappingCaveatOnAFeasibleMapping(t *testing.T) {
+	const caveat = "pair a second device for the other"
+	snaps := renderFrames(t, CalibrationReport{
+		Running: true, Measured: true, SourceKind: string(calibration.SourceSynthetic),
+		Verdict: model.QualExcellent, MeasuredMS: 3000, Settled: true,
+		Streams:     []model.AudioStreamState{measuredStream(model.StreamHI, model.ChannelMono, "synthetic-tone")},
+		Feasibility: calibration.Feasibility{OK: true, Required: 1, Detected: 2, Reason: "multi-device mapping: this device feeds one stream; " + caveat},
+	})
+	if got := snaps[0]["defects"].Text; !strings.Contains(got, caveat) {
+		t.Errorf("step 6 rendered %q; the mapping caveat must be on the screen even when the mapping is feasible", got)
+	}
+}
+
+// Nothing measured must render as nothing measured: no level, no verdict, no
+// green anything — and the refusal in the server's own words.
+func TestScreenRendersARefusalWithNoFiguresAtAll(t *testing.T) {
+	const refusal = "no capture backend for input device in this build (BLOCKERS B3/B4)"
+	snaps := renderFrames(t, CalibrationReport{
+		SourceKind: string(calibration.SourceNone), Error: refusal,
+		QualifiedDetail: "Nothing has been measured yet, so there is no verdict to record.",
+	})
+	s := snaps[0]
+	if got := s["verdict"].Text; got != "not measured" {
+		t.Errorf("verdict = %q, want \"not measured\"", got)
+	}
+	if strings.Contains(s["verdict"].Class, "ok") {
+		t.Errorf("a run that measured nothing rendered a green verdict: %q", s["verdict"].Class)
+	}
+	if !strings.Contains(s["meters"].Text, refusal) {
+		t.Errorf("the refusal must be on the screen, got %q", s["meters"].Text)
+	}
+	if strings.Contains(s["meters"].Text, "dBFS") {
+		t.Errorf("a refused run rendered a level: %q", s["meters"].Text)
+	}
+	if got := s["meter-error"].Text; got != refusal {
+		t.Errorf("meter error = %q, want the refusal verbatim (guardrail #7: fail loudly)", got)
+	}
+}
+
+// countingDriver records how many times the meter asked for a measurement, safely
+// enough to be read while the handler goroutine is still writing.
+type countingDriver struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *countingDriver) Devices() (calibration.DeviceList, error) {
+	return calibration.DeviceList{Devices: []capture.Device{{ID: testScarlett, Channels: 2}}}, nil
+}
+
+func (d *countingDriver) Measure(req calibration.Request) (calibration.Report, error) {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
+	return calibration.Report{
+		Running: true, SourceKind: calibration.SourceSynthetic,
+		RequestedDeviceID: req.DeviceID, DeviceID: req.DeviceID, Mode: req.Mode,
+		MeasuredMS: 2000,
+		Streams:    []model.AudioStreamState{measuredStream(model.StreamHI, model.ChannelMono, req.DeviceID)},
+	}, nil
+}
+
+func (d *countingDriver) Stop() (calibration.Report, error) { return calibration.Report{}, nil }
+
+func (d *countingDriver) count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+// An SSE handler is long-lived, and this one deliberately does NOT tear down the
+// media-side run when the browser goes away (EventSource reconnects on its own).
+// That makes it exactly the shape that leaks a goroutine per reload if the loop
+// misses the disconnect. It must stop polling when the client is gone.
+func TestMeterStreamStopsPollingWhenTheBrowserDisconnects(t *testing.T) {
+	drv := &countingDriver{}
+	s, _ := newCalibrationServer(t, drv)
+	ts := httptest.NewServer(s.AdminHandler())
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+
+		"/api/admin/calibration/meter?device_id="+testScarlett+
+		"&channel_mapping=mono%3AHI&use=HI&input_tier=tier2_usb_interface", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET meter: %v", err)
+	}
+	if _, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil {
+		t.Fatalf("read first frame: %v", err)
+	}
+
+	// The browser goes away mid-stream.
+	cancel()
+	resp.Body.Close()
+	time.Sleep(3 * meterInterval)
+	settled := drv.count()
+	time.Sleep(4 * meterInterval)
+	if grew := drv.count() - settled; grew != 0 {
+		t.Errorf("the meter kept measuring %d more times after the client disconnected; "+
+			"every reload would leave a goroutine polling captionbridge-media forever", grew)
 	}
 }

@@ -390,11 +390,16 @@ func (s *Server) measureOnce(req calibration.Request, sess calibration.Session) 
 	return out
 }
 
-// qualificationOf is the single decision about whether a measurement may become
-// a device's §10.5 last_qualification, and the plain-language reason when it may
-// not. This codebase has already had a synthetic tone persisted under a real
-// device's identity once; it does not get a second one.
+// qualificationOf answers whether a measurement may become a device's §10.5
+// last_qualification, and gives the plain-language reason when it may not. The
+// DECISION is calibration.Report.Qualified() and only that: this function owns
+// the wording, never the rule. Deriving the rule a second time here is how the
+// two drift apart and the weaker one wins — which is how a synthetic tone was
+// persisted under a real device's identity once already.
 func qualificationOf(rep calibration.Report) (bool, string) {
+	if rep.Qualified() {
+		return true, ""
+	}
 	switch {
 	case rep.SourceKind == calibration.SourceSynthetic:
 		return false, "These figures come from the synthetic test source, not from an audio input. " +
@@ -407,7 +412,10 @@ func qualificationOf(rep calibration.Report) (bool, string) {
 		return false, fmt.Sprintf("Keep the test signal playing: a verdict needs at least %d ms of audio "+
 			"before it describes the input rather than the moment the capture opened.", calibration.MinMeasureMS)
 	default:
-		return true, ""
+		// Qualified() refused for a reason this wording does not cover yet. Say
+		// so plainly rather than inventing a reassurance: an unexplained refusal
+		// is still a refusal, and it must not read as a pass.
+		return false, "This measurement does not meet the bar for recording a verdict against this input."
 	}
 }
 

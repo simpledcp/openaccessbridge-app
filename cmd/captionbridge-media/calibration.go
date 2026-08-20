@@ -159,6 +159,20 @@ func (c *calibrator) measure(req calibration.Request) calibration.Report {
 		return c.refuseLocked("channel mapping not recognized (§6.5): " + string(req.Mode))
 	}
 
+	// §6.5's "Device A = HI, Device B = VI-N" is TWO physical inputs, and this
+	// wizard opens the ONE input the installer selected. mapper.PlanFor is right
+	// to return both named streams for the mode — the pairing is configured
+	// elsewhere — but running that plan here would build two lanes out of one
+	// device and report HI and VI-N as measured when the second device was never
+	// opened. A booth tech reads that as "both feeds are qualified", which is the
+	// same shape of untrue as a tone reported under a device's name. Refuse, and
+	// say how to calibrate the pair instead (§6.4 step 2 splits it cleanly).
+	if mode == mapper.MultiDevice {
+		return c.refuseLocked("the multi-device mapping serves HI and VI-N from two separate inputs, " +
+			"and this wizard measures one input at a time: calibrate each device on its own by selecting " +
+			"\"Hearing assistance (HI) only\" for one and \"Audio description (VI-N) only\" for the other")
+	}
+
 	// --- The two ways a request can name something this build cannot open. Both
 	// are refused with a reason rather than approximated, and the refusal is the
 	// same one manager.configure gives, for the same reason (§10.5). ---
