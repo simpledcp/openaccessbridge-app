@@ -22,3 +22,6 @@ coverage.html
 # Go toolchain caches (should never appear in-repo, but guard anyway)
 /go/
 /go-sdk/
+
+# Agent worktrees / local session state (never part of the product)
+/.claude/

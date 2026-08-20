@@ -203,6 +203,54 @@ func TestInvariant_ThreeProcessSeparation(t *testing.T) {
 	}
 }
 
+// §3.5: privilege separation is only real if the loopback channel between the
+// privileged helper and the unprivileged core actually WORKS as deployed. The
+// firewall helper runs as root and core as the captionbridge user, so an
+// owner-only socket would be unreachable and the dashboard would report a
+// permanent "Firewall INACTIVE" — a separation that silently disables the
+// security surface it exists to prove.
+func TestInvariant_LoopbackSocketReachableAcrossPrivilege(t *testing.T) {
+	root := repoRoot(t)
+	units := []string{"captionbridge-core.service", "captionbridge-media.service", "captionbridge-firewall.service"}
+
+	// All three share one tmpfs runtime dir, so it must survive any single unit
+	// stopping and be group-traversable.
+	for _, unit := range units {
+		u := readFile(t, filepath.Join(root, "deploy", "systemd", unit))
+		if !strings.Contains(u, "Group=captionbridge") {
+			t.Errorf("%s must run with the shared Group=captionbridge so the loopback sockets are mutually reachable", unit)
+		}
+		if !strings.Contains(u, "RuntimeDirectoryPreserve=yes") {
+			t.Errorf("%s must set RuntimeDirectoryPreserve=yes; otherwise stopping it deletes the runtime dir the other two are using", unit)
+		}
+		if strings.Contains(u, "RuntimeDirectoryMode=0700") {
+			t.Errorf("%s uses RuntimeDirectoryMode=0700, which blocks the shared group from reaching the sockets", unit)
+		}
+	}
+
+	// The firewall helper is the one that runs as root; it must NOT declare a
+	// User= (that would drop the privileges it exists to hold) but must hand its
+	// socket to the shared group.
+	fw := readFile(t, filepath.Join(root, "deploy", "systemd", "captionbridge-firewall.service"))
+	if strings.Contains(fw, "User=") {
+		t.Error("firewall helper must run as root (no User=) — it is the only privileged component")
+	}
+	core := readFile(t, filepath.Join(root, "deploy", "systemd", "captionbridge-core.service"))
+	if !strings.Contains(core, "User=captionbridge") {
+		t.Error("core must run unprivileged (User=captionbridge)")
+	}
+
+	// And the helper must actually widen the socket rather than relying on the
+	// owner-only default, while still attributing its callers.
+	main := readFile(t, filepath.Join(root, "cmd", "captionbridge-firewall", "main.go"))
+	if !strings.Contains(main, "ipc.ListenWithOptions") {
+		t.Error("firewall helper must bind its socket with explicit group ownership (ipc.ListenWithOptions)")
+	}
+	if !strings.Contains(main, "AllowPeer") {
+		t.Error("firewall helper must admit callers by peer credentials, not permissions alone")
+	}
+}
+
 // Guardrail 5: no content persisted — the config schema has no content-bearing
 // object, and the runtime dir is tmpfs in the unit files.
 func TestInvariant_NoContentPersistence(t *testing.T) {

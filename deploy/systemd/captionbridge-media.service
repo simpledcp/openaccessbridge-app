@@ -17,8 +17,11 @@ ExecStart=/usr/local/bin/captionbridge-media --socket-dir=/run/captionbridge
 Restart=on-failure
 RestartSec=2
 
+# 0750 + preserve: the three processes share this tmpfs runtime dir for their
+# loopback sockets, so it must outlive any single unit's stop (§3.5).
 RuntimeDirectory=captionbridge
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 
 # No persistence of audio (guardrail #5): audio is transient; no writable disk.
 NoNewPrivileges=yes

@@ -17,7 +17,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +35,7 @@ import (
 func main() {
 	sockDir := flag.String("socket-dir", ipc.DefaultSocketDir(), "loopback socket directory")
 	allowApply := flag.Bool("allow-apply", false, "actually apply nftables rules + sysctls (requires root); off = dry-run")
+	sockGroup := flag.String("socket-group", "captionbridge", "group allowed to reach this helper's socket (core runs unprivileged; empty = owner only)")
 	flag.Parse()
 
 	log := logging.New(logging.Options{Component: buildinfo.ComponentFirewall, JSON: true})
@@ -43,8 +46,13 @@ func main() {
 
 	h := &helper{log: log, allowApply: *allowApply && os.Geteuid() == 0}
 
+	// This helper runs as root while core runs unprivileged, so an owner-only
+	// socket would be unreachable from core (§3.5). Hand the socket to the shared
+	// group and admit only that group — permissions AND peer credentials, since
+	// the privileged component must be able to attribute every command.
+	opts := socketOptions(*sockGroup, log)
 	sockPath := filepath.Join(*sockDir, ipc.SocketFirewall)
-	srv, err := ipc.Listen(sockPath, h.handle)
+	srv, err := ipc.ListenWithOptions(sockPath, h.handle, opts)
 	if err != nil {
 		log.Error(logging.EvProcessUnhealthy, logging.Field("error", err.Error()))
 		os.Exit(1)
@@ -64,6 +72,36 @@ func main() {
 type helper struct {
 	log        *logging.Logger
 	allowApply bool
+}
+
+// socketOptions resolves the shared socket group. On the appliance the group
+// exists (created by packaging) and core reaches the helper through it. On a dev
+// host it usually does not — degrade to the owner-only posture and say so
+// plainly rather than failing to start or silently widening access.
+func socketOptions(group string, log *logging.Logger) ipc.ListenOptions {
+	if group == "" {
+		return ipc.ListenOptions{}
+	}
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		log.Warn(logging.EvStateTransition,
+			logging.Field("socket_group", group),
+			logging.Field("result", "not_found_owner_only"))
+		return ipc.ListenOptions{}
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil || gid == 0 {
+		log.Warn(logging.EvStateTransition,
+			logging.Field("socket_group", group),
+			logging.Field("result", "unusable_gid_owner_only"))
+		return ipc.ListenOptions{}
+	}
+	return ipc.ListenOptions{
+		GroupGID:  gid,
+		Mode:      0o660,
+		DirMode:   0o750,
+		AllowPeer: ipc.AllowOwnerOrGroup(gid),
+	}
 }
 
 // verifyFacts is the caller-supplied half of a verification pass (§9.3): facts

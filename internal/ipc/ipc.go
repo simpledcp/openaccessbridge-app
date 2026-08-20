@@ -83,32 +83,126 @@ func Encode(w io.Writer, m Message) error {
 // Handler processes an inbound message and may return a response (or nil).
 type Handler func(Message) *Message
 
+// Peer identifies the process on the other end of a loopback connection, as
+// reported by the kernel at connect time (SO_PEERCRED on Linux).
+type Peer struct {
+	UID int
+	GID int
+	PID int
+}
+
+// AllowOwner authorizes only processes running as the same uid as the listener.
+// This is the default policy and matches the historical owner-only socket.
+func AllowOwner() func(Peer) bool {
+	self := os.Getuid()
+	return func(p Peer) bool { return p.UID == self }
+}
+
+// AllowOwnerOrGroup authorizes the listener's own uid, or any process whose
+// PRIMARY gid is gid. This is what lets the unprivileged core talk to the root
+// firewall helper: they run as different users but share the captionbridge
+// group (§3.5). A gid of 0 authorizes nobody by group.
+func AllowOwnerOrGroup(gid int) func(Peer) bool {
+	self := os.Getuid()
+	return func(p Peer) bool { return p.UID == self || (gid != 0 && p.GID == gid) }
+}
+
+// ListenOptions controls socket ownership and who may connect. The zero value is
+// the owner-only posture Listen has always used.
+type ListenOptions struct {
+	// GroupGID, when non-zero, chowns the socket to that group so a peer running
+	// as a different user in that group can connect. Required on the appliance,
+	// where the firewall helper is root and core is not (§3.5).
+	GroupGID int
+	// Mode is the socket's permission bits (default 0600; use 0660 with GroupGID).
+	Mode os.FileMode
+	// DirMode is the socket directory's permission bits (default 0700; use 0750
+	// with GroupGID so the group can traverse it).
+	DirMode os.FileMode
+	// AllowPeer authorizes a connecting process by its kernel-reported identity.
+	// Nil means owner-only. Permissions alone are not the boundary: the
+	// privileged helper must be able to attribute every command it accepts.
+	AllowPeer func(Peer) bool
+}
+
 // Server listens on a Unix domain socket and dispatches frames to a Handler.
 type Server struct {
-	ln      net.Listener
-	handler Handler
-	wg      sync.WaitGroup
-	mu      sync.Mutex
-	closed  bool
+	ln        net.Listener
+	handler   Handler
+	allowPeer func(Peer) bool
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	closed    bool
+	rejected  int
 }
 
 // Listen binds a Unix domain socket at path (removing any stale socket first) and
 // restricts it to the owner (0700 dir / 0600 socket) so only local, same-user
 // processes can connect.
 func Listen(path string, h Handler) (*Server, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	return ListenWithOptions(path, h, ListenOptions{})
+}
+
+// ListenWithOptions is Listen with explicit socket ownership and an admission
+// policy. Use it where the peer runs as a different user (§3.5).
+func ListenWithOptions(path string, h Handler, opts ListenOptions) (*Server, error) {
+	dirMode := opts.DirMode
+	if dirMode == 0 {
+		dirMode = 0o700
+	}
+	mode := opts.Mode
+	if mode == 0 {
+		mode = 0o600
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return nil, fmt.Errorf("mkdir socket dir: %w", err)
 	}
+	// MkdirAll is a no-op on an existing dir, so set the mode explicitly — the
+	// runtime dir may have been created by whichever process started first.
+	if err := os.Chmod(dir, dirMode); err != nil {
+		return nil, fmt.Errorf("chmod socket dir: %w", err)
+	}
+	if opts.GroupGID != 0 {
+		if err := os.Chown(dir, -1, opts.GroupGID); err != nil {
+			return nil, fmt.Errorf("chgrp socket dir: %w", err)
+		}
+	}
+
 	_ = os.Remove(path) // clear a stale socket from a prior crash
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("listen unix %s: %w", path, err)
 	}
-	_ = os.Chmod(path, 0o600)
-	s := &Server{ln: ln, handler: h}
+	// Chown before chmod: widening the mode first would briefly expose the
+	// socket to the wrong group.
+	if opts.GroupGID != 0 {
+		if err := os.Chown(path, -1, opts.GroupGID); err != nil {
+			ln.Close()
+			return nil, fmt.Errorf("chgrp socket: %w", err)
+		}
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("chmod socket: %w", err)
+	}
+
+	allow := opts.AllowPeer
+	if allow == nil {
+		allow = AllowOwner()
+	}
+	s := &Server{ln: ln, handler: h, allowPeer: allow}
 	s.wg.Add(1)
 	go s.serve()
 	return s, nil
+}
+
+// Rejected returns how many connections were refused by the admission policy.
+// Surfaced as a count only — never the peer's identity (§9.4).
+func (s *Server) Rejected() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rejected
 }
 
 func (s *Server) serve() {
@@ -134,6 +228,9 @@ func (s *Server) serve() {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
+	if !s.admit(conn) {
+		return
+	}
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
@@ -147,6 +244,20 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 		}
 	}
+}
+
+// admit applies the peer-credential policy. It fails CLOSED: a peer whose
+// identity the kernel will not report is refused, because the privileged helper
+// must be able to attribute every command it acts on (§3.5).
+func (s *Server) admit(conn net.Conn) bool {
+	p, err := peerOf(conn)
+	if err != nil || !s.allowPeer(p) {
+		s.mu.Lock()
+		s.rejected++
+		s.mu.Unlock()
+		return false
+	}
+	return true
 }
 
 // Close stops the server and waits for in-flight handlers.

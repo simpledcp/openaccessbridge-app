@@ -14,13 +14,21 @@ Type=simple
 # exactly what network state management requires.
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+# Runs as root (uid 0) but with the SHARED GROUP, so the loopback socket it
+# creates is root:captionbridge 0660 and the unprivileged core can reach it.
+# Without this the only channel to the privileged helper is unreachable and the
+# dashboard reports a permanent "Firewall INACTIVE" (§3.5).
+Group=captionbridge
 ExecStart=/usr/local/bin/captionbridge-firewall --socket-dir=/run/captionbridge
 Restart=on-failure
 RestartSec=2
 
 # Runtime dir is tmpfs (sockets/transient state only — never content; §9.4).
+# 0750 so the shared group can traverse to the socket; preserved so stopping any
+# one unit does not delete the directory the other two are still using.
 RuntimeDirectory=captionbridge
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 
 # Hardening.
 NoNewPrivileges=yes

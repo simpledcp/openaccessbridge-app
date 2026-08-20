@@ -23,8 +23,11 @@ ExecStart=/usr/local/bin/captionbridge-core \
 Restart=on-failure
 RestartSec=2
 
+# 0750 + preserve: the three processes share this tmpfs runtime dir for their
+# loopback sockets, so it must outlive any single unit's stop (§3.5).
 RuntimeDirectory=captionbridge
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 # Only the SQLite CONFIG store is writable (configuration only — never content).
 StateDirectory=captionbridge
 StateDirectoryMode=0700
