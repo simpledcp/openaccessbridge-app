@@ -62,7 +62,9 @@ type HarnessOptions struct {
 	Files               map[string][]byte // media-block files (RPL + timed text)
 	PreferredLanguages  []string
 	ExpectedFingerprint string
-	FetchAheadReels     int
+	// ExpectedScreenName is the other half of the §8.5 pinned identity.
+	ExpectedScreenName string
+	FetchAheadReels    int
 	// EagerLanguages caps the up-front language fetch (§5.3); 0 fetches all.
 	EagerLanguages int
 	Log            *logging.Logger
@@ -134,6 +136,7 @@ func NewHarness(opts HarnessOptions) *Harness {
 		Clock:               clk.Now,
 		Log:                 log,
 		ExpectedFingerprint: opts.ExpectedFingerprint,
+		ExpectedScreenName:  opts.ExpectedScreenName,
 		PreferredLanguages:  opts.PreferredLanguages,
 		FetchAheadReels:     opts.FetchAheadReels,
 		EagerLanguages:      opts.EagerLanguages,

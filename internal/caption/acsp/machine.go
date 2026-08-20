@@ -2,6 +2,7 @@ package acsp
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,8 +38,14 @@ type Options struct {
 	Loader              *resolver.Loader  // fetches timed-text per reel
 	Clock               func() time.Time
 	Log                 *logging.Logger
-	ExpectedFingerprint string   // wrong-room guard (§8.5); empty disables it
-	PreferredLanguages  []string // default-language priority (§5.4 / D8)
+	ExpectedFingerprint string // wrong-room guard (§8.5); empty disables it
+	// ExpectedScreenName is the OTHER half of §8.5's pinned identity: the screen
+	// name this auditorium profile expects the server to announce. Empty disables
+	// it. It is the weakest of the three pins and the one most likely to be
+	// available, since §10.5's composite identity is "configured IP + server
+	// family + screen name" — so it is often the only wrong-room signal there is.
+	ExpectedScreenName string
+	PreferredLanguages []string // default-language priority (§5.4 / D8)
 	// WarnFraction: emit a lease-expiring warning when remaining < WarnFraction of
 	// the lease. Default 0.25.
 	WarnFraction float64
@@ -72,20 +79,21 @@ type Options struct {
 // OnSelfHeal) are invoked with the lock held and must not call back into the
 // Machine.
 type Machine struct {
-	mu      sync.Mutex
-	ctrl    *caption.Controller
-	res     resolver.Resolver
-	loader  *resolver.Loader
-	clock   func() time.Time
-	log     *logging.Logger
-	expFP   string
-	prefLng []string
-	warnFr  float64
-	onState func(model.CaptionLinkState)
-	onWarn  func(model.Warning)
-	onHeal  func()
-	eagerN  int
-	fetchTO time.Duration
+	mu        sync.Mutex
+	ctrl      *caption.Controller
+	res       resolver.Resolver
+	loader    *resolver.Loader
+	clock     func() time.Time
+	log       *logging.Logger
+	expFP     string
+	expScreen string
+	prefLng   []string
+	warnFr    float64
+	onState   func(model.CaptionLinkState)
+	onWarn    func(model.Warning)
+	onHeal    func()
+	eagerN    int
+	fetchTO   time.Duration
 
 	state         model.ACSPState
 	server        string
@@ -108,7 +116,7 @@ type Machine struct {
 	currentRPL    *rpl.RPL
 	commsLost     bool
 	leaseWarned   bool
-	identityOK    bool
+	identity      IdentityState
 	runCtx        context.Context
 }
 
@@ -140,6 +148,7 @@ func New(opts Options) *Machine {
 		clock:      clk,
 		log:        log,
 		expFP:      opts.ExpectedFingerprint,
+		expScreen:  strings.TrimSpace(opts.ExpectedScreenName),
 		prefLng:    opts.PreferredLanguages,
 		warnFr:     wf,
 		onState:    opts.OnState,
@@ -150,7 +159,7 @@ func New(opts Options) *Machine {
 		state:      model.StateDisconnected,
 		outputMode: model.OutputUnknown,
 		activeSeg:  -1,
-		identityOK: true,
+		identity:   IdentityUnknown,
 	}
 }
 
@@ -206,19 +215,79 @@ func (m *Machine) handleAnnounce(req Request) Response {
 		m.state = model.StateConnected
 	}
 	m.state = model.StateAnnounced
-	// Wrong-room / misconfiguration guard (§8.5). A mismatch is surfaced loudly
-	// but is not necessarily a cryptographic authentication (§10.5).
-	if m.expFP != "" && req.Fingerprint != "" && req.Fingerprint != m.expFP {
-		m.identityOK = false
-		m.log.Warn(logging.EvServerIdentityMismatch, logging.Field("reason", "fingerprint_mismatch"))
-		m.warn(model.Warning{Code: model.WarnServerIdentityMismatch,
-			Message:  "Connected cinema server does not match this auditorium's pinned identity.",
-			Severity: model.SeverityCritical})
-	} else {
-		m.identityOK = true
-	}
+	m.checkIdentity(req)
 	m.emitState()
 	return Response{Type: ReqAnnounce, OK: true, State: string(m.state)}
+}
+
+// checkIdentity applies the §8.5 wrong-room guard: "pin the expected server
+// identity per auditorium profile (expected IP, ACSP server fingerprint, and
+// screen name); warn loudly if the connected server does not match."
+//
+// It reports THREE outcomes, not two. "Nothing was pinned" and "something was
+// pinned but the server announced nothing to check it against" are both
+// UNVERIFIED, and neither may render as a confirmed match — the appliance would
+// otherwise show a green wrong-room guard it never actually performed, which is
+// the same class of defect as reporting a firewall active without reading the
+// ruleset (§9.3). A mismatch is loud but is NOT cryptographic authentication
+// (§10.5): the pin may be a weak composite identity, so the message says what
+// failed rather than asserting the server is an impostor.
+func (m *Machine) checkIdentity(req Request) {
+	fpPinned, screenPinned := m.expFP != "", m.expScreen != ""
+	if !fpPinned && !screenPinned {
+		m.identity = IdentityUnpinned
+		return
+	}
+
+	var mismatched []string
+	checked := 0
+	if fpPinned {
+		if req.Fingerprint == "" {
+			// Pinned but unanswerable. Phase 0A determines what each server
+			// family actually exposes (B1); until then this is a real state.
+			m.log.Warn(logging.EvServerIdentityMismatch, logging.Field("reason", "fingerprint_not_announced"))
+		} else {
+			checked++
+			if req.Fingerprint != m.expFP {
+				mismatched = append(mismatched, "fingerprint")
+			}
+		}
+	}
+	if screenPinned {
+		if strings.TrimSpace(req.ScreenName) == "" {
+			m.log.Warn(logging.EvServerIdentityMismatch, logging.Field("reason", "screen_name_not_announced"))
+		} else {
+			checked++
+			// Operator-typed on one side, server-reported on the other, so
+			// compare case- and whitespace-insensitively. Anything cleverer
+			// (treating "Screen 3" as "Auditorium 3") would silence exactly the
+			// re-cabling this guard exists to catch.
+			if !strings.EqualFold(strings.TrimSpace(req.ScreenName), m.expScreen) {
+				mismatched = append(mismatched, "screen name")
+			}
+		}
+	}
+
+	switch {
+	case len(mismatched) > 0:
+		m.identity = IdentityMismatch
+		m.log.Warn(logging.EvServerIdentityMismatch,
+			logging.Field("reason", "identity_mismatch"),
+			logging.Field("mismatched", strings.Join(mismatched, ",")))
+		m.warn(model.Warning{Code: model.WarnServerIdentityMismatch,
+			Message: "Connected cinema server does not match this auditorium's pinned " +
+				strings.Join(mismatched, " or ") + " — check the appliance is cabled to the right room.",
+			Severity: model.SeverityCritical})
+	case checked == 0:
+		// Everything pinned went unannounced: the guard did not run.
+		m.identity = IdentityUnverified
+		m.warn(model.Warning{Code: model.WarnServerIdentityMismatch,
+			Message: "This auditorium pins a server identity, but the connected server announced none of it — " +
+				"the wrong-room check could not be performed.",
+			Severity: model.SeverityWarning})
+	default:
+		m.identity = IdentityMatch
+	}
 }
 
 func (m *Machine) handleGetNewLease(req Request, now time.Time) Response {

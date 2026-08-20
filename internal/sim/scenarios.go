@@ -110,6 +110,8 @@ func All() []Scenario {
 		multiLanguage(),
 		malformedAssetDegrades(),
 		wrongRoomFingerprint(),
+		wrongRoomScreenName(),
+		wrongRoomUnverifiable(),
 		multiReelAdvance(),
 		midShowReconnectSkipsPastReels(),
 		uncaptionedReelBetweenCaptioned(),
@@ -513,6 +515,56 @@ func wrongRoomFingerprint() Scenario {
 			h.Send(Announce("srv-evil", "Wrong Room", "DIFFERENT-FP"))
 			if !h.HasWarning(model.WarnServerIdentityMismatch) {
 				t.Errorf("expected a server-identity-mismatch warning")
+			}
+		},
+	}
+}
+
+// §8.5's other pin. §10.5 notes the fingerprint may not exist at all on a given
+// server family, in which case the screen name is the ONLY wrong-room signal —
+// so it has to work on its own, and a check that cannot run must not read green.
+func wrongRoomScreenName() Scenario {
+	files, _ := singleReelShow("1", 60000, map[string][]CueSpec{
+		"en": {{StartMS: 0, EndMS: 60000, Text: "Captioned"}},
+	})
+	return Scenario{
+		Name: "wrong-room-screen-name",
+		Desc: "A server announcing another room's screen name is caught even with no fingerprint to compare (§8.5).",
+		Opts: HarnessOptions{Files: files, ExpectedScreenName: "Auditorium 3"},
+		Run: func(t T, h *Harness) {
+			h.Machine.Connected()
+			h.Send(Announce("srv-1", "Auditorium 7", "")) // no fingerprint offered
+			if !h.HasWarning(model.WarnServerIdentityMismatch) {
+				t.Errorf("a wrong screen name must raise the identity-mismatch warning")
+			}
+			if got := h.Machine.Identity(); got != acsp.IdentityMismatch {
+				t.Errorf("identity = %q, want mismatch", got)
+			}
+		},
+	}
+}
+
+// A pinned identity the server never answers means the guard DID NOT RUN.
+// Rendering that as a match would be a green light for a check nobody made.
+func wrongRoomUnverifiable() Scenario {
+	files, _ := singleReelShow("1", 60000, map[string][]CueSpec{
+		"en": {{StartMS: 0, EndMS: 60000, Text: "Captioned"}},
+	})
+	return Scenario{
+		Name: "wrong-room-unverifiable",
+		Desc: "A pinned identity the server announces nothing for reports as unverified, never as a match (§8.5, §10.5).",
+		Opts: HarnessOptions{Files: files, ExpectedFingerprint: "EXPECTED-FP"},
+		Run: func(t T, h *Harness) {
+			h.Machine.Connected()
+			h.Send(Announce("srv-1", "Auditorium 3", "")) // pinned, but nothing to check
+			if got := h.Machine.Identity(); got != acsp.IdentityUnverified {
+				t.Errorf("identity = %q, want unverified", got)
+			}
+			if got := h.Machine.Identity(); got.Verified() {
+				t.Errorf("a check that never ran must not report as verified")
+			}
+			if !h.HasWarning(model.WarnServerIdentityMismatch) {
+				t.Errorf("an unperformable wrong-room check must still surface (guardrail #7)")
 			}
 		},
 	}
