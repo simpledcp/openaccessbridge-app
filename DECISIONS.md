@@ -183,3 +183,34 @@ stamped, an older one runs the (currently empty) migration path and is
 re-stamped, and one written by a NEWER build is refused with a named error rather
 than read as if it were ours. An unparsable version is refused too. Silently
 misreading configuration is how an appliance comes up in a posture nobody chose.
+
+### D20. WebRTC peer is **Pion** (pure Go), not GStreamer `webrtcbin` [§6.7, supersedes part of D5]
+§6.7 names `webrtcbin` as the appliance-side peer, and BLOCKER B4 recorded it as
+unreachable: `gst-plugins-bad` and the `gstreamer-1.0.pc` dev headers cannot be
+installed without passwordless sudo. That blocker was scoped to ONE
+implementation. `github.com/pion/webrtc/v4` is a pure-Go WebRTC stack needing no
+dev headers and no cgo, so it clears B4 in software.
+
+**Verified by spike before adopting, both with `CGO_ENABLED=0`:**
+- two Pion peers negotiate with `ICEServers: []` — host candidates only, no
+  STUN/TURN, as §6.7 requires — with the BROWSER offering and the appliance
+  answering, which is the direction `assets/patron.js` already implements, and
+  Opus RTP flows over it;
+- `gst-launch-1.0 … ! opusenc frame-size=10 audio-type=voice ! rtpopuspay !
+  udpsink` emits RTP that `pion/rtp` parses, with the runtime plugins already
+  present on this host.
+
+**D5 stands:** GStreamer remains the ENCODER behind the same
+`internal/audio/encode` seam. Pion replaces only the transport. The split keeps
+the appliance a single static binary with no libgstreamer link-time dependency
+(consistent with D2's reasoning for pure-Go SQLite).
+
+**Note on the codec line:** WebRTC signals Opus as `48000/2` by convention even
+when the payload is mono. §6.7's "mono per stream" is about the audio content,
+not the SDP channel count; declaring 1 channel makes the offer's codec unmatched
+and the track never starts. This cost a spike iteration and is worth remembering.
+
+**What this does NOT clear:** B2. Real phones on a real venue AP remain
+untested, and the phone-side jitter buffer — §6.7's dominant, least-controllable
+latency term — cannot be measured here at all.
+

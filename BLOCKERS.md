@@ -38,7 +38,12 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
 - **Clears:** known-good hardware kit (§6.2), compatibility matrix (§11.3),
   gates G2a/G2b.
 
-### B4. GStreamer dev libs + `webrtcbin` not installable (no passwordless apt)
+### B4. GStreamer dev libs + `webrtcbin` not installable (no passwordless apt) — **CLEARED IN SOFTWARE (D20)**
+> **Status:** no longer blocking. The appliance-side WebRTC peer is now Pion
+> (pure Go, no dev headers, no cgo) — see DECISIONS D20. GStreamer remains the
+> Opus ENCODER via `gst-launch-1.0`, which needs only the runtime plugins that
+> are present. The text below is kept because it still describes why the
+> `webrtcbin` route was rejected.
 - **Present:** GStreamer runtime 1.24.2 with `opusenc`, `audiotestsrc`,
   `alsasrc`, `level`.
 - **Missing:** `gstreamer-1.0.pc` dev headers (so no go-gst cgo bindings) and the
