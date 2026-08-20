@@ -143,9 +143,26 @@ func Listen(path string, h Handler) (*Server, error) {
 	return ListenWithOptions(path, h, ListenOptions{})
 }
 
+// maxSocketPath is the usable length of a Unix socket path. The kernel's
+// sockaddr_un.sun_path is 108 bytes including the terminating NUL, and it does
+// not truncate: an over-long path fails bind(2) with the famously unhelpful
+// EINVAL ("invalid argument"). Catch it here and say what is actually wrong.
+const maxSocketPath = 107
+
+func checkSocketPath(path string) error {
+	if len(path) > maxSocketPath {
+		return fmt.Errorf("socket path is %d bytes, over the %d-byte kernel limit: %s "+
+			"(use a shorter --socket-dir)", len(path), maxSocketPath, path)
+	}
+	return nil
+}
+
 // ListenWithOptions is Listen with explicit socket ownership and an admission
 // policy. Use it where the peer runs as a different user (§3.5).
 func ListenWithOptions(path string, h Handler, opts ListenOptions) (*Server, error) {
+	if err := checkSocketPath(path); err != nil {
+		return nil, err
+	}
 	dirMode := opts.DirMode
 	if dirMode == 0 {
 		dirMode = 0o700
@@ -279,6 +296,9 @@ type Client struct {
 
 // Dial connects to a helper socket at path.
 func Dial(path string) (*Client, error) {
+	if err := checkSocketPath(path); err != nil {
+		return nil, err
+	}
 	conn, err := net.DialTimeout("unix", path, 3*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("dial unix %s: %w", path, err)

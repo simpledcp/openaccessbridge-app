@@ -3,6 +3,7 @@ package ipc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,4 +146,34 @@ func TestAllowOwnerOrGroup(t *testing.T) {
 	if AllowOwnerOrGroup(0)(Peer{UID: self + 1, GID: 0}) {
 		t.Error("AllowOwnerOrGroup(0) admitted a foreign peer by group")
 	}
+}
+
+// An over-long socket path fails bind(2) with EINVAL ("invalid argument"),
+// which says nothing about the real cause. A long RuntimeDirectory on the
+// appliance would hit this, so report the actual limit instead.
+func TestSocketPathLengthIsReportedClearly(t *testing.T) {
+	long := filepath.Join("/tmp", strings.Repeat("d", maxSocketPath), "x.sock")
+	_, err := Listen(long, func(Message) *Message { return nil })
+	if err == nil {
+		t.Fatal("expected an error for an over-long socket path")
+	}
+	if !strings.Contains(err.Error(), "kernel limit") {
+		t.Errorf("error does not explain the path-length limit: %v", err)
+	}
+	if _, err := Dial(long); err == nil || !strings.Contains(err.Error(), "kernel limit") {
+		t.Errorf("Dial should reject the same path with the same explanation: %v", err)
+	}
+
+	// A path at the limit is accepted.
+	dir := t.TempDir()
+	name := strings.Repeat("s", maxSocketPath-len(dir)-len("/.sock")) + ".sock"
+	ok := filepath.Join(dir, name)
+	if len(ok) != maxSocketPath {
+		t.Fatalf("test setup: built a %d-byte path, want %d", len(ok), maxSocketPath)
+	}
+	srv, err := Listen(ok, func(Message) *Message { return nil })
+	if err != nil {
+		t.Fatalf("a path exactly at the limit should bind: %v", err)
+	}
+	srv.Close()
 }
