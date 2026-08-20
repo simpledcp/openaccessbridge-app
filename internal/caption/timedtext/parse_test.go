@@ -73,6 +73,129 @@ func TestParseSMPTE428_10_ClosedDerivedRate(t *testing.T) {
 	assertCues(t, doc.Cues, want)
 }
 
+// TestParseStartTimeNormalizesToTimeline is the §5.4 "correct start/end timing
+// relative to the reel/timeline" requirement: an asset authored on the usual
+// 01:00:00:00 timecode axis must land at the same timeline-relative ms as the
+// identical asset authored from zero, not an hour late.
+func TestParseStartTimeNormalizesToTimeline(t *testing.T) {
+	doc := parseFixture(t, "smpte_428-7_starttime_24fps.xml")
+	if doc.StartTimeMS != 3600000 {
+		t.Fatalf("StartTimeMS = %d, want 3600000", doc.StartTimeMS)
+	}
+	want := []model.Cue{
+		{StartMS: 1000, EndMS: 4500, Text: "Hello world"},
+		{StartMS: 5000, EndMS: 7000, Text: "[MUSIC PLAYING]"},
+		// Straddles the origin: the in-point clamps to 0 rather than going negative.
+		{StartMS: 0, EndMS: 500, Text: "Straddles the origin"},
+		// The cue entirely before the origin is dropped (see warnings below).
+	}
+	assertCues(t, doc.Cues, want)
+	if !hasWarning(doc.Warnings, "cue_before_start_time") {
+		t.Errorf("expected cue_before_start_time warning, got %v", doc.Warnings)
+	}
+	if !hasWarning(doc.Warnings, "cue_clamped_to_start_time") {
+		t.Errorf("expected cue_clamped_to_start_time warning, got %v", doc.Warnings)
+	}
+}
+
+// TestParseStartTimeRateResolvedLate guards the staging order: a <StartTime> that
+// appears before the rate elements must still convert at the resolved rate.
+func TestParseStartTimeRateResolvedLate(t *testing.T) {
+	xmlDoc := `<?xml version="1.0"?>
+<SubtitleReel xmlns="x"><Language>en</Language><StartTime>00:00:10:00</StartTime>
+<SubtitleList><Font>
+<Subtitle TimeIn="00:00:12:00" TimeOut="00:00:14:00"><Text>late rate</Text></Subtitle>
+</Font></SubtitleList><EditRate>25 1</EditRate></SubtitleReel>`
+	doc, err := ParseBytes([]byte(xmlDoc))
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	if doc.StartTimeMS != 10000 {
+		t.Fatalf("StartTimeMS = %d, want 10000", doc.StartTimeMS)
+	}
+	assertCues(t, doc.Cues, []model.Cue{{StartMS: 2000, EndMS: 4000, Text: "late rate"}})
+}
+
+// TestParseZeroStartTimeUnchanged pins the no-regression case: the shipped
+// fixtures declare 00:00:00:00 (or nothing) and must be untouched by the origin
+// normalization.
+func TestParseZeroStartTimeUnchanged(t *testing.T) {
+	for _, name := range []string{
+		"smpte_428-7_24fps.xml",
+		"smpte_428-10_closed_25fps.xml",
+		"interop_cinecanvas.xml",
+	} {
+		doc := parseFixture(t, name)
+		if doc.StartTimeMS != 0 {
+			t.Errorf("%s: StartTimeMS = %d, want 0", name, doc.StartTimeMS)
+		}
+	}
+}
+
+// TestParseCarriesOpaqueStyleAndPosition is the §5.4 "carry style/position as
+// opaque pass-through fields" requirement: styling is not rendered, but it must
+// survive the parse so a later fidelity pass has something to interpret.
+func TestParseCarriesOpaqueStyleAndPosition(t *testing.T) {
+	tests := []struct {
+		fixture  string
+		style    map[string]string
+		position map[string]string
+	}{
+		{
+			fixture:  "smpte_428-7_24fps.xml",
+			style:    map[string]string{"id": "theFont", "color": "FFFFFFFF", "weight": "normal", "size": "42"},
+			position: map[string]string{"valign": "bottom", "vposition": "8"},
+		},
+		{
+			fixture:  "interop_cinecanvas.xml",
+			style:    map[string]string{"id": "Arial", "color": "FFFFFFFF", "effect": "border", "size": "42"},
+			position: map[string]string{"valign": "bottom", "vposition": "10"},
+		},
+		{
+			fixture:  "smpte_428-10_closed_25fps.xml",
+			style:    map[string]string{"id": "f1", "size": "40"},
+			position: nil, // this fixture declares no positioning
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			doc := parseFixture(t, tt.fixture)
+			if len(doc.Cues) == 0 {
+				t.Fatalf("no cues parsed")
+			}
+			c := doc.Cues[0]
+			for k, want := range tt.style {
+				if got := c.Style[k]; got != want {
+					t.Errorf("style[%q] = %q, want %q (style=%v)", k, got, want, c.Style)
+				}
+			}
+			for k, want := range tt.position {
+				if got := c.Position[k]; got != want {
+					t.Errorf("position[%q] = %q, want %q (position=%v)", k, got, want, c.Position)
+				}
+			}
+			if tt.position == nil && len(c.Position) != 0 {
+				t.Errorf("expected no position, got %v", c.Position)
+			}
+			// Timing/identity attributes are not styling and must not leak in.
+			for _, k := range []string{"timein", "timeout", "spotnumber"} {
+				if _, ok := c.Style[k]; ok {
+					t.Errorf("style must not carry %q: %v", k, c.Style)
+				}
+			}
+		})
+	}
+}
+
+func hasWarning(warnings []string, want string) bool {
+	for _, w := range warnings {
+		if w == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestParseMalformedXMLErrors(t *testing.T) {
 	_, err := ParseBytes([]byte(`<SubtitleReel><Subtitle TimeIn=`))
 	if err == nil {

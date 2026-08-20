@@ -100,8 +100,169 @@ func TestStatusBroadcastReachesAllLanguages(t *testing.T) {
 	}
 }
 
+// TestTrackGradeReachesPatron is §5.4 line 320: a subtitle-only show must not be
+// presented as "Closed captions". The grade is resolved upstream from the ST
+// 429-12 track type; the fan-out has to carry it to the phone.
+func TestTrackGradeReachesPatron(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      model.TrackKind
+		wantKind  string
+		wantGrade bool
+	}{
+		{name: "closed_caption", kind: model.TrackClosedCaption, wantKind: "closed_caption", wantGrade: true},
+		{name: "closed_subtitle", kind: model.TrackClosedSubtitle, wantKind: "closed_subtitle", wantGrade: false},
+		{name: "main_subtitle", kind: model.TrackMainSubtitle, wantKind: "main_subtitle", wantGrade: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHub(Options{})
+			h.PublishCue("en", true, model.Cue{Text: "Hello", Kind: tt.kind})
+			s, _ := h.Subscribe("en")
+			m := mustNext(t, s)
+			if m.Kind != tt.wantKind || m.CaptionGrade != tt.wantGrade {
+				t.Fatalf("kind=%q caption_grade=%v, want %q/%v", m.Kind, m.CaptionGrade, tt.wantKind, tt.wantGrade)
+			}
+			// The grade must survive a cue-out: the patron copy stays correct
+			// between cues, not just while text is on screen.
+			h.PublishCue("en", false, model.Cue{})
+			if m := mustNext(t, s); m.Kind != tt.wantKind || m.CaptionGrade != tt.wantGrade {
+				t.Fatalf("grade lost on cue-out: %+v", m)
+			}
+		})
+	}
+}
+
+// TestSetTrackKindLabelsBeforeFirstCue: the label must be right from the moment
+// the reel loads, not only after the first cue fires.
+func TestSetTrackKindLabelsBeforeFirstCue(t *testing.T) {
+	h := NewHub(Options{})
+	h.SetTrackKind("es-419", model.TrackClosedSubtitle)
+	s, _ := h.Subscribe("es-419")
+	m := mustNext(t, s)
+	if m.CaptionGrade || m.Kind != "closed_subtitle" || !m.LanguageAvailable {
+		t.Fatalf("expected subtitle-grade available language, got %+v", m)
+	}
+}
+
+// TestUnknownLanguageIsReportedNotBlank is the no-silent-degradation guardrail on
+// the patron path: a phone asking for a language the show does not carry must be
+// told so, not served a permanently empty caption area.
+func TestUnknownLanguageIsReportedNotBlank(t *testing.T) {
+	h := NewHub(Options{})
+	h.SetTrackKind("en-US", model.TrackClosedCaption)
+
+	s, _ := h.Subscribe("en-GB") // no exact track for this tag
+	if m := mustNext(t, s); m.LanguageAvailable {
+		t.Fatalf("en-GB is not carried; expected language_available=false, got %+v", m)
+	}
+	if h.HasLanguage("en-GB") {
+		t.Fatalf("HasLanguage(en-GB) should be false")
+	}
+	// Switching to a carried language clears the condition.
+	h.SetLanguage(s, "en-US")
+	if m := mustNext(t, s); !m.LanguageAvailable {
+		t.Fatalf("en-US is carried; expected language_available=true, got %+v", m)
+	}
+}
+
+// TestClearLanguageRetiresStaleCue: when a reel carries no track for a language
+// its subscribers must be blanked and told, not left holding the previous reel's
+// last cue forever (§5.2 item 5 "no captions for this segment").
+func TestClearLanguageRetiresStaleCue(t *testing.T) {
+	h := NewHub(Options{})
+	h.PublishCue("fr", true, model.Cue{Text: "Bonjour", Kind: model.TrackClosedCaption})
+	s, _ := h.Subscribe("fr")
+	if m := mustNext(t, s); !m.Visible {
+		t.Fatalf("expected the cue on subscribe, got %+v", m)
+	}
+	h.ClearLanguage("fr")
+	m := mustNext(t, s)
+	if m.Visible || m.Text != "" || m.LanguageAvailable {
+		t.Fatalf("expected a blank unavailable state, got %+v", m)
+	}
+}
+
+// TestLanguagesOrderedByAccessibilityRank pins the ordering NegotiateLanguage
+// relies on for D8 steps 3 and 4: closed captions first, then subtitles, with
+// codes breaking ties so the patron list is stable across reloads.
+func TestLanguagesOrderedByAccessibilityRank(t *testing.T) {
+	h := NewHub(Options{})
+	h.SetTrackKind("zh", model.TrackMainSubtitle)
+	h.SetTrackKind("es-419", model.TrackClosedSubtitle)
+	h.SetTrackKind("fr", model.TrackClosedCaption)
+	h.SetTrackKind("en-US", model.TrackClosedCaption)
+
+	got := h.Languages()
+	want := []string{"en-US", "fr", "es-419", "zh"}
+	if len(got) != len(want) {
+		t.Fatalf("languages = %+v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i].Code != want[i] {
+			t.Fatalf("languages = %+v, want %v", got, want)
+		}
+	}
+}
+
+// TestNegotiateLanguage is the D8 / §5.4 default-language priority: (1) venue
+// configured, (2) browser language (exact tag, then primary subtag), (3) first
+// closed-caption track, (4) first subtitle track.
+func TestNegotiateLanguage(t *testing.T) {
+	available := []LanguageOption{
+		{Code: "en-US", Kind: model.TrackClosedCaption},
+		{Code: "fr", Kind: model.TrackClosedCaption},
+		{Code: "es-419", Kind: model.TrackClosedSubtitle},
+	}
+	subtitleOnly := []LanguageOption{
+		{Code: "de", Kind: model.TrackMainSubtitle},
+		{Code: "ja", Kind: model.TrackMainSubtitle},
+	}
+	tests := []struct {
+		name       string
+		available  []LanguageOption
+		configured []string
+		requested  []string
+		want       string
+		wantOK     bool
+	}{
+		{name: "venue_default_wins", available: available,
+			configured: []string{"fr"}, requested: []string{"en-US"}, want: "fr", wantOK: true},
+		{name: "venue_default_absent_falls_through", available: available,
+			configured: []string{"pt-BR"}, requested: []string{"es-419"}, want: "es-419", wantOK: true},
+		{name: "browser_exact_tag", available: available,
+			requested: []string{"es-419"}, want: "es-419", wantOK: true},
+		{name: "browser_primary_subtag", available: available,
+			requested: []string{"en-GB"}, want: "en-US", wantOK: true},
+		{name: "browser_order_respected", available: available,
+			requested: []string{"pt", "fr", "en-US"}, want: "fr", wantOK: true},
+		{name: "wildcard_ignored", available: available,
+			requested: []string{"*"}, want: "en-US", wantOK: true},
+		{name: "no_match_first_closed_caption", available: available,
+			requested: []string{"ja"}, want: "en-US", wantOK: true},
+		{name: "no_caption_track_first_subtitle", available: subtitleOnly,
+			requested: []string{"ko"}, want: "de", wantOK: true},
+		{name: "nothing_available", available: nil,
+			configured: []string{"en"}, requested: []string{"en"}, want: "", wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := NegotiateLanguage(tt.available, tt.configured, tt.requested)
+			if got != tt.want || ok != tt.wantOK {
+				t.Fatalf("NegotiateLanguage = (%q,%v), want (%q,%v)", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestMaxClientsCap(t *testing.T) {
 	h := NewHub(Options{MaxClients: 2})
+	// MaxClients is readable so the wiring layer can be asserted against the
+	// active deployment profile's cap (D11) rather than the cap being dead
+	// config nothing checks.
+	if got := h.MaxClients(); got != 2 {
+		t.Fatalf("MaxClients = %d, want 2", got)
+	}
 	if _, err := h.Subscribe("en"); err != nil {
 		t.Fatal(err)
 	}

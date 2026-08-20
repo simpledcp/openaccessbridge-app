@@ -60,6 +60,14 @@ func newEngine(clk *fakeClock, rec *recorder) *Engine {
 	return New(Options{Clock: clk.now, OnChange: rec.on})
 }
 
+// nextBoundaryAt reads the scheduler's next-boundary decision for a position,
+// which is otherwise only observable through real-timer wall-clock behavior.
+func nextBoundaryAt(e *Engine, pos int64) int64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.nextBoundaryLocked(pos)
+}
+
 func TestActiveCueResolutionAcrossBoundaries(t *testing.T) {
 	clk := newFakeClock()
 	rec := &recorder{}
@@ -207,6 +215,153 @@ func TestDriftMeasurement(t *testing.T) {
 	e.UpdateTimeline(11000)      // drift +800 → over budget
 	if !e.OverBudget() {
 		t.Fatalf("800ms drift should exceed 500ms budget, got %d", e.DriftMS())
+	}
+}
+
+// TestOverlappingCueOutIsScheduled is the §5.5 push-on-change regression: with an
+// overlapping pair the boundary scheduler must still arm on the OUTER cue's end,
+// or the caption freezes on screen until the next timeline message arrives.
+func TestOverlappingCueOutIsScheduled(t *testing.T) {
+	clk := newFakeClock()
+	rec := &recorder{}
+	e := newEngine(clk, rec)
+	// B is nested inside A; sorted by start the outer cue comes first.
+	e.SetCues("en", []model.Cue{
+		{StartMS: 0, EndMS: 300, Text: "A", Language: "en"},
+		{StartMS: 50, EndMS: 100, Text: "B", Language: "en"},
+	})
+	e.Play(0)
+
+	tests := []struct {
+		atMS    int64
+		want    int64 // expected next boundary, -1 for none
+		visible string
+	}{
+		{atMS: 0, want: 50, visible: "A"},
+		{atMS: 50, want: 100, visible: "B"},
+		{atMS: 100, want: 300, visible: "A"}, // A's cue-out must still be scheduled
+		{atMS: 300, want: -1, visible: ""},
+	}
+	for _, tt := range tests {
+		clk.advance(time.Duration(tt.atMS-e.Position()) * time.Millisecond)
+		e.Evaluate()
+		if got := nextBoundaryAt(e, tt.atMS); got != tt.want {
+			t.Errorf("nextBoundary at %d = %d, want %d", tt.atMS, got, tt.want)
+		}
+		ev, _ := rec.last()
+		got := ""
+		if ev.Visible {
+			got = ev.Cue.Text
+		}
+		if got != tt.visible {
+			t.Errorf("at %d visible = %q, want %q", tt.atMS, got, tt.visible)
+		}
+	}
+	if st := e.Status(); st.Visible {
+		t.Fatalf("captions must clear at A's end, got %+v", st)
+	}
+}
+
+// TestLeaseExpiryRecoversOnFreshTimeline is §5.5: a fresh Update Timeline (only
+// possible over a live lease) re-anchors and resumes. Without it a renewed lease
+// leaves the phones dark until the next Play.
+func TestLeaseExpiryRecoversOnFreshTimeline(t *testing.T) {
+	clk := newFakeClock()
+	rec := &recorder{}
+	e := newEngine(clk, rec)
+	e.SetCues("en", testCues())
+	e.Play(1000) // inside cue A
+	if ev, _ := rec.last(); !ev.Visible || ev.Cue.Text != "A" {
+		t.Fatalf("expected A at 1000, got %+v", ev)
+	}
+
+	e.LeaseExpired()
+	if ev, _ := rec.last(); ev.Visible {
+		t.Fatalf("lease expiry must blank, got %+v", ev)
+	}
+
+	// Lease renewed: the server sends a fresh timeline position.
+	e.UpdateTimeline(1500)
+	st := e.Status()
+	if st.State != "playing" || !st.Playing || !st.Visible {
+		t.Fatalf("fresh timeline must recover from lease expiry, got %+v", st)
+	}
+	if ev, _ := rec.last(); !ev.Visible || ev.Cue.Text != "A" {
+		t.Fatalf("expected A back after renewal, got %+v", ev)
+	}
+	if d := e.DriftMS(); d != 0 {
+		t.Fatalf("re-anchor after a blank must not invent drift, got %d", d)
+	}
+}
+
+// TestCompositionChangedDiscardsPrediction is the §5.5 SPL/CPL-change event: the
+// new composition's cues must never be resolved against the old composition's
+// anchor, so the prediction is discarded (seek semantics) until a fresh timeline.
+func TestCompositionChangedDiscardsPrediction(t *testing.T) {
+	clk := newFakeClock()
+	rec := &recorder{}
+	e := newEngine(clk, rec)
+	e.SetCues("en", testCues())
+	e.Play(0)
+	clk.advance(3500 * time.Millisecond) // pos 3500 → cue B visible
+	e.Evaluate()
+	if ev, _ := rec.last(); !ev.Visible || ev.Cue.Text != "B" {
+		t.Fatalf("expected B at 3500, got %+v", ev)
+	}
+
+	e.CompositionChanged()
+	if ev, _ := rec.last(); ev.Visible {
+		t.Fatalf("composition change must blank, got %+v", ev)
+	}
+	if st := e.Status(); st.PositionMS != 0 || st.Playing {
+		t.Fatalf("prediction must be discarded, got %+v", st)
+	}
+
+	// The new composition's cues load; they must NOT resolve at the stale 3500.
+	e.SetCues("en", []model.Cue{{StartMS: 3000, EndMS: 4000, Text: "NEW", Language: "en"}})
+	clk.advance(10 * time.Second)
+	e.Evaluate()
+	if st := e.Status(); st.Visible {
+		t.Fatalf("new cues must not resolve against the old anchor, got %+v", st)
+	}
+
+	// The next Update Timeline re-anchors and captions return.
+	e.UpdateTimeline(3200)
+	if ev, _ := rec.last(); !ev.Visible || ev.Cue.Text != "NEW" {
+		t.Fatalf("expected NEW after re-anchor, got %+v", ev)
+	}
+}
+
+// TestBudgetDefaultsAndOverride pins D9: the warn budget defaults to 500 ms and
+// the target to 400 ms, both configurable, both surfaced to diagnostics.
+func TestBudgetDefaultsAndOverride(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       Options
+		wantWarn   int64
+		wantTarget int64
+	}{
+		{name: "d9_defaults", opts: Options{}, wantWarn: DefaultWarnBudgetMS, wantTarget: DefaultTargetBudgetMS},
+		{name: "configured", opts: Options{WarnBudgetMS: 250, TargetBudgetMS: 200}, wantWarn: 250, wantTarget: 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clk := newFakeClock()
+			tt.opts.Clock = clk.now
+			e := New(tt.opts)
+			st := e.Status()
+			if st.WarnBudgetMS != tt.wantWarn || st.TargetBudgetMS != tt.wantTarget {
+				t.Fatalf("budgets = %d/%d, want %d/%d",
+					st.WarnBudgetMS, st.TargetBudgetMS, tt.wantWarn, tt.wantTarget)
+			}
+			e.SetCues("en", testCues())
+			e.Play(0)
+			clk.advance(10 * time.Second)
+			e.UpdateTimeline(10000 - tt.wantWarn - 1) // drift = budget + 1
+			if !e.OverBudget() || !e.Status().OverBudget {
+				t.Fatalf("drift %d must exceed budget %d", e.DriftMS(), tt.wantWarn)
+			}
+		})
 	}
 }
 

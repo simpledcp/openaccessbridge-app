@@ -19,6 +19,15 @@ import (
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
+// Drift/latency budget defaults (§5.5 "configurable drift/latency budget", D9):
+// target captions on screen within 400 ms of the reference, warn above 500 ms.
+// Both sit inside the plan's 250–500 ms working figure and are overridable via
+// Options so a venue (or a calibration against a real server) can tighten them.
+const (
+	DefaultTargetBudgetMS int64 = 400
+	DefaultWarnBudgetMS   int64 = 500
+)
+
 // Clock returns the current time including a monotonic reading. time.Now
 // satisfies this; tests inject a fake clock. Monotonic deltas are immune to NTP
 // steps (§5.5).
@@ -48,9 +57,11 @@ type Engine struct {
 	visible     bool // whether a cue is currently shown
 	driftMS     int64
 
-	// budgetMS is the configured drift/latency budget; drift beyond warnBudgetMS
-	// is surfaced (D9). 0 disables the warning.
-	warnBudgetMS int64
+	// warnBudgetMS is the configured drift/latency budget; drift beyond it is
+	// surfaced (D9). 0 disables the warning. targetBudgetMS is the design goal
+	// carried alongside for diagnostics.
+	warnBudgetMS   int64
+	targetBudgetMS int64
 
 	onChange func(CueEvent)
 
@@ -62,9 +73,12 @@ type Engine struct {
 
 // Options configures an Engine.
 type Options struct {
-	Clock        Clock
-	OnChange     func(CueEvent)
-	WarnBudgetMS int64
+	Clock    Clock
+	OnChange func(CueEvent)
+	// WarnBudgetMS / TargetBudgetMS are the configurable drift budget (§5.5).
+	// Zero takes the D9 defaults.
+	WarnBudgetMS   int64
+	TargetBudgetMS int64
 }
 
 // New constructs an Engine. If Clock is nil, time.Now is used.
@@ -75,15 +89,20 @@ func New(opts Options) *Engine {
 	}
 	wb := opts.WarnBudgetMS
 	if wb == 0 {
-		wb = 500 // §5.5 / D9 default
+		wb = DefaultWarnBudgetMS
+	}
+	tb := opts.TargetBudgetMS
+	if tb == 0 {
+		tb = DefaultTargetBudgetMS
 	}
 	return &Engine{
-		clock:        clk,
-		rate:         0,
-		state:        "idle",
-		activeIndex:  -1,
-		onChange:     opts.OnChange,
-		warnBudgetMS: wb,
+		clock:          clk,
+		rate:           0,
+		state:          "idle",
+		activeIndex:    -1,
+		onChange:       opts.OnChange,
+		warnBudgetMS:   wb,
+		targetBudgetMS: tb,
 	}
 }
 
@@ -115,11 +134,16 @@ func (e *Engine) UpdateTimeline(serverPosMS int64) {
 	}
 	e.anchorServerMS = serverPosMS
 	e.anchorMono = e.clock()
-	if e.state == "idle" || e.state == "stopped" {
+	// A fresh timeline message re-anchors and resumes from every state that is
+	// merely WAITING for one (§5.5): idle (never anchored, or the composition
+	// changed), stopped, and lease_expired — an Update Timeline can only arrive
+	// over a live lease, so its arrival means the lease was renewed and captions
+	// must come back. "paused" is deliberately excluded: only Resume unfreezes.
+	switch e.state {
+	case "idle", "stopped", "lease_expired":
 		e.state = "playing"
 		e.rate = 1
-	}
-	if e.state == "playing" {
+	case "playing":
 		e.rate = 1
 	}
 	ev := e.reevaluateLocked("timeline_event")
@@ -182,6 +206,27 @@ func (e *Engine) SeekTo(serverPosMS int64) {
 		e.rate = 1
 	}
 	ev := e.reevaluateLocked("timeline_event")
+	e.rearmLocked()
+	e.mu.Unlock()
+	e.fire(ev)
+}
+
+// CompositionChanged signals an SPL/CPL change — a different composition or
+// playlist arriving underneath the current lease, without a Terminate Lease
+// (§5.5 explicit timeline events). It takes seek semantics to the limit: the
+// previous composition's prediction is discarded entirely (anchor cleared,
+// captions blanked) so the incoming cue set is never resolved against the old
+// composition's timeline. The engine returns to "idle" and re-anchors on the
+// next Update Timeline.
+func (e *Engine) CompositionChanged() {
+	e.mu.Lock()
+	e.anchorServerMS = 0
+	e.anchorMono = time.Time{}
+	e.rate = 0
+	e.state = "idle"
+	e.driftMS = 0 // drift against a discarded timeline means nothing
+	e.activeIndex = -1
+	ev := e.blankLocked("timeline_event")
 	e.rearmLocked()
 	e.mu.Unlock()
 	e.fire(ev)
@@ -398,12 +443,20 @@ func (e *Engine) nextBoundaryLocked(pos int64) int64 {
 			best = t
 		}
 	}
-	// Only need to look at cues near pos.
+	// Only need to look at cues near pos, but the window must LOOK BACK by the
+	// same amount as resolveActiveLocked: with overlapping cues the active one
+	// can start earlier than idx, and its EndMS is then the next boundary. Scan
+	// forward only and that cue-out is never scheduled — the caption freezes on
+	// screen until the next timeline message (§5.5 push on cue-out).
 	idx := sort.Search(len(e.cues), func(i int) bool { return e.cues[i].StartMS > pos }) - 1
 	if idx < 0 {
 		idx = 0
 	}
-	for i := idx; i < len(e.cues) && i <= idx+8; i++ {
+	lo := idx - 8
+	if lo < 0 {
+		lo = 0
+	}
+	for i := lo; i < len(e.cues) && i <= idx+8; i++ {
 		consider(e.cues[i].StartMS)
 		consider(e.cues[i].EndMS)
 	}
@@ -419,6 +472,11 @@ type Status struct {
 	DriftMS    int64
 	Language   string
 	CueCount   int
+	// The configured drift budget and whether the last measurement broke it, so
+	// diagnostics can show the number against the limit it is judged by (§5.5).
+	WarnBudgetMS   int64
+	TargetBudgetMS int64
+	OverBudget     bool
 }
 
 // Status returns a diagnostic snapshot (no caption text).
@@ -426,13 +484,16 @@ func (e *Engine) Status() Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return Status{
-		PositionMS: e.positionLocked(),
-		State:      e.state,
-		Playing:    e.rate != 0,
-		Visible:    e.visible,
-		DriftMS:    e.driftMS,
-		Language:   e.language,
-		CueCount:   len(e.cues),
+		PositionMS:     e.positionLocked(),
+		State:          e.state,
+		Playing:        e.rate != 0,
+		Visible:        e.visible,
+		DriftMS:        e.driftMS,
+		Language:       e.language,
+		CueCount:       len(e.cues),
+		WarnBudgetMS:   e.warnBudgetMS,
+		TargetBudgetMS: e.targetBudgetMS,
+		OverBudget:     e.overBudgetLocked(),
 	}
 }
 
@@ -448,9 +509,20 @@ func (e *Engine) DriftMS() int64 {
 func (e *Engine) OverBudget() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.overBudgetLocked()
+}
+
+func (e *Engine) overBudgetLocked() bool {
 	d := e.driftMS
 	if d < 0 {
 		d = -d
 	}
 	return e.warnBudgetMS > 0 && d > e.warnBudgetMS
+}
+
+// WarnBudgetMS returns the configured drift warn threshold (§5.5 / D9).
+func (e *Engine) WarnBudgetMS() int64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.warnBudgetMS
 }
