@@ -3,9 +3,11 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,4 +209,133 @@ func TestSetupModeClosesOnCompletion(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("unauthenticated status after completion = %d, want 503", resp.StatusCode)
 	}
+}
+
+// §8.1 steps 11-13 run the verification and readiness checks BEFORE setup
+// exits, and §8.4 makes it a hard gate: in the locked profiles "an admin
+// surface reachable from the patron side refuses to leave setup". Completion
+// previously ran no check at all — and stamped §10.8's LastReadinessCheckOK as
+// if one had passed, recording a check that never ran.
+func TestSetupCompletionIsGatedOnARealCheck(t *testing.T) {
+	newServer := func(profile model.FirewallProfile, status func() model.SystemReadiness) (*Server, config.Store) {
+		store, err := config.OpenSQLite(filepath.Join(t.TempDir(), "c.db"))
+		if err != nil {
+			t.Fatalf("store: %v", err)
+		}
+		t.Cleanup(func() { store.Close() })
+		s, err := NewServer(Config{
+			Profile: profile, PatronBind: "0.0.0.0:0", AdminBind: "127.0.0.1:0",
+		}, Deps{Hub: fanout.NewHub(fanout.Options{}), Store: store, Status: status})
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		return s, store
+	}
+
+	// Drive the wizard to the point where only the readiness gate is left.
+	satisfyPrereqs := func(t *testing.T, ts *httptest.Server) {
+		t.Helper()
+		post := func(path string, body any) *http.Response {
+			b, _ := json.Marshal(body)
+			req, _ := http.NewRequest("POST", ts.URL+path, bytes.NewReader(b))
+			req.Header.Set("Content-Type", "application/json")
+			req.SetBasicAuth("admin", "longenough1")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("POST %s: %v", path, err)
+			}
+			resp.Body.Close()
+			return resp
+		}
+		b, _ := json.Marshal(map[string]string{"username": "admin", "password": "longenough1"})
+		req, _ := http.NewRequest("POST", ts.URL+"/api/admin/setup/credentials", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("create credentials: %v", err)
+		}
+		resp.Body.Close()
+		post("/api/admin/setup/network", map[string]string{"TheaterIface": "eth0", "ClientIface": "wlan0"})
+		post("/api/admin/setup/server", map[string]string{"auditorium_id": "screen-1", "cinema_server_ip": "10.10.20.15"})
+		post("/api/admin/setup/profile", map[string]string{"profile": "patron_facing"})
+	}
+
+	complete := func(t *testing.T, ts *httptest.Server) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest("POST", ts.URL+"/api/admin/setup/complete", nil)
+		req.SetBasicAuth("admin", "longenough1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("complete: %v", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+
+	t.Run("admin on the patron net refuses to leave setup", func(t *testing.T) {
+		s, store := newServer(model.ProfilePatronFacing, func() model.SystemReadiness {
+			return model.SystemReadiness{AdminIsolated: false}
+		})
+		ts := httptest.NewServer(s.AdminHandler())
+		defer ts.Close()
+		satisfyPrereqs(t, ts)
+
+		code, body := complete(t, ts)
+		if code != http.StatusPreconditionFailed {
+			t.Fatalf("complete = %d, want 412 (§8.4 refuses to leave setup)", code)
+		}
+		if !strings.Contains(body, model.WarnAdminOnPatronNet) {
+			t.Errorf("refusal should name the blocking condition, got %q", body)
+		}
+		if v, _, _ := store.GetSetting(config.SettingSetupComplete); v == "true" {
+			t.Error("setup was marked complete despite the refusal")
+		}
+	})
+
+	t.Run("a critical warning blocks completion", func(t *testing.T) {
+		s, _ := newServer(model.ProfileBoothDiagnostic, func() model.SystemReadiness {
+			return model.SystemReadiness{AdminIsolated: true, Warnings: []model.Warning{
+				{Code: model.WarnForwardingEnabled, Severity: model.SeverityCritical},
+			}}
+		})
+		ts := httptest.NewServer(s.AdminHandler())
+		defer ts.Close()
+		satisfyPrereqs(t, ts)
+
+		code, body := complete(t, ts)
+		if code != http.StatusPreconditionFailed {
+			t.Fatalf("complete = %d, want 412 for a critical warning", code)
+		}
+		if !strings.Contains(body, model.WarnForwardingEnabled) {
+			t.Errorf("refusal should name the critical code, got %q", body)
+		}
+	})
+
+	t.Run("a clean check completes and does not fabricate a readiness stamp", func(t *testing.T) {
+		s, store := newServer(model.ProfilePatronFacing, func() model.SystemReadiness {
+			return model.SystemReadiness{AdminIsolated: true}
+		})
+		ts := httptest.NewServer(s.AdminHandler())
+		defer ts.Close()
+		satisfyPrereqs(t, ts)
+
+		if code, body := complete(t, ts); code != http.StatusOK {
+			t.Fatalf("complete = %d (%s), want 200 on a clean check", code, body)
+		}
+		if v, _, _ := store.GetSetting(config.SettingSetupComplete); v != "true" {
+			t.Error("setup should be complete after a clean check")
+		}
+		// §10.8's LastReadinessCheckOK records when a check last PASSED. The
+		// supervisor writes it from passes it actually ran; pressing Complete
+		// must not stamp one on its behalf.
+		cfgv, err := store.GetSystemConfig()
+		if err != nil {
+			t.Fatalf("GetSystemConfig: %v", err)
+		}
+		if cfgv.LastReadinessCheckOK != nil {
+			t.Errorf("completion fabricated a §10.8 readiness stamp (%v) from a check it never ran",
+				cfgv.LastReadinessCheckOK)
+		}
+	})
 }

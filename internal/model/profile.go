@@ -15,7 +15,24 @@ const (
 // which admin must not be exposed on the patron network and SSH is disabled
 // (§8.4, §9.2). Lab and Booth Diagnostic are non-production.
 func (p FirewallProfile) Production() bool {
-	return p == ProfilePatronFacing || p == ProfileLowCostReplacement
+	// An UNRECOGNIZED profile counts as production. §8.4 makes admin/patron
+	// separation a hard boundary — "the patron network is untrusted BYOD;
+	// authentication alone is not the boundary" — so a hand-edited, migrated, or
+	// corrupted profile name must get the STRICTEST posture, not skip the check.
+	// Returning false here made validateBindSeparation pass silently on a typo.
+	return !p.Known() || p == ProfilePatronFacing || p == ProfileLowCostReplacement
+}
+
+// Known reports whether p is one of the four shipping profiles (§9.2 / §12).
+// Every fail-safe decision keys off this rather than off a default case, so an
+// unknown posture is answered conservatively instead of permissively.
+func (p FirewallProfile) Known() bool {
+	switch p {
+	case ProfileLab, ProfileBoothDiagnostic, ProfilePatronFacing, ProfileLowCostReplacement:
+		return true
+	default:
+		return false
+	}
 }
 
 // AdminAllowedOnPatronNet reports whether the admin surface may be bound on the

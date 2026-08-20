@@ -249,15 +249,65 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, reason, http.StatusPreconditionFailed)
 		return
 	}
-	_ = s.deps.Store.PutSetting(config.SettingSetupComplete, "true")
-	// Record a successful readiness checkpoint (§10.8).
-	if v, err := s.deps.Store.GetSystemConfig(); err == nil {
-		now := time.Now().UTC()
-		v.LastReadinessCheckOK = &now
-		_ = s.deps.Store.PutSystemConfig(v)
+	// §8.1 steps 11-13 run the firewall/network verification and the readiness
+	// checks BEFORE setup exits, and §8.4 makes that a hard gate: in the locked
+	// profiles "an admin surface reachable from the patron side refuses to leave
+	// setup". Consult the readiness snapshot the supervisor assembles from passes
+	// that actually ran, rather than declaring success on the operator's behalf.
+	if blocking := s.setupBlockers(); len(blocking) > 0 {
+		s.deps.Log.Warn(logging.EvStateTransition,
+			logging.Field("phase", "setup_complete_refused"),
+			logging.Field("blocking", strings.Join(blocking, ",")))
+		http.Error(w, "cannot leave setup until these are resolved: "+strings.Join(blocking, ", "),
+			http.StatusPreconditionFailed)
+		return
 	}
+
+	_ = s.deps.Store.PutSetting(config.SettingSetupComplete, "true")
+	// §10.8's LastReadinessCheckOK is deliberately NOT stamped here. It records
+	// when a readiness check last PASSED, and the supervisor writes it from the
+	// verification passes it actually runs; stamping it on the operator pressing
+	// Complete would record a check that never ran — and would race the
+	// supervisor's own read-modify-write of the same row.
 	s.deps.Log.Info(logging.EvStateTransition, logging.Field("phase", "setup_complete"))
 	writeJSON(w, s.setup.State())
+}
+
+// setupBlockers lists the §8.3 warning codes that must clear before setup may
+// close. It returns codes, not prose, so the list is stable for the UI and
+// carries nothing sensitive into the log (§9.4).
+//
+// With no Status dependency wired there is nothing to consult, and the gate
+// stays open rather than blocking an operator on a check the build cannot run;
+// the shipped core always wires it.
+func (s *Server) setupBlockers() []string {
+	if s.deps.Status == nil {
+		return nil
+	}
+	st := s.deps.Status()
+
+	var blocking []string
+	seen := map[string]bool{}
+	add := func(code string) {
+		if code != "" && !seen[code] {
+			seen[code] = true
+			blocking = append(blocking, code)
+		}
+	}
+
+	// The §8.4 hard check applies to the locked profiles, and to an unrecognized
+	// one (model.FirewallProfile.Production treats unknown as production).
+	if s.cfg.Profile.Production() && !st.AdminIsolated {
+		add(model.WarnAdminOnPatronNet)
+	}
+	// Every critical condition blocks regardless of profile: leaving setup is
+	// the moment the appliance claims it is ready for a show.
+	for _, warn := range st.Warnings {
+		if warn.Severity == model.SeverityCritical {
+			add(warn.Code)
+		}
+	}
+	return blocking
 }
 
 // requireAdmin authenticates admin requests (§8.4). On first boot (no credential

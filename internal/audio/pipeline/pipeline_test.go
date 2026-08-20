@@ -376,8 +376,15 @@ func TestPipelineFormatChangeIsCounted(t *testing.T) {
 		StaleFrameTimeout: 10 * time.Second,
 	})
 	run(t, st)
-	got := waitFor(t, st, "the format change to be reported", func(s model.AudioStreamState) bool {
-		return strings.Contains(strings.Join(s.Reasons, " "), "changed capture format")
+	// Wait for the per-SESSION stability reason, not the immediate one. Two
+	// different states mention the format change: the live publish at the moment
+	// the odd frame arrives, which still describes the window it measured (the
+	// old width — honestly, since that window really was 2-channel), and the next
+	// completed analysis block, which carries the new width. Matching on
+	// "changed capture format" alone caught whichever came first and made this
+	// test flaky; the session reason is only ever emitted from a completed block.
+	got := waitFor(t, st, "the format change to be reported on a completed block", func(s model.AudioStreamState) bool {
+		return strings.Contains(strings.Join(s.Reasons, " "), "this session")
 	})
 	if got.Status.Rank() < model.QualMarginal.Rank() {
 		t.Errorf("a device that changed format mid-stream must be demoted, got %q", got.Status)
