@@ -3,8 +3,8 @@
 CaptionBridge is built as far as it can go in software on this dev machine.
 Everything hardware-gated is behind a seam and recorded in `BLOCKERS.md`.
 
-- **31 packages · 374 tests · race-clean · ~82% coverage · ~31K LOC of Go.**
-- **30 ACSP scenarios** (`./bin/acsp-simulator`) as the caption-path regression backbone.
+- **31 packages · 472 tests · race-clean · ~82% coverage · ~36K LOC of Go.**
+- **32 ACSP scenarios** (`./bin/acsp-simulator`) as the caption-path regression backbone.
 - A **soak layer** (§11.6): 1500 show cycles with reconnects and language
   switches, retention flat, content purged at every show boundary.
 - The full three-process system runs end-to-end and was verified live (below).
@@ -89,14 +89,16 @@ failed feed raises a critical warning); nothing sensitive in logs (redaction).
 Recorded honestly rather than closed off. Fullest detail is in JOURNAL.md and in
 the audit lanes' own reports.
 
-- **Admin UI has not caught up with the backend.** The dashboard renders the
-  original rows; the facts added since (process liveness, client counts vs the
-  cap, `firewall_introspected`, connected-vs-pinned server identity, the §10.8
-  record) are in `/api/admin/status` but not on the page. The §6.4 calibration
-  ENGINE exists with no admin screen driving it, and the §10.4 join code has no
-  QR bitmap rendered for it.
-- **§8.5 screen-name guard.** The pinned server FINGERPRINT is checked;
-  `expected_screen_name` still has no guard.
+- **§10.4 join code has no QR bitmap** rendered for it; the code and join URL
+  are delivered, but a patron types the code rather than scanning.
+- **The §6.4 wizard has no hardware path to measure.** `calibration.SourceHardware`
+  is implemented and tested, but nothing on this image can emit it — the single
+  line that becomes a real-device open is the synthetic-device-id refusal (B3/B4).
+- **A multi-device room is not representable in one §10.5 profile record**
+  (`AuditoriumProfile` holds a single `input_device_id`). The wizard now refuses
+  the pairing rather than calibrating one device and reporting two; the show path
+  in `cmd/captionbridge-media` has the same shape and is masked only by the B3/B4
+  refusal. Worth a decision before the hardware path lands.
 - **Support mode (§9.4)** — off by default, outbound-only, time-limited,
   audited — is still only a config key.
 - **Signed offline updates + A/B rollback (§9.4)** are not built.

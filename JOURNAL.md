@@ -227,3 +227,66 @@ green under `-race -count=2`, three processes verified running end to end.
 Remaining software work is listed in STATUS.md under "Known remaining work" —
 chiefly that the admin UI has not caught up with the backend facts now available
 to it, and the §6.4 wizard has an engine but no screen.
+
+## Admin surface catches up (§8.2, §8.3, §8.4, §6.4)
+
+Two waves had made the backend measure honestly; almost none of it was visible.
+The dashboard rendered about half of §8.2's rows and none of the facts added
+since — most sharply `firewall_introspected`, which meant the page printed
+"Firewall: Active" identically whether the ruleset had been READ or merely
+assumed. Two lanes: the dashboard, and a real screen for the §6.4 calibration
+engine.
+
+**The fabrication check earned its keep three times over.** All three defects
+were live on the shipped page, all three passed their tests, and all three are
+the same shape — a value that was never measured rendered as though it had been:
+
+- **A synthetic tone shown as the booth's feed.** `captionbridge-media` marks
+  generated inputs with a `synthetic-` device-id prefix, but the dashboard
+  dropped `input_device_id` entirely, so the page rendered "HI · excellent ·
+  -13.5 dBFS" and an audio verdict of READY with nothing saying the source was a
+  generated tone. `--synthetic` defaults to true, so that was what every
+  dashboard showed. Attribution now appears at all four places a verdict is read.
+- **Drift 0 printed as a measurement.** `drift_ms_estimate` is an int64 with no
+  `omitempty`, so the "not measured" branch was dead code; `MaxDriftMS` ranges
+  over per-language engines and returns 0 by vacuity when no show is loaded. A
+  DISCONNECTED caption path rendered "Drift at last re-anchor: 0 ms" — flawless
+  sync for a path that is not running.
+- **A cleared level printed as a reading.** `pipeline.Stream.fail()` clears
+  `LevelDBFS` to the -120.0 sentinel, so a stream whose only reason was "not yet
+  started" rendered as "-120.0 dBFS": a sentinel dressed as a measurement of
+  digital silence.
+
+Also found: `verify.Report.AdminIsolated` answers "does this binding meet the
+ACTIVE profile's requirement", and Lab and Booth Diagnostic impose none — so it
+read `true` for an admin surface bound to every interface, exactly the case §8.4
+wrote its banner for. The dashboard now carries the raw reachability measurement.
+
+**Fixed at the integration seam afterwards:** core never passed `--socket-dir`
+through to the web layer, so the wizard reported "the media process is not
+answering" for every device on any non-default socket dir. And both listeners
+shared one embedded asset handler, so the PATRON bind served admin.html,
+admin.js and the calibration wizard to the untrusted BYOD network — no measured
+values, but the surface, and this pass had just grown admin.js from 3KB to 29KB
+of booth diagnostics. Assets are now partitioned by surface with an allowlist,
+and a test asserts every file in `assets/` is classified to exactly one of them.
+
+**Also this session:** the §8.5 wrong-room guard was completed. Only the
+fingerprint was compared; the screen name was received and discarded, which
+matters because §10.5 notes the fingerprint may not exist on a given server
+family — where identity is the weaker composite, the screen name is the only
+wrong-room signal there is. The check now reports five outcomes rather than a
+boolean, because "nothing pinned" and "pinned but unanswered" are both
+UNVERIFIED and neither may render as a match.
+
+**A process note worth keeping.** Agent worktrees were three times created from
+the session's ORIGINAL commit rather than current HEAD. The first time cost a
+merge conflict; the third time both lanes would have been building against a
+tree where `internal/audio/calibration` did not exist and `firewall_introspected`
+had never been added — the entire premise of their task absent. Caught it before
+any work was wasted, and the workflow script now verifies its base commit as step
+zero and resets if stale.
+
+Where it landed: 31 packages, 472 tests, ~82% coverage, 32 scenarios, green
+under `-race`, three processes verified running with the dashboard and the
+wizard both exercised live.
