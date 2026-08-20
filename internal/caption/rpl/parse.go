@@ -77,6 +77,26 @@ func ParseBytes(b []byte) (*RPL, error) {
 			if inReel {
 				reelNumBuf = readText(se)
 			}
+		// Reel-level timing. A <Resource> is decoded whole (parseResource consumes
+		// the element), so these can only be the reel's own children. They are what
+		// keeps an uncaptioned reel — legitimately resource-less, §5.2 item 5 —
+		// from collapsing to 0 ms and shifting every following reel (§5.3).
+		// PROVISIONAL element names (D19 / Phase 0A): the real ST 430-11 spelling is
+		// confirmed against a live server before it is relied on.
+		case "duration":
+			if inReel && curReel != nil {
+				curReel.DurationUnits = atoiOr(readText(se), 0)
+			}
+		case "entrypoint", "entry_point":
+			if inReel && curReel != nil {
+				curReel.EntryPointUnits = atoiOr(readText(se), 0)
+			}
+		case "editrate", "edit_rate":
+			if inReel && curReel != nil {
+				if er, err := timedtext.ParseEditRate(readText(se)); err == nil {
+					curReel.EditRate = er
+				}
+			}
 		case "resource":
 			res, err := parseResource(dec, se)
 			if err != nil {

@@ -109,3 +109,89 @@ func TestParseMalformedErrors(t *testing.T) {
 		t.Fatalf("expected error for malformed RPL")
 	}
 }
+
+// TestReelLevelDurationAnchorsUncaptionedReel covers the reel whose ResourceList
+// is legitimately empty (§5.2 item 5): its duration can only come from the
+// reel-level <Duration>, and without it every following reel anchors at the wrong
+// composition offset (§5.3).
+func TestReelLevelDurationAnchorsUncaptionedReel(t *testing.T) {
+	r := load(t, "rpl_uncaptioned_middle_reel.xml")
+	if len(r.Reels) != 3 {
+		t.Fatalf("reels = %d, want 3", len(r.Reels))
+	}
+	if n := len(r.Reels[1].Resources); n != 0 {
+		t.Fatalf("reel2 resources = %d, want 0 (uncaptioned reel)", n)
+	}
+	for i, want := range []int64{60000, 60000, 60000} {
+		if got := r.Reels[i].DurationMS(); got != want {
+			t.Errorf("reel%d duration = %d, want %d", i+1, got, want)
+		}
+	}
+	for i, want := range []int64{0, 60000, 120000} {
+		if got := r.ReelOffsetMS(i); got != want {
+			t.Errorf("reel%d offset = %d, want %d", i+1, got, want)
+		}
+	}
+	if got, want := r.TotalDurationMS(), int64(180000); got != want {
+		t.Errorf("total duration = %d, want %d", got, want)
+	}
+	// Reel 3 is trimmed 48 units (2000 ms) into its asset; a cue at asset time t
+	// therefore lands at reelOffset + t - 2000 on the composition timeline.
+	if got, want := r.Reels[2].EntryPointMS(), int64(2000); got != want {
+		t.Errorf("reel3 entry point = %d, want %d", got, want)
+	}
+	res, ok := r.Reels[2].SelectResource("en-US")
+	if !ok {
+		t.Fatalf("expected an en-US resource on reel 3")
+	}
+	if got, want := r.Reels[2].TrimMS(res), int64(2000); got != want {
+		t.Errorf("reel3 trim = %d, want %d (reel entry point, resource has none)", got, want)
+	}
+}
+
+// TestReelDurationFallsBackToResources: an RPL with no reel-level <Duration> keeps
+// the previous heuristic (longest resource) so existing content still anchors.
+func TestReelDurationFallsBackToResources(t *testing.T) {
+	r := load(t, "rpl_multilang.xml")
+	if r.Reels[0].DurationUnits != 0 {
+		t.Fatalf("fixture unexpectedly declares a reel-level duration")
+	}
+	if got := r.Reels[0].DurationMS(); got != 60000 {
+		t.Fatalf("reel1 duration = %d, want 60000 from the longest resource", got)
+	}
+}
+
+// TestReelIndexAt is the inverse of ReelOffsetMS: the mapping that lets the ACS
+// fetch the current + next reel and skip reels already past (§5.3).
+func TestReelIndexAt(t *testing.T) {
+	r := load(t, "rpl_uncaptioned_middle_reel.xml")
+	cases := []struct {
+		name string
+		pos  int64
+		want int
+	}{
+		{"before start clamps to first", -5000, 0},
+		{"start of reel 1", 0, 0},
+		{"inside reel 1", 2000, 0},
+		{"boundary into reel 2", 60000, 1},
+		{"inside uncaptioned reel 2", 65000, 1},
+		{"boundary into reel 3", 120000, 2},
+		{"inside reel 3", 125000, 2},
+		{"past the end clamps to last", 999000, 2},
+	}
+	for _, tc := range cases {
+		if got := r.ReelIndexAt(tc.pos); got != tc.want {
+			t.Errorf("%s: ReelIndexAt(%d) = %d, want %d", tc.name, tc.pos, got, tc.want)
+		}
+	}
+	// An RPL with no reels never panics and never invents an index.
+	empty := &RPL{}
+	if got := empty.ReelIndexAt(1000); got != 0 {
+		t.Errorf("empty RPL ReelIndexAt = %d, want 0", got)
+	}
+	// A reel of unknown duration cannot contain a position and is stepped over.
+	unknown := &RPL{Reels: []Reel{{ReelNumber: 1}, {ReelNumber: 2}}}
+	if got := unknown.ReelIndexAt(5000); got != 1 {
+		t.Errorf("unknown-duration ReelIndexAt = %d, want 1 (last)", got)
+	}
+}

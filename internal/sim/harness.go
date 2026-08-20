@@ -13,6 +13,7 @@
 package sim
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -62,7 +63,9 @@ type HarnessOptions struct {
 	PreferredLanguages  []string
 	ExpectedFingerprint string
 	FetchAheadReels     int
-	Log                 *logging.Logger
+	// EagerLanguages caps the up-front language fetch (§5.3); 0 fetches all.
+	EagerLanguages int
+	Log            *logging.Logger
 }
 
 // Harness wires a fake clock, hub, controller, memory-backed resolver, loader, and
@@ -73,10 +76,36 @@ type Harness struct {
 	Ctrl    *caption.Controller
 	Machine *acsp.Machine
 	Fetcher *resolver.MemoryFetcher
+	// Cache is the transient timed-text cache, so a scenario can assert that
+	// content really is gone at a show boundary (guardrail #5).
+	Cache *resolver.Cache
 
 	mu       sync.Mutex
 	subs     map[string]*fanout.Subscriber
 	warnings []model.Warning
+	fetches  *recordingFetcher
+}
+
+// recordingFetcher counts media-block fetches per locator. Scenarios need it
+// because §5.3's "skip fetching reels already past" is a statement about what is
+// NOT fetched, which no caption assertion can demonstrate.
+type recordingFetcher struct {
+	inner  *resolver.MemoryFetcher
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func (r *recordingFetcher) Fetch(ctx context.Context, ref string) ([]byte, error) {
+	r.mu.Lock()
+	r.counts[ref]++
+	r.mu.Unlock()
+	return r.inner.Fetch(ctx, ref)
+}
+
+func (r *recordingFetcher) count(ref string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counts[ref]
 }
 
 // NewHarness builds a Harness over the given media-block files.
@@ -92,9 +121,12 @@ func NewHarness(opts HarnessOptions) *Harness {
 	if fetcher.Files == nil {
 		fetcher.Files = map[string][]byte{}
 	}
-	res := resolver.NewPluggable(fetcher, nil, log)
-	loader := resolver.NewLoader(resolver.NewPipeline(res, resolver.NewCache(8<<20), log), opts.FetchAheadReels)
-	h := &Harness{Clock: clk, Hub: hub, Ctrl: ctrl, Fetcher: fetcher, subs: map[string]*fanout.Subscriber{}}
+	rec := &recordingFetcher{inner: fetcher, counts: map[string]int{}}
+	res := resolver.NewPluggable(rec, nil, log)
+	cache := resolver.NewCache(8 << 20)
+	loader := resolver.NewLoader(resolver.NewPipeline(res, cache, log), opts.FetchAheadReels)
+	h := &Harness{Clock: clk, Hub: hub, Ctrl: ctrl, Fetcher: fetcher, Cache: cache,
+		subs: map[string]*fanout.Subscriber{}, fetches: rec}
 	h.Machine = acsp.New(acsp.Options{
 		Controller:          ctrl,
 		Resolver:            res,
@@ -104,10 +136,14 @@ func NewHarness(opts HarnessOptions) *Harness {
 		ExpectedFingerprint: opts.ExpectedFingerprint,
 		PreferredLanguages:  opts.PreferredLanguages,
 		FetchAheadReels:     opts.FetchAheadReels,
+		EagerLanguages:      opts.EagerLanguages,
 		OnWarning:           h.addWarning,
 	})
 	return h
 }
+
+// FetchCount returns how many times a media-block locator has been fetched.
+func (h *Harness) FetchCount(ref string) int { return h.fetches.count(ref) }
 
 func (h *Harness) addWarning(w model.Warning) {
 	h.mu.Lock()
@@ -156,6 +192,33 @@ func (h *Harness) Evaluate() { h.Ctrl.Evaluate() }
 // AdvanceEval advances the clock then re-resolves cues.
 func (h *Harness) AdvanceEval(d time.Duration) {
 	h.Clock.Advance(d)
+	h.Ctrl.Evaluate()
+}
+
+// RunTimeline drives Update Timeline at a fixed cadence up to untilMS, advancing
+// the fake clock in step and ticking as production would, with a status keepalive
+// at the half-lease cadence so the lease does not lapse mid-run (§11.1 "timeline
+// updates at a configurable cadence", §5.2 item 1). It leaves the engines
+// evaluated at the final position.
+func (h *Harness) RunTimeline(cadence time.Duration, untilMS int64, playoutID string) {
+	step := cadence.Milliseconds()
+	if step <= 0 {
+		return
+	}
+	pos := h.State().TimelinePositionMS
+	interval := h.State().RequestIntervalMS // == half the lease
+	var sinceKeepalive int64
+	for pos < untilMS {
+		pos += step
+		h.Clock.Advance(cadence)
+		sinceKeepalive += step
+		if interval > 0 && sinceKeepalive >= interval {
+			h.Send(Status(interval * 2))
+			sinceKeepalive = 0
+		}
+		h.Send(UpdateTimeline(pos, playoutID, acsp.PlayPlaying))
+		h.Machine.Tick()
+	}
 	h.Ctrl.Evaluate()
 }
 
@@ -208,6 +271,23 @@ func (h *Harness) AssertState(t T, want model.ACSPState) {
 	t.Helper()
 	if got := h.State().State; got != want {
 		t.Errorf("state = %s, want %s", got, want)
+	}
+}
+
+// AssertNoCachedContent asserts the transient timed-text cache is empty — what
+// guardrail #5 ("purged at show end") actually means in memory.
+func (h *Harness) AssertNoCachedContent(t T) {
+	t.Helper()
+	if got := h.Cache.Used(); got != 0 {
+		t.Errorf("transient cache holds %d bytes of caption content, want 0", got)
+	}
+}
+
+// AssertFetchCount asserts how many times a media-block locator was fetched.
+func (h *Harness) AssertFetchCount(t T, ref string, want int) {
+	t.Helper()
+	if got := h.FetchCount(ref); got != want {
+		t.Errorf("fetches of %s = %d, want %d", ref, got, want)
 	}
 }
 
