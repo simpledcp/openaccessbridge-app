@@ -429,3 +429,80 @@ as necessary to keep the RTP clock frame-spaced, but with the current
 `fdsrc blocksize` the timestamps are exactly 480 ticks per packet with or without
 it, under paced and bursty writes alike. The flag is correct and harmless, so it
 stays — but it is not load-bearing and nothing fails without it.
+
+## §11.4 latency pass — measuring the appliance-side floor, and naming the rest
+
+§15 names HI latency as the plan's largest risk and §6.7 flags the sub-150 ms
+target as "aggressive and may be unachievable". Until the §6.7 WebRTC path
+existed there was no peer to measure against, so every row of that latency table
+was a quoted typical. `internal/audio/latency` (`make latency`, plus a CI-sized
+run in the normal suite) turns the rows this host CAN reach into readings and
+states the boundary of the claim everywhere a number appears.
+
+**It measures the production path, not a copy of it.** The harness runs the real
+`pipeline.Stream` with the paced synthetic source, the real `gst-launch` Opus
+encoder, and the real `webrtcpeer.Hub`, and takes its timestamps from a tap
+wrapped around the `encode.RTPStream` seam. A harness that re-implemented the
+chain would report a delay no patron's audio ever travelled through.
+
+**Correlation, which is the load-bearing part.** Each RTP packet is joined to its
+PCM block by ordinal (the encoder is FIFO with DTX off, so the Nth accepted block
+is the Nth packet) and to its arrival at the subscriber by RTP timestamp, which
+`TrackLocalStaticRTP` preserves. Neither is taken on faith: a write ordinal is
+recorded only if `StreamStats.FramesIn` advanced, so a dropped block cannot shift
+every later packet onto the wrong write; the RTP sequence number is checked on
+every packet and a gap RESYNCHRONISES the ordinal (a silent one-frame drift would
+understate the floor by a whole Opus frame); and a join that produces a negative
+transit aborts the run rather than reporting a shorter floor than the appliance
+has. A spike before writing any of it confirmed the shape: correlating by RTP
+timestamp naively is off by one, because `opusenc`'s FIRST timestamp stride is
+360 ticks rather than 480. That 120-sample gap is the encoder's pre-skip, and it
+became a measurement in its own right (2.5 ms) instead of a bug.
+
+**What came out**, 30 s window, 3000 joined packets, 0 dropped blocks, 0 resyncs
+(p50 / p95): channel map 0.8 / 4.4 µs; level analysis 119 / 234 µs; Opus encode
+transit 416 / 524 µs; WebRTC fan-out transit 111 / 143 µs; appliance floor 531 /
+651 µs. Composed with the structural 10 ms framing term, the appliance-side floor
+is ~10.7 ms. Percentiles are nearest-rank, never interpolated, so every printed
+duration is one that actually happened; no mean is offered, because a mean hides
+exactly the jitter this pass is about.
+
+Two of those readings correct quoted typicals rather than confirming them. §6.7
+budgets "~10–20 ms" for Opus encode at a 10 ms frame; measured, the encoder's
+wall transit is half a millisecond and the 10 ms is entirely the framing delay of
+having to accumulate a frame before one can be emitted — so the row is
+structural, not processing cost, and shrinking it means shrinking the frame, not
+optimising the encoder.
+
+The second correction is a real (small, out-of-lane) defect, left unfixed and
+recorded here. `pipeline.EncoderPathLatencyMS` reports capture period + Opus
+frame — 20 ms at the shipped settings — but the two are the SAME accumulation
+when the capture period is a whole number of Opus frames, which is the shipped
+case: one 10 ms capture frame is handed straight to `WritePCM` and becomes
+exactly one Opus frame. Measured, the whole appliance-side path is ~10.7 ms, not
+20. The estimate is conservative rather than flattering, which is the safe
+direction for a latency budget, so it was NOT changed in this pass — but it is
+double-counting, and the harness is the first thing able to say so. Worth a
+decision alongside the real ALSA period, where a period LONGER than one frame
+does add a genuine second term.
+
+**What it deliberately does not say.** This is a Go-peer-to-Go-peer measurement
+on one machine. It is a FLOOR for the appliance's own contribution and says
+nothing about glass-to-ear, and the report refuses to be quoted without that: the
+headline sentence, the "still a floor" label on the composed total, and the full
+list of unmeasured terms — ALSA buffer (B3), Wi-Fi, the phone jitter buffer
+(B2, flagged as THE DOMINANT TERM), Opus decode, phone audio output (B2) — are
+pinned by tests that fail if any of them is dropped. Nothing is compared to the
+100–150 ms HI target as though the target had been met. `latency_measured` on the
+dashboard is still false.
+
+The sharpest thing this pass produced is a change in where the risk sits: the
+appliance spends under a millisecond of transit, so essentially the whole HI
+latency question now lives on the phone side that B2 gates. B2 and B3 were
+updated to say so.
+
+Five behaviours were mutation-confirmed (reverted, watched fail, restored): the
+ordinal resync after a sequence gap; the negative-transit refusal; the pre-skip
+guard that claims nothing from a ragged RTP clock; the Summary headline that
+bounds the claim; and the `dur(0)` rendering that makes an unmeasured stage read
+as "-" rather than as 0 ms.

@@ -41,6 +41,7 @@ RT=/tmp/cb; mkdir -p $RT
 ./bin/acsp-simulator --list ; ./bin/acsp-simulator
 
 make soak         # §11.6 long soak (default 2000 show cycles)
+make latency      # §11.4 appliance-side latency pass (default 60 s sampling window)
 ```
 
 **Verified live (all three processes):** captions `PLAYING` (lease active, RPL
@@ -99,11 +100,53 @@ is itself set from a counted RTP packet — not from "the encoder was launched".
 
 **Measured here:** Opus RTP arrives at a subscriber over the real three-process
 path; RTP timestamps advance exactly 480 ticks per packet (the §6.7 10 ms
-frame); the encode path holds ~0 frames of backlog in steady state and adds
-~0.4 ms of wall transit beyond the frame itself. **Not measured here:** anything
-glass-to-ear. No phone, no venue AP, no jitter buffer (B2). The dashboard still
-renders audio latency as "not measured" with the encode-path estimate beside it
-under its own name.
+frame); the encode path holds ~0 frames of backlog in steady state. **Not
+measured here:** anything glass-to-ear. No phone, no venue AP, no jitter buffer
+(B2). The dashboard still renders audio latency as "not measured" with the
+encode-path estimate beside it under its own name.
+
+## §11.4 latency — the appliance-side FLOOR, and only that
+
+`internal/audio/latency` (`make latency`) drives the production path — the real
+`pipeline.Stream`, the real `gst-launch` Opus encoder, the real
+`webrtcpeer.Hub` — and times each appliance-side contributor separately, so a
+real figure can later be COMPOSED with the phone-side terms instead of guessed.
+Timestamps are taken from a tap on the `encode.RTPStream` seam; each packet is
+joined between the encoder's socket and the subscriber by its RTP timestamp, and
+to the PCM block that produced it by an ordinal that resynchronises on any RTP
+sequence gap rather than drifting a frame.
+
+Measured on this dev host, 30 s window, 3000 joined packets, 0 dropped blocks,
+0 sequence resyncs (p50 / p95):
+
+| Contributor | p50 | p95 | what the two timestamps span |
+|---|---|---|---|
+| `channel_map` | 0.8 µs | 4.4 µs | one `mapper.Extract` of one capture frame, on the delivery path |
+| `level_analysis` | 119 µs | 234 µs | one `Extract` + one `qualifier.Analyze` of a §6.3 block — runs BESIDE the delivery path, so it is not in a patron's latency at all |
+| `opus_encode_transit` | 416 µs | 524 µs | a complete 10 ms block handed to the encoder → the RTP packet carrying it, off the encoder's own socket |
+| `webrtc_fanout_transit` | 111 µs | 143 µs | that packet → the same packet parsed by a Pion subscriber, through the fan-out, a real SRTP session and an ICE host-candidate hop |
+| `appliance_floor` | 531 µs | 651 µs | both of the above on ONE packet (a measurement, not a sum of percentiles) |
+
+Also **measured**, from the RTP clock: the encoder's Opus **pre-skip is 120
+samples (2.5 ms)** — its first timestamp stride was 360 ticks where every later
+stride was exactly 480.
+
+**Composed appliance-side floor: ~10.7 ms** = 10 ms of structural framing (a
+10 ms Opus frame cannot be emitted before 10 ms of audio exists) + the 651 µs
+measured p95, for the oldest sample in a block.
+
+**This is a FLOOR, and it is NOT a glass-to-ear figure.** It was measured
+Go-peer-to-Go-peer on one machine. §6.7's own honesty flag names the phone-side
+jitter buffer (40–300+ ms) as the dominant, least-controllable term, and it is
+not in these numbers at all — a Pion receiver buffers nothing and hands packets
+up as they arrive, which is precisely why this bounds the appliance from below
+and says nothing about a patron's ear. **Nothing here may be read as meeting (or
+missing) §6.7's 100–150 ms HI target.** Still unmeasured, each printed by name in
+every report the harness produces: analog capture + ALSA buffer (B3), local
+Wi-Fi transport, the phone-side jitter buffer (B2), Opus **decode** (nothing here
+decodes a payload), and phone audio output (B2). On real hardware the 10 ms
+framing term is replaced by the ALSA capture period (§6.7 row 1: 5–20 ms), which
+is not this synthetic frame.
 
 ## Invariants (asserted in CI — `internal/invariants`)
 
@@ -140,9 +183,22 @@ the audit lanes' own reports.
   local-only violation (no STUN, no TURN, nothing leaves the LAN) and it is
   harmless on an appliance with one patron NIC, but scoping gathering to the
   configured patron interface is the right thing before a field pilot.
-- **§6.7's latency table is still one measured row.** The appliance-side encode
-  path is measured; the phone-side jitter buffer that dominates the budget needs
-  B2, and the §11.4 loopback rig needs B3.
+- **§6.7's latency table now has an appliance-side floor and nothing else.**
+  Rows 2 and 3 (analysis/map, Opus encode) are measured with distributions, and
+  the appliance's own transport leg is measured. Rows 1, 4, 5 and 6 — ALSA
+  buffer, Wi-Fi, the DOMINANT phone jitter buffer, phone output — are still
+  quoted typicals: they need the §11.4 loopback rig (B3) and a phone fleet (B2).
+  §15 named HI latency as the plan's largest risk and it remains one.
+- **`pipeline.EncoderPathLatencyMS` double-counts one accumulation.** It reports
+  capture period + Opus frame (20 ms shipped), but at the shipped settings the
+  10 ms capture frame IS the 10 ms Opus frame — one accumulation, not two. The
+  §11.4 harness measures the whole appliance path at ~10.7 ms. It errs
+  conservative, so it was left alone in the latency pass; it needs a decision
+  alongside the real ALSA period, where a period longer than one frame does add
+  a genuine second term.
+- **There is no in-product latency estimate calibrated against ground truth**
+  (§11.4's last bullet). The dashboard shows a structural encode-path budget and
+  says "not measured"; calibrating it needs the loopback rig.
 
 ## What is NOT done (hardware/external-gated — see BLOCKERS.md)
 

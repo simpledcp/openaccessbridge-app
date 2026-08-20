@@ -55,6 +55,21 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   (`capture.SyntheticTone.Realtime`) so what is delivered is 10 ms of audio per
   10 ms of clock rather than a generator running at whatever speed the CPU
   allows.
+- **What the §11.4 latency pass did and did NOT clear (2026-08-20).** Cleared in
+  software: the appliance-side contributors are measured as distributions rather
+  than quoted from §6.7's table — channel map, level analysis, Opus encode
+  transit, WebRTC fan-out transit, and an end-to-end appliance floor, plus a
+  measured Opus pre-skip of 120 samples (2.5 ms) read off the RTP clock. Still
+  gated by B3, and unchanged: **§11.4's actual deliverable, glass-to-ear
+  latency**, which needs a known marker injected into a real ANALOG input and
+  the phone's headphone output captured back — a loopback mic or splitter, real
+  ADCs, and representative phones under good and degraded RF. Also still gated:
+  §6.7 row 1 (analog capture + ALSA buffer, 5–20 ms), because there is no ADC
+  here and the harness's 10 ms framing term is a synthetic frame size, not a
+  real ALSA period; and §11.4's "continuous in-product latency estimate …
+  calibrated against the loopback ground truth", which cannot be calibrated
+  against a ground truth that does not exist yet. The dashboard therefore still
+  reports `latency_measured:false`.
 
 ### B4. GStreamer dev libs + `webrtcbin` not installable (no passwordless apt) — **CLEARED IN SOFTWARE (D20)**
 > **Status:** no longer blocking. The appliance-side WebRTC peer is now Pion

@@ -11,7 +11,7 @@ BIN := bin
 BINARIES := captionbridge-core captionbridge-media captionbridge-firewall acsp-simulator
 LDFLAGS := -X github.com/simpledcp/captionbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
 
-.PHONY: all build test vet race cover sim soak clean tidy fmt check
+.PHONY: all build test vet race cover sim soak latency clean tidy fmt check
 
 all: check build
 
@@ -55,6 +55,20 @@ check: fmt-check vet test
 SOAK_CYCLES ?= 2000
 soak:
 	CAPTIONBRIDGE_SOAK_CYCLES=$(SOAK_CYCLES) $(GO) test ./internal/soak/ -run Soak -v -timeout 30m
+
+# §11.4 latency pass. Reports the APPLIANCE-SIDE contributors separately —
+# channel map, level analysis, Opus encode transit, WebRTC fan-out transit — as
+# p50/p95 distributions over a long run.
+#
+# READ THE HEADER IT PRINTS. What comes out is a FLOOR for the appliance's own
+# contribution, measured Go-peer-to-Go-peer on one machine. It is NOT a
+# glass-to-ear figure and must not be compared to §6.7's 100-150 ms HI target:
+# the dominant term of that budget is the phone-side jitter buffer (40-300+ ms)
+# and there is no phone and no browser here (BLOCKER B2). `make check` already
+# runs a short version of this as a regression guard.
+LATENCY_SECONDS ?= 60
+latency:
+	CAPTIONBRIDGE_LATENCY_SECONDS=$(LATENCY_SECONDS) $(GO) test ./internal/audio/latency/ -run Latency -v -count=1 -timeout 20m
 
 # Run the ACSP simulator standalone (dev convenience).
 sim: acsp-simulator
