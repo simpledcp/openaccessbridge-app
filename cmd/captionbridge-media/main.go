@@ -63,7 +63,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := &manager{log: log, backend: backend, tier: tier, synthetic: *synthetic, parent: ctx}
+	mgr := newManagerFor(ctx, log, backend, tier, *synthetic)
 	if *synthetic {
 		// Until core pushes an auditorium profile, run the two independent
 		// synthetic streams: they prove HI and VI-N run independently (§6.1) and
@@ -116,6 +116,18 @@ type manager struct {
 	mapping  mapper.Mode
 	order    []model.StreamType // stable report order
 	slots    map[model.StreamType]*slot
+
+	// cal is the §6.4 calibration wizard's live measurement run (calibration.go).
+	// It is a SEPARATE set of streams from slots: calibrating an input must never
+	// take down the audio a room is already serving.
+	cal *calibrator
+}
+
+// newManager builds the stream manager and its calibration run.
+func newManagerFor(ctx context.Context, log *logging.Logger, backend encode.Backend, tier qualifier.Tier, synthetic bool) *manager {
+	m := &manager{log: log, backend: backend, tier: tier, synthetic: synthetic, parent: ctx}
+	m.cal = &calibrator{log: log, parent: ctx, backend: backend, synthetic: synthetic}
+	return m
 }
 
 func (m *manager) handle(msg ipc.Message) *ipc.Message {
@@ -143,6 +155,9 @@ func (m *manager) handle(msg ipc.Message) *ipc.Message {
 			return result(msg, model.MediaCommandResult{Error: err.Error()})
 		}
 		return result(msg, m.stop(stream))
+	case ipc.TypeMediaDevices, ipc.TypeMediaCalibrate, ipc.TypeMediaCalibrateStop:
+		// §6.4 calibration wizard (calibration.go).
+		return m.handleCalibration(msg)
 	default:
 		return &ipc.Message{Type: "unsupported", ID: msg.ID}
 	}
@@ -329,6 +344,11 @@ func (m *manager) stopAllLocked() {
 }
 
 func (m *manager) stopAll() {
+	if m.cal != nil {
+		// The calibration run holds its own input; shutting the process down must
+		// release it too (§6.1 hot-plug/device hygiene).
+		m.cal.stop()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stopAllLocked()

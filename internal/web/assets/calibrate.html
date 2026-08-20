@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CaptionBridge — Audio Calibration</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  <link rel="stylesheet" href="/static/calibrate.css">
+</head>
+<body>
+  <h1>Audio Calibration Wizard</h1>
+  <p class="muted">
+    Guided input setup for this auditorium (§6.4). Work down the steps; the wizard measures
+    the input, names what is wrong, and tells you what to change.
+  </p>
+  <p><a href="/admin">← Back to the dashboard</a></p>
+
+  <!-- PROVENANCE. Every figure on this page carries where it came from. A number
+       measured from the synthetic stand-in is never allowed to read as a
+       measurement of the booth's input. -->
+  <div id="provenance" class="provenance" hidden></div>
+
+  <ol id="wizard">
+    <li>
+      <h2>1. Select the input device</h2>
+      <p class="muted">Detected capture inputs, by their stable identifier (§6.1) — never a card index.</p>
+      <select id="device"><option value="">loading…</option></select>
+      <p id="device-note" class="muted"></p>
+      <p id="device-error" class="loud" hidden></p>
+      <h3>Input hardware tier</h3>
+      <p class="muted">
+        What is physically feeding this input (§6.2). The tier decides how harshly the
+        signal is judged: a built-in mic jack is warned about far earlier than a line-input
+        USB interface.
+      </p>
+      <select id="tier"></select>
+    </li>
+
+    <li>
+      <h2>2. Select the intended use</h2>
+      <p class="muted">Which accessibility feed(s) this input serves. HI and VI-N stay independent.</p>
+      <select id="use"></select>
+    </li>
+
+    <li>
+      <h2>3. Select the channel mapping</h2>
+      <p class="muted">
+        Which captured channel feeds which named stream (§6.5). A mapping this device cannot
+        satisfy is not offered here at all — that fault belongs before a show, not during one.
+      </p>
+      <select id="mapping"></select>
+      <p id="mapping-note" class="muted"></p>
+    </li>
+
+    <li>
+      <h2>4. Play a known signal</h2>
+      <p>
+        From the cinema system, play something into this input and leave it playing:
+        a test tone, trailer audio, or the venue's accessibility feed. Then start the meter below.
+      </p>
+      <p class="muted">
+        If the room is silent the wizard will report "no signal" — which is a real fault
+        during calibration, not a quiet passage.
+      </p>
+    </li>
+
+    <li>
+      <h2>5. Live input meter</h2>
+      <button id="start">Start measuring</button>
+      <button id="stop">Stop</button>
+      <span id="meter-state" class="status"></span>
+      <p id="meter-error" class="loud" hidden></p>
+      <div id="meters"></div>
+    </li>
+
+    <li>
+      <h2>6. What was detected</h2>
+      <div id="defects"><p class="muted">Nothing measured yet.</p></div>
+    </li>
+
+    <li>
+      <h2>7. Recommended fix</h2>
+      <div id="recs"><p class="muted">Nothing measured yet.</p></div>
+    </li>
+
+    <li>
+      <h2>8. Verdict</h2>
+      <p>
+        <span id="verdict" class="verdict">not measured</span>
+        <span id="verdict-provenance" class="chip"></span>
+      </p>
+      <pre id="summary">Not measured.</pre>
+    </li>
+
+    <li>
+      <h2>9. Save the auditorium input profile</h2>
+      <p class="muted">
+        Saves the device, the mapping and your notes (§10.5) so re-opening this room reuses
+        known-good settings. A verdict is recorded only when it was measured on the selected
+        hardware; otherwise the input is saved UNQUALIFIED and says so.
+      </p>
+      <input id="auditorium" placeholder="auditorium id (e.g. screen-3)" autocomplete="off">
+      <input id="gain-notes" placeholder="gain notes (e.g. attenuator pad inline; isolator fitted)" autocomplete="off">
+      <button id="save">Save profile</button>
+      <p id="qualify-note" class="muted"></p>
+      <p id="save-note"></p>
+    </li>
+  </ol>
+
+  <script src="/static/calibrate.js"></script>
+</body>
+</html>

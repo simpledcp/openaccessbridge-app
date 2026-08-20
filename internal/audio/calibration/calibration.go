@@ -59,20 +59,20 @@ type Session struct {
 // detected hardware (§6.5). A mapping the device cannot satisfy is a Failed
 // state surfaced BEFORE a show, never a silent fault during one.
 type Feasibility struct {
-	OK bool
+	OK bool `json:"ok"`
 	// Unknown is true when the device did not expose a channel count (typical
 	// of on-board HDA codecs, capture.Device.Channels == 0). The mapping is then
 	// neither proven possible nor proven impossible, and the wizard must say so
 	// rather than guess in either direction.
-	Unknown  bool
-	Required int
-	Detected int
-	Reason   string
+	Unknown  bool   `json:"unknown"`
+	Required int    `json:"required_channels"`
+	Detected int    `json:"detected_channels"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // Feasibility checks the mapping against the detected device up front.
 func (s Session) Feasibility() Feasibility {
-	required := requiredChannels(s.Mode)
+	required := RequiredChannels(s.Mode)
 	detected := s.Device.Channels
 
 	switch {
@@ -96,9 +96,11 @@ func (s Session) Feasibility() Feasibility {
 // itoa avoids importing strconv for one call site in a message string.
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
 
-// requiredChannels is how many capture channels a mode needs. It mirrors the
-// §6.5 table in internal/audio/mapper: every stereo-derived mode needs two.
-func requiredChannels(m mapper.Mode) int {
+// RequiredChannels is how many capture channels a mode needs. It mirrors the
+// §6.5 table in internal/audio/mapper: every stereo-derived mode needs two. It
+// is exported because captionbridge-media has to size the input it opens for a
+// live calibration run to the same table the wizard judged against (§6.4 step 5).
+func RequiredChannels(m mapper.Mode) int {
 	switch m {
 	case mapper.StereoLeftHIRightVIN, mapper.StereoLeftVINRightHI,
 		mapper.SummedMonoHI, mapper.SummedMonoVIN,
@@ -154,7 +156,7 @@ func Analyze(s Session, b Block) Result {
 		if reason == "" && err != nil {
 			reason = err.Error()
 		}
-		res.Verdict = model.QualFailed
+		// One Failed stream, so the reduced verdict Judge computes is Failed.
 		res.Streams = []model.AudioStreamState{{
 			InputDeviceID: s.Device.ID,
 			StreamType:    primaryStream(s.Mode, s.Use),
@@ -167,12 +169,10 @@ func Analyze(s Session, b Block) Result {
 			DeviceConnected: b.DeviceConnected,
 			Reasons:         []string{reason},
 		}}
-		res.Recommendations = recommend(s, res)
-		res.Summary = summarize(s, res)
-		return res
+		return Judge(s, res.Streams)
 	}
 
-	required := requiredChannels(s.Mode)
+	required := RequiredChannels(s.Mode)
 	for _, sm := range plan.Maps {
 		lane, err := mapper.Extract(sm.Source, b.Samples, b.Channels)
 		if err != nil {
@@ -203,7 +203,32 @@ func Analyze(s Session, b Block) Result {
 		res.Streams = append(res.Streams, st)
 	}
 
+	return Judge(s, res.Streams)
+}
+
+// Judge derives the wizard's answer (§6.4 steps 6-8) from measurements taken
+// SOMEWHERE ELSE — the live capture → qualify chain already running inside
+// captionbridge-media, which is what §6.4 step 5's "live input meter" is showing.
+// It is the same decision layer Analyze uses; only the origin of the
+// measurements differs, so the verdict the installer sees in the wizard and the
+// verdict the dashboard shows during a show can never disagree.
+//
+// It judges only what it is handed. An empty stream list is Failed, not
+// "waiting": nothing was measured, and a wizard that renders an unmeasured input
+// as anything but failed is the fabrication this package exists to prevent.
+func Judge(s Session, streams []model.AudioStreamState) Result {
+	res := Result{Feasible: s.Feasibility(), Streams: streams}
 	res.Verdict = worst(res.Streams)
+	// §6.5: a mapping the DETECTED hardware cannot satisfy is a Failed state
+	// surfaced before a show, whatever the lanes currently measure — a stereo
+	// split on a mono device can read perfectly on the one channel that exists.
+	// A device that reports no channel count at all is a different case: it is
+	// not proven unable, and the measurement itself (the qualifier compares the
+	// mapping's required channels against the device count it actually saw) is a
+	// stronger answer than a guess, so it is allowed to stand.
+	if !res.Feasible.OK && !res.Feasible.Unknown {
+		res.Verdict = model.QualFailed
+	}
 	res.Recommendations = recommend(s, res)
 	res.Summary = summarize(s, res)
 	return res
