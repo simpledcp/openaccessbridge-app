@@ -129,3 +129,57 @@ from public summaries. The simulator emits the same grammar so parser↔simulato
 agree. The pluggable resolver classifies and counts unresolved (vendor-specific)
 locator forms by FORM CLASS (never the raw path, which can embed a title) so
 coverage grows from real Phase 0A observations.
+
+### D20. Core reconciles the stored configuration into the running system [§3.5, §9.1, §10.5]
+Configuration that nothing consumes is not configuration. `captionbridge-core`
+runs a reconcile pass at startup and every 15 s: it derives the firewall ruleset
+from the stored profile + interfaces + allowlist and has the privileged helper
+install it, runs the §9.3 verification pass **through that helper** (which can
+read the loaded nftables table), pushes the §10.5 auditorium input profile to
+the media process, and records the §10.8 result. Audio state is polled every 2 s.
+Incomplete configuration (no interfaces or no allowlist) is skipped with a logged
+reason rather than sent as a half-formed ruleset.
+
+### D21. Firewall posture is MEASURED, never asserted [§9.3]
+Both `verify.Run` call sites supply `verify.NFTRulesetReader()`. The deprecated
+caller-asserted `FirewallActive` flag is supplied by neither: "a helper answered a
+ping" and "--allow-apply was passed" are not evidence that a default-deny ruleset
+is loaded. When core cannot reach the helper it runs the pass locally, where the
+`nft` read fails without root — reported as "could not be confirmed", a loud
+failure, never a pass. `SystemReadiness.firewall_introspected` tells the dashboard
+whether the claim was measured; an active-but-unmeasured claim raises
+`firewall_active_not_introspected` rather than the misleading `firewall_inactive`.
+
+### D22. Caption-path warnings are a live SET, cleared by measurement [§8.3, §5.2]
+The ACSP machine raises warnings as one-shot events; the dashboard needs the
+conditions that are true now. `readiness.CaptionWarnings` holds each raised
+warning and drops it only when something MEASURED shows the condition passed: a
+status request that pushes the lease deadline back out, a window load that finds
+nothing missing and nothing degraded (`resolver.Loader.OnLoadComplete`), a
+torn-down link. Nothing expires on a timer, and nothing is cleared by the link
+state merely changing shape — the content warnings are raised part-way through
+loading a show, before the server has necessarily said which playout is on
+screen, so anything inferred from the link state at that moment files them under
+the wrong show and drops them unread. For the same reason a warning's link
+context is bound from the first state observed AFTER it was raised, not the last
+one seen before. Defaults
+(`caption_lease_warn_fraction` 0.25, `caption_asset_fetch_timeout_ms` 5000) are
+settings, not constants reached by omission; an out-of-range value falls back
+loudly.
+
+### D23. §10.5 `last_qualification` is recorded only from a settled verdict [§6.4, §10.8]
+Core writes the auditorium's last qualification from the WORST live stream
+verdict — a healthy HI feed does not excuse a failed VI-N one — and skips the
+pass in which the media plan was just rebuilt, because a verdict read a moment
+after the streams restarted describes the restart, not the booth's input. §10.8's
+`firewall_profile_version` is recorded only when rules were REALLY installed
+(dry-run records nothing), and `audio_device_compat_profile` records the stable
+device identity in play; there is no per-device compatibility revision to record
+until real qualification data exists (BLOCKER B3).
+
+### D24. A config database from a newer schema is refused, not opened [§10.8]
+`config_schema_version` is read and reconciled on open: a fresh database is
+stamped, an older one runs the (currently empty) migration path and is
+re-stamped, and one written by a NEWER build is refused with a named error rather
+than read as if it were ours. An unparsable version is refused too. Silently
+misreading configuration is how an appliance comes up in a posture nobody chose.

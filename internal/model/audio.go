@@ -90,3 +90,19 @@ type AudioStreamState struct {
 	// no audio content.
 	Reasons []string `json:"reasons,omitempty"`
 }
+
+// Encoder states carried on AudioStreamState.EncoderState (§6.6 "encoder
+// state"). internal/audio/pipeline produces them; this is their canonical home
+// so the dashboard assembler can read a state without importing the media
+// pipeline into the caption/web process. internal/invariants asserts the two
+// sets of constants stay identical.
+const (
+	// EncoderStateUnknown: the encode path has not been exercised yet.
+	EncoderStateUnknown = "unknown"
+	// EncoderStateUnavailable: no encoder ran, so nothing is being encoded for
+	// this stream however clean the input measures.
+	EncoderStateUnavailable = "unavailable"
+	// EncoderStateReadyNoTransport: a real encode was proven locally but there is
+	// no subscriber transport yet (B2/B4).
+	EncoderStateReadyNoTransport = "ready_no_transport"
+)

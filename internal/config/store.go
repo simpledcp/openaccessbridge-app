@@ -57,4 +57,18 @@ const (
 	SettingPatronBindAddr   = "patron_bind_addr"
 	SettingSupportMode      = "support_mode"
 	SettingSSHEnabled       = "ssh_enabled"
+
+	// Caption-link tuning (§5.2). These have working defaults in
+	// internal/caption/acsp; the settings exist so a venue whose server has a
+	// different status cadence can move them without a rebuild, rather than the
+	// defaults being hardcoded by omission.
+	//
+	// SettingLeaseWarnFraction: warn once the remaining lease drops below this
+	// fraction of the granted lease ("treat anything approaching the lease as a
+	// warning", §5.2 item 1). Stored as a decimal string, e.g. "0.25".
+	SettingLeaseWarnFraction = "caption_lease_warn_fraction"
+	// SettingAssetFetchTimeoutMS bounds ONE RPL / timed-text fetch made from the
+	// request path, in milliseconds. It is further clamped to the remaining lease
+	// by the state machine.
+	SettingAssetFetchTimeoutMS = "caption_asset_fetch_timeout_ms"
 )

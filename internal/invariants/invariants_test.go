@@ -121,18 +121,18 @@ func TestInvariant_ForwardingEnabledIsCritical(t *testing.T) {
 func TestInvariant_IndependentReadiness(t *testing.T) {
 	clean := verify.Report{ForwardingDisabledV4: true, ForwardingDisabledV6: true, FirewallActive: true, AdminIsolated: true, NoDefaultCreds: true, SSHCorrect: true, Pass: true}
 	// Captions ready, audio dead.
-	r1 := readiness.Assemble(
-		model.CaptionLinkState{State: model.StatePlaying, LeaseActive: true, RPLLoaded: true},
-		[]model.AudioStreamState{{StreamType: model.StreamVIN, Status: model.QualFailed, Silence: true, Reasons: []string{"silent during playback"}}},
-		clean, readiness.Network{}, readiness.DefaultLatencyBudgets())
+	r1 := readiness.Assemble(readiness.Inputs{
+		Link:   model.CaptionLinkState{State: model.StatePlaying, LeaseActive: true, RPLLoaded: true},
+		Audio:  []model.AudioStreamState{{StreamType: model.StreamVIN, Status: model.QualFailed, Silence: true, DeviceConnected: true, Reasons: []string{"silent during playback"}}},
+		Verify: clean})
 	if !r1.CaptionReady || r1.AudioReady {
 		t.Fatalf("expected captions ready + audio not ready, got caption=%v audio=%v", r1.CaptionReady, r1.AudioReady)
 	}
 	// Audio ready, captions down.
-	r2 := readiness.Assemble(
-		model.CaptionLinkState{State: model.StateDisconnected},
-		[]model.AudioStreamState{{StreamType: model.StreamHI, Status: model.QualExcellent}},
-		clean, readiness.Network{}, readiness.DefaultLatencyBudgets())
+	r2 := readiness.Assemble(readiness.Inputs{
+		Link:   model.CaptionLinkState{State: model.StateDisconnected},
+		Audio:  []model.AudioStreamState{{StreamType: model.StreamHI, Status: model.QualExcellent, DeviceConnected: true}},
+		Verify: clean})
 	if r2.CaptionReady || !r2.AudioReady {
 		t.Fatalf("expected audio ready + captions not ready, got caption=%v audio=%v", r2.CaptionReady, r2.AudioReady)
 	}
@@ -141,10 +141,10 @@ func TestInvariant_IndependentReadiness(t *testing.T) {
 // Guardrail 7: no silent degradation — a failed feed surfaces a CRITICAL warning.
 func TestInvariant_NoSilentDegradation(t *testing.T) {
 	clean := verify.Report{ForwardingDisabledV4: true, ForwardingDisabledV6: true, FirewallActive: true, AdminIsolated: true, NoDefaultCreds: true, SSHCorrect: true, Pass: true}
-	r := readiness.Assemble(
-		model.CaptionLinkState{State: model.StatePlaying, LeaseActive: true, RPLLoaded: true},
-		[]model.AudioStreamState{{StreamType: model.StreamHI, Status: model.QualFailed, Silence: true, Reasons: []string{"configured input is silent during playback"}}},
-		clean, readiness.Network{}, readiness.DefaultLatencyBudgets())
+	r := readiness.Assemble(readiness.Inputs{
+		Link:   model.CaptionLinkState{State: model.StatePlaying, LeaseActive: true, RPLLoaded: true},
+		Audio:  []model.AudioStreamState{{StreamType: model.StreamHI, Status: model.QualFailed, Silence: true, DeviceConnected: true, Reasons: []string{"configured input is silent during playback"}}},
+		Verify: clean})
 	if !r.HasCritical() {
 		t.Fatalf("a silent HI feed during playback must raise a critical warning, got %v", r.Warnings)
 	}
