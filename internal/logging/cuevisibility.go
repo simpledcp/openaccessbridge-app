@@ -19,6 +19,12 @@ import (
 // the no-content rule; without it operators are pushed to work around that rule.
 //
 // It is safe for concurrent use: the caption fan-out drives several languages.
+//
+// SEAM: nothing constructs a tracker yet, so caption.cue.visible_no_text is still
+// emitted by no running process. The call site is Controller.LoadReel's OnChange
+// closure in internal/caption (a different lane), which already receives the
+// timing.CueEvent{Visible, Cue} this needs. Until that call is added the event
+// remains declared-but-unemitted — the mechanism exists, the wiring does not.
 type CueVisibilityTracker struct {
 	mu    sync.Mutex
 	log   *Logger

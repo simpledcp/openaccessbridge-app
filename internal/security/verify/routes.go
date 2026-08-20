@@ -234,6 +234,11 @@ type routeFindings struct {
 	// dnsViaDefaultRoute: a nameserver is only reachable through a default route,
 	// i.e. an internet-facing resolver.
 	dnsViaDefaultRoute bool
+	// dnsUnreadable is true when the resolver configuration could not be read, so
+	// the DNS claim is UNKNOWN rather than known-bad. Both are loud; only the
+	// message differs, and telling an operator "DNS crosses a zone boundary" when
+	// we merely failed to open the file sends them after the wrong fault.
+	dnsUnreadable bool
 	// reasons carries short, content-free explanations for the warning messages.
 	sharedReason  string
 	scopeReason   string
@@ -292,12 +297,9 @@ func checkRoutes(theaterIface, clientIface string, allowlist []string, p Paths) 
 
 	// (a) No allowlisted theater host may be reachable out of the patron
 	//     interface: that is the patron side reaching the theater side.
-	for _, ip := range allowIPs {
-		if r, ok := bestRoute(routes, ip); ok && r.Iface == clientIface {
-			f.zonesSeparated = false
-			f.sharedReason = "an allowlisted theater host routes out of the patron interface " + clientIface
-			break
-		}
+	if reason, joined := patronPathToTheater(routes, clientIface, allowIPs); joined {
+		f.zonesSeparated = false
+		f.sharedReason = reason
 	}
 	// (b) No subnet may appear on both interfaces: overlapping on-link scopes are
 	//     the two zones joined by another name.
@@ -340,13 +342,20 @@ func checkRoutes(theaterIface, clientIface string, allowlist []string, p Paths) 
 		}
 	}
 
-	// (d) DNS must not leak. A resolver reached out of the theater interface puts
-	//     query traffic into the theater zone; a resolver reachable only through a
-	//     default route is an internet-facing resolver.
+	// (d) DNS must not leak across EITHER zone boundary. A resolver reached out of
+	//     the theater interface puts query traffic into the cinema LAN; a resolver
+	//     that lives ON the patron subnet puts it into a local-only network the
+	//     appliance itself serves, where no legitimate resolver exists. A resolver
+	//     reachable only through a default route is an internet-facing resolver
+	//     (§9.4 "no internet dependence") — loud, but deliberately not blocking.
 	f.dnsChecked = true
 	ns, err := readNameservers(p.ResolvConf)
 	if err != nil {
+		// The resolver config could not be READ — the posture is unknown, not
+		// known-bad. dnsUnreadable makes Run say so instead of sending the
+		// operator after a leak that may not exist.
 		f.dnsContained = false
+		f.dnsUnreadable = true
 		f.dnsReason = err.Error()
 		return f
 	}
@@ -364,10 +373,57 @@ func checkRoutes(theaterIface, clientIface string, allowlist []string, p Paths) 
 			break
 		}
 		if r.isDefault() {
+			// Reached through a default route: that is the internet-facing-resolver
+			// case, not "a resolver lives on that subnet", so it must not be judged
+			// as one regardless of which interface carries the default.
 			f.dnsViaDefaultRoute = true
+			continue
+		}
+		if r.Iface == clientIface {
+			f.dnsContained = false
+			f.dnsReason = "a configured nameserver is reachable only across the patron interface " + clientIface
+			break
 		}
 	}
 	return f
+}
+
+// patronPathToTheater reports whether the patron interface has ANY path to an
+// allowlisted theater host (§9.3 "the patron side cannot reach the theater side").
+//
+// Two separate conditions, because longest-prefix matching hides one behind the
+// other:
+//
+//   - the WINNING route to an allowlisted host leaves via the patron interface —
+//     the appliance would put theater traffic into the patron zone right now;
+//   - the patron interface carries any non-default route COVERING an allowlisted
+//     host, even when a more specific theater route currently wins. That is still
+//     the two zones joined: the patron NIC is configured to reach theater space,
+//     and a metric change, a link flap, or the theater route going away promotes
+//     it silently. Checking only the winner fails open on exactly that setup
+//     (patron 10.10.20.0/24 + theater 10.10.20.0/25 reported "separated").
+//
+// Default routes are excluded from the second condition — a default route covers
+// every address, so it would flag every deployment that has one; it is already
+// caught by the first condition whenever it is the route that actually wins.
+func patronPathToTheater(routes []route, clientIface string, allow []net.IP) (string, bool) {
+	for _, ip := range allow {
+		if r, ok := bestRoute(routes, ip); ok && r.Iface == clientIface {
+			return "an allowlisted theater host routes out of the patron interface " + clientIface, true
+		}
+	}
+	for _, r := range routes {
+		if r.Iface != clientIface || r.Dest == nil || r.isDefault() || isLocalScope(r.Dest.IP) {
+			continue
+		}
+		for _, ip := range allow {
+			if sameFamily(r.Dest.IP, ip) && r.Dest.Contains(ip) {
+				return "the patron interface " + clientIface + " carries a route (" + r.Dest.String() +
+					") that covers an allowlisted theater host", true
+			}
+		}
+	}
+	return "", false
 }
 
 // inAllowlist reports whether ip is one of the explicitly allowlisted addresses.

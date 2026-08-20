@@ -141,7 +141,9 @@ type Grant struct {
 	// "admin-only" half of §9.4 — and hashed before it is ever logged.
 	GrantedBy string
 	// Reason is a short free-text note ("patron reports captions one line late").
-	// It is operator-written configuration, not captured content.
+	// It is surfaced on the admin dashboard through Status, and it is NEVER
+	// written to the log stream: free text typed about a caption fault can quote
+	// the caption, and the redaction guard keys off field names, not values.
 	Reason string
 }
 
@@ -224,12 +226,20 @@ func (m *Manager) Start(g Grant) (Status, error) {
 	m.sessions[g.Kind] = s
 
 	// Audit trail: who (hashed), what kind, and the bounds — never the content.
+	//
+	// The Reason is deliberately NOT logged. It is unbounded operator free text
+	// typed while looking at a caption problem ("the cue read '...' and was one
+	// line late"), so it is a content vector the redaction chokepoint cannot
+	// catch: redact.go keys off field NAMES, and "reason" names nothing denied.
+	// Only its presence and length go into the trail; the text itself stays in
+	// the in-memory Status the admin dashboard renders (guardrail #6).
 	m.opts.Log.Warn(logging.EvDebugCaptureStarted,
 		logging.Field("kind", string(g.Kind)),
 		logging.Field("granted_by_id", s.grantee),
 		logging.Field("ttl_ms", ttl.Milliseconds()),
 		logging.Field("byte_budget", budget),
-		logging.Field("reason", g.Reason))
+		logging.Field("reason_given", strings.TrimSpace(g.Reason) != ""),
+		logging.Field("reason_len", len(g.Reason)))
 	return s.status(), nil
 }
 

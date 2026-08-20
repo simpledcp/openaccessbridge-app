@@ -375,3 +375,178 @@ func TestHexDecoders(t *testing.T) {
 		t.Error("hexIPv6 should reject a short field")
 	}
 }
+
+// TestRoutes_PatronPathToTheaterBeatsLongestPrefix pins the fail-open that
+// longest-prefix matching hides: the patron interface is configured to reach
+// theater space, but a more specific theater route currently wins, so looking
+// only at the WINNING route reports the two zones as separated. §9.1 says the
+// zones are never joined — a configured path counts, not just the one in use
+// today, because a metric change or a link flap promotes it silently.
+func TestRoutes_PatronPathToTheaterBeatsLongestPrefix(t *testing.T) {
+	cases := []struct {
+		name   string
+		routes []routeSpec
+	}{
+		{
+			name: "theater prefix is more specific than the patron one",
+			routes: []routeSpec{
+				{"eth0", "10.10.20.0/25"},  // theater wins longest-prefix
+				{"wlan0", "10.10.20.0/24"}, // patron still reaches the theater host
+				{"lo", "127.0.0.0/8"},
+			},
+		},
+		{
+			name: "patron carries a wide supernet of the theater subnet",
+			routes: []routeSpec{
+				{"eth0", "10.10.20.0/24"},
+				{"wlan0", "10.0.0.0/8"},
+				{"lo", "127.0.0.0/8"},
+			},
+		},
+		{
+			name: "the winning route to the theater host leaves via the patron NIC",
+			routes: []routeSpec{
+				{"eth0", "192.168.9.0/24"},
+				{"wlan0", "10.10.20.0/24"},
+				{"lo", "127.0.0.0/8"},
+			},
+		},
+		{
+			name: "v6: patron supernet covers the allowlisted theater host",
+			routes: []routeSpec{
+				{"eth0", "fd00:10::/64"},
+				{"wlan0", "fd00::/16"},
+				{"lo", "127.0.0.0/8"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			procNet := filepath.Join(t.TempDir(), "proc", "net")
+			allow := []string{"10.10.20.15"}
+			if strings.HasPrefix(tc.name, "v6") {
+				allow = []string{"fd00:10::15"}
+			}
+			resolv := writeRouteFixture(t, procNet, tc.routes, "127.0.0.53")
+			rep := Run(routeCfg(t, procNet, resolv, allow))
+
+			if rep.ZonesSeparated {
+				t.Error("a patron-side route to an allowlisted theater host is the two zones joined")
+			}
+			if !contains(codes(rep.Warnings), model.WarnSharedInterface) {
+				t.Errorf("expected %s, got %v", model.WarnSharedInterface, codes(rep.Warnings))
+			}
+			if rep.Pass {
+				t.Error("joined zones must fail the pass")
+			}
+		})
+	}
+}
+
+// TestRoutes_SeparatedZonesStillPassWithADefaultRouteOnPatron guards the fix
+// against the obvious over-correction: a default route covers every address, so
+// treating "covers an allowlisted host" as a joined zone without excluding
+// default routes would flag a deployment whose theater route actually wins.
+func TestRoutes_SeparatedZonesStillPassWithADefaultRouteOnPatron(t *testing.T) {
+	procNet := filepath.Join(t.TempDir(), "proc", "net")
+	resolv := writeRouteFixture(t, procNet, []routeSpec{
+		{"eth0", "10.10.20.0/24"},
+		{"wlan0", "192.168.50.0/24"},
+		{"wlan0", "0.0.0.0/0"}, // patron default route; the theater /24 still wins
+		{"lo", "127.0.0.0/8"},
+	}, "127.0.0.53")
+	rep := Run(routeCfg(t, procNet, resolv, []string{"10.10.20.15"}))
+	if !rep.ZonesSeparated {
+		t.Errorf("a patron default route that loses longest-prefix must not be called a joined zone: %v", rep.Warnings)
+	}
+}
+
+// TestRoutes_NameserverAcrossPatronInterface: §9.3 forbids a DNS leak across
+// interfaces — either of them. A resolver reached out of the patron NIC puts
+// query traffic into a local-only network the appliance itself serves, where no
+// legitimate resolver lives; only the theater side was being checked.
+func TestRoutes_NameserverAcrossPatronInterface(t *testing.T) {
+	procNet := filepath.Join(t.TempDir(), "proc", "net")
+	resolv := writeRouteFixture(t, procNet, []routeSpec{
+		{"eth0", "10.10.20.0/24"},
+		{"wlan0", "192.168.50.0/24"},
+		{"lo", "127.0.0.0/8"},
+	}, "192.168.50.9")
+	rep := Run(routeCfg(t, procNet, resolv, []string{"10.10.20.15"}))
+
+	if rep.DNSContained {
+		t.Error("a nameserver reachable only across the patron interface is a DNS leak")
+	}
+	if !contains(codes(rep.Warnings), model.WarnDNSLeak) {
+		t.Errorf("expected %s, got %v", model.WarnDNSLeak, codes(rep.Warnings))
+	}
+	if rep.Pass {
+		t.Error("a locked profile must not pass with DNS crossing a zone")
+	}
+}
+
+// TestRoutes_UnreadableResolvConfIsUnknownNotALeak: both are loud, but the
+// message must not send an operator hunting a leak when we merely failed to open
+// the file (guardrail #7 is about surfacing the REAL failure).
+func TestRoutes_UnreadableResolvConfIsUnknownNotALeak(t *testing.T) {
+	procNet := filepath.Join(t.TempDir(), "proc", "net")
+	writeRouteFixture(t, procNet, []routeSpec{
+		{"eth0", "10.10.20.0/24"},
+		{"wlan0", "192.168.50.0/24"},
+	})
+	// A directory opens but cannot be read as a file.
+	unreadable := filepath.Join(procNet, "resolv.d")
+	mustMkdir(t, unreadable)
+
+	cfg := routeCfg(t, procNet, unreadable, []string{"10.10.20.15"})
+	rep := Run(cfg)
+	if rep.DNSContained {
+		t.Error("an unreadable resolver configuration must not report DNS as contained")
+	}
+	var msg string
+	for _, w := range rep.Warnings {
+		if w.Code == model.WarnDNSLeak {
+			msg = w.Message
+		}
+	}
+	if !strings.Contains(msg, "could not be confirmed") {
+		t.Errorf("message = %q, want it to say the posture is unknown, not that DNS leaks", msg)
+	}
+	// The zone-separation finding must not be relabelled by the DNS failure.
+	if !rep.ZonesSeparated {
+		t.Errorf("a readable routing table with separate zones must still report them separated: %v", rep.Warnings)
+	}
+}
+
+// TestRoutes_ScopeIsNotIntrospectedWithoutAnAllowlist: the scope assertion needs
+// an allowlist to measure against. Mid-setup there is none, so the report must
+// say the assertion did not run rather than leave a bare false that a dashboard
+// would render as "the theater scope is wider than the allowlist".
+func TestRoutes_ScopeIsNotIntrospectedWithoutAnAllowlist(t *testing.T) {
+	procNet := filepath.Join(t.TempDir(), "proc", "net")
+	resolv := writeRouteFixture(t, procNet, []routeSpec{
+		{"eth0", "0.0.0.0/0"}, // would be a scope failure IF an allowlist existed
+		{"wlan0", "192.168.50.0/24"},
+	})
+	rep := Run(routeCfg(t, procNet, resolv, nil))
+
+	if rep.TheaterScopeIntrospected {
+		t.Error("the scope assertion cannot run without an allowlist to measure against")
+	}
+	if rep.TheaterScopeAllowlistOnly {
+		t.Error("an unmeasured assertion must not be reported as satisfied")
+	}
+	if contains(codes(rep.Warnings), model.WarnDNSLeak) {
+		t.Errorf("an unmeasured scope must not raise a warning: %v", rep.Warnings)
+	}
+
+	// With an allowlist the very same routing table DOES fail the scope check,
+	// and then the report says the assertion ran.
+	rep = Run(routeCfg(t, procNet, resolv, []string{"10.10.20.15"}))
+	if !rep.TheaterScopeIntrospected {
+		t.Error("with an allowlist configured the scope assertion must report that it ran")
+	}
+	if rep.TheaterScopeAllowlistOnly || rep.Pass {
+		t.Errorf("a theater default route must fail the scope assertion: %+v", rep)
+	}
+}

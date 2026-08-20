@@ -152,6 +152,13 @@ type Report struct {
 	// TheaterScopeAllowlistOnly: the theater interface carries no route beyond
 	// the configured allowlist. False when it could not be asserted.
 	TheaterScopeAllowlistOnly bool `json:"theater_scope_allowlist_only"`
+	// TheaterScopeIntrospected is true when the scope assertion actually ran. It
+	// needs a configured allowlist to measure against, so mid-setup it is false
+	// and TheaterScopeAllowlistOnly's false then means "not measured", NOT
+	// "measured and wider than the allowlist" — the same distinction
+	// FirewallIntrospected and BridgesConfirmed draw. A dashboard must not render
+	// an unmeasured field as a failed assertion (and none is warned about).
+	TheaterScopeIntrospected bool `json:"theater_scope_introspected"`
 	// DNSContained: no configured resolver is reached across a zone boundary.
 	DNSContained bool `json:"dns_contained"`
 
@@ -194,6 +201,7 @@ func Run(cfg Config) Report {
 		RoutesIntrospected:        rt.checked,
 		ZonesSeparated:            rt.checked && rt.zonesSeparated,
 		TheaterScopeAllowlistOnly: rt.scopeChecked && rt.theaterScopeAllowlistOnly,
+		TheaterScopeIntrospected:  rt.scopeChecked,
 		DNSContained:              rt.dnsChecked && rt.dnsContained,
 		NoDefaultCreds:            !cfg.DefaultCredentials,
 		SSHCorrect:                sshCorrect,
@@ -251,6 +259,10 @@ func Run(cfg Config) Report {
 	}
 	if rt.scopeChecked && !rt.theaterScopeAllowlistOnly && scopeAssertionApplies(cfg.Profile) {
 		warnings = append(warnings, model.Warning{
+			// §8.3 has no code for "theater scope wider than the allowlist"; this
+			// is the nearest existing one (both are "a zone reaches further than it
+			// may") and the message carries the real finding. A dedicated code
+			// belongs in internal/model.
 			Code:     model.WarnDNSLeak,
 			Message:  "The theater-side reachable scope is wider than the allowlist: " + rt.scopeReason,
 			Severity: profileSeverity,
@@ -260,6 +272,8 @@ func Run(cfg Config) Report {
 		msg := "DNS crosses a zone boundary: " + rt.dnsReason
 		if rt.unreadable != "" {
 			msg = "DNS containment could not be confirmed: " + rt.unreadable
+		} else if rt.dnsUnreadable {
+			msg = "DNS containment could not be confirmed: " + rt.dnsReason
 		}
 		warnings = append(warnings, model.Warning{
 			Code: model.WarnDNSLeak, Message: msg, Severity: profileSeverity,
@@ -442,6 +456,13 @@ func forwardingMessage(c forwardingCheck, forwardAccepts int) string {
 	}
 	if forwardAccepts > 0 {
 		parts = append(parts, "the nftables forward chain carries accept rules")
+	}
+	if len(parts) == 0 {
+		// Unreachable through Run (the warning only fires when one of the halves is
+		// non-clean), but this composes a SECURITY warning: it must never be the
+		// thing that panics the periodic verification loop (§9.3 "periodically at
+		// runtime") if a caller or a later refactor reaches it with a clean check.
+		parts = append(parts, "the forwarding posture could not be summarized")
 	}
 	return strings.ToUpper(parts[0][:1]) + parts[0][1:] + joinRest(parts) +
 		"; the appliance must never route between interfaces"

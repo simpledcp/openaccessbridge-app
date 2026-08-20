@@ -272,3 +272,35 @@ func TestRefusesSetupCompletion_EndToEnd(t *testing.T) {
 		t.Error("the same posture must not strand a Lab bench")
 	}
 }
+
+// TestForwardingMessage_NeverPanics: this function composes a SECURITY warning
+// from two independent halves (kernel knobs, nft forward chain). Every reachable
+// combination must produce a sentence, including the degenerate "nothing to
+// report" one — a panic here would take down the periodic verification loop
+// (§9.3 "periodically at runtime") instead of raising a warning.
+func TestForwardingMessage_NeverPanics(t *testing.T) {
+	cases := []struct {
+		name    string
+		check   forwardingCheck
+		accepts int
+		want    string // a substring that must appear
+	}{
+		{"knobs named", forwardingCheck{enabled: []string{"ipv6/conf/eth0/forwarding"}}, 0, "ipv6/conf/eth0/forwarding"},
+		{"knobs and forward accepts", forwardingCheck{enabled: []string{"ipv4/ip_forward"}}, 2, "forward chain"},
+		{"forward accepts only", forwardingCheck{disabledV4: true, disabledV6: true}, 1, "forward chain"},
+		{"unnamed knob failure", forwardingCheck{disabledV4: false, disabledV6: true}, 0, "cannot be confirmed"},
+		{"nothing to report", forwardingCheck{disabledV4: true, disabledV6: true}, 0, "must never route"},
+		{"many knobs are truncated", forwardingCheck{enabled: []string{"a", "b", "c", "d", "e"}}, 0, "and others"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := forwardingMessage(tc.check, tc.accepts)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("forwardingMessage = %q, want it to contain %q", got, tc.want)
+			}
+			if !strings.HasSuffix(got, "the appliance must never route between interfaces") {
+				t.Errorf("forwardingMessage = %q, want the standard tail", got)
+			}
+		})
+	}
+}

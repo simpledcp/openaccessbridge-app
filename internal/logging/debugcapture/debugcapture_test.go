@@ -448,3 +448,50 @@ func TestCaptureFilePermissions(t *testing.T) {
 		t.Errorf("capture file mode = %o, want 600", perm)
 	}
 }
+
+// TestGrantReasonNeverReachesTheLog: the grant's Reason is unbounded operator
+// free text, typed while looking at a caption fault, so it can quote the caption
+// itself. The redaction chokepoint (logging/redact.go) keys off field NAMES, and
+// "reason" names nothing denied — so the only safe handling is not to log the
+// text at all. The audit trail keeps whether a reason was given and how long it
+// was; the text stays in the in-memory Status the dashboard renders (§9.4,
+// guardrail #6).
+func TestGrantReasonNeverReachesTheLog(t *testing.T) {
+	m, _, buf, _ := harness(t)
+	g := grant()
+	g.Reason = "patron says the cue read WE ATTACK AT DAWN and was one line late"
+
+	st, err := m.Start(g)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// The dashboard still gets it: this is suppression in the LOG, not loss.
+	if st.Reason != g.Reason {
+		t.Errorf("Status.Reason = %q, want the operator's note back", st.Reason)
+	}
+	if err := m.Stop(KindCaption); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	out := buf.String()
+	for _, fragment := range []string{"WE ATTACK AT DAWN", "one line late", g.Reason} {
+		if strings.Contains(out, fragment) {
+			t.Errorf("operator free text reached the log stream (%q):\n%s", fragment, out)
+		}
+	}
+	// The audit trail must still record that a bounded, reasoned grant happened.
+	evs := events(t, buf)
+	if len(evs) == 0 {
+		t.Fatal("no audit events emitted")
+	}
+	start := evs[0]
+	if start["reason_given"] != true {
+		t.Errorf("start event should record that a reason was given: %v", start)
+	}
+	if start["reason_len"] != float64(len(g.Reason)) {
+		t.Errorf("reason_len = %v, want %d", start["reason_len"], len(g.Reason))
+	}
+	if _, ok := start["reason"]; ok {
+		t.Errorf("the start event must carry no free-text reason field: %v", start)
+	}
+}
