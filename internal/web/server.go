@@ -11,9 +11,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
@@ -30,11 +32,20 @@ type LangOption struct {
 
 // Config configures the web server.
 type Config struct {
-	Profile         model.FirewallProfile
-	PatronBind      string // e.g. "0.0.0.0:8080"
-	AdminBind       string // e.g. "127.0.0.1:8443" — must be isolated in prod
-	Auditorium      string
+	Profile    model.FirewallProfile
+	PatronBind string // e.g. "0.0.0.0:8080"
+	AdminBind  string // e.g. "127.0.0.1:8443" — must be isolated in prod
+	// Auditorium is the room name shown to patrons (§7.2 "You are connected to
+	// Auditorium 3"). Room identity only — never plot or title detail.
+	Auditorium string
+	// AuditoriumID is the stable room identifier bound into per-show tokens so a
+	// code from another room is refused (§8.5). Defaults to a slug of Auditorium.
+	AuditoriumID    string
 	DefaultLanguage string
+	// PerShowToken requires a valid per-show session on the patron surface. It
+	// mirrors deploy.Profile.PerShowToken (true for Patron-Facing and Low-Cost
+	// Replacement, false for Lab and Booth Diagnostic).
+	PerShowToken bool
 }
 
 // Deps are the runtime dependencies injected by the core process.
@@ -44,6 +55,13 @@ type Deps struct {
 	Status    func() model.SystemReadiness // admin readiness snapshot
 	Languages func() []LangOption          // available caption languages
 	Store     config.Store                 // config store (setup wizard, admin auth)
+	// Audio is the live per-stream audio state, projected down to the patron-safe
+	// availability model by internal/web/audio.go (§6.6 → §7.2). Nil means no
+	// audio is configured, which the patron page reports honestly.
+	Audio func() []model.AudioStreamState
+	// Signaler relays WebRTC SDP/ICE to captionbridge-media (§6.7). Nil in the
+	// shipped binary — see the SEAM note on AudioSignaler (BLOCKERS B4/B2).
+	Signaler AudioSignaler
 	// SetupWindow is how long first-boot setup mode stays open before auto-expiry
 	// (§8.1 step 14). Zero uses a default.
 	SetupWindow time.Duration
@@ -51,12 +69,14 @@ type Deps struct {
 
 // Server owns the patron and admin HTTP servers.
 type Server struct {
-	cfg    Config
-	deps   Deps
-	patron *http.Server
-	admin  *http.Server
-	static http.Handler
-	setup  *SetupManager
+	cfg        Config
+	deps       Deps
+	patron     *http.Server
+	admin      *http.Server
+	static     http.Handler
+	setup      *SetupManager
+	sessions   *SessionStore
+	patronTmpl *template.Template
 }
 
 // NewServer validates the configuration and builds the patron + admin servers.
@@ -67,6 +87,15 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	if cfg.DefaultLanguage == "" {
 		cfg.DefaultLanguage = "en"
 	}
+	if cfg.Auditorium == "" {
+		cfg.Auditorium = "this auditorium"
+	}
+	if cfg.AuditoriumID == "" {
+		// §8.5 needs a stable room id inside every token. Deriving one from the
+		// displayed room name is better than an empty binding, which would make
+		// every code valid in every room.
+		cfg.AuditoriumID = slugAuditorium(cfg.Auditorium)
+	}
 	if err := validateBindSeparation(cfg); err != nil {
 		return nil, err
 	}
@@ -74,7 +103,24 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, deps: deps, static: http.StripPrefix("/static/", http.FileServer(http.FS(sub)))}
+	tmpl, err := template.ParseFS(assetsFS, "assets/patron.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse patron page: %w", err)
+	}
+	s := &Server{
+		cfg:        cfg,
+		deps:       deps,
+		static:     http.StripPrefix("/static/", http.FileServer(http.FS(sub))),
+		patronTmpl: tmpl.Lookup("patron.html"),
+	}
+	if s.patronTmpl == nil {
+		return nil, errors.New("patron page template missing")
+	}
+	sessions, err := NewSessionStore(cfg.AuditoriumID, deps.Store)
+	if err != nil {
+		return nil, err
+	}
+	s.sessions = sessions
 	if deps.Store != nil {
 		s.setup = NewSetupManager(deps.Store, deps.Log, cfg.Profile, deps.SetupWindow)
 	}
@@ -87,12 +133,45 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	if cfg.AdminBind != "" {
 		s.admin = &http.Server{
 			Addr:              cfg.AdminBind,
-			Handler:           s.adminMux(),
+			Handler:           s.adminSurface(),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 	}
 	return s, nil
 }
+
+// slugAuditorium reduces a display name to a stable token-binding id.
+func slugAuditorium(name string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// Sessions exposes the per-show session store so the core process can mint a
+// session at show start and end it at show end (§10.4).
+func (s *Server) Sessions() *SessionStore { return s.sessions }
+
+// EndShow terminates the current show for every connected patron: tokens are
+// revoked and live caption/audio connections receive the polite "this show has
+// ended" state instead of dangling (§7.2, §9.4).
+//
+// SEAM: nothing in cmd/captionbridge-core calls this yet. The automatic trigger
+// (ACSP Terminate Lease / end of the final reel) lives in the caption controller,
+// which this lane does not own; the admin endpoint POST /api/admin/session/end is
+// the operator path that exists today.
+func (s *Server) EndShow() { s.sessions.EndShow() }
 
 // validateBindSeparation enforces §8.4: in production profiles, the admin surface
 // must NOT be reachable on the patron interface.
@@ -189,5 +268,5 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // PatronHandler exposes the patron mux (used by tests via httptest).
 func (s *Server) PatronHandler() http.Handler { return s.patronMux() }
 
-// AdminHandler exposes the admin mux (used by tests via httptest).
-func (s *Server) AdminHandler() http.Handler { return s.adminMux() }
+// AdminHandler exposes the admin surface (used by tests via httptest).
+func (s *Server) AdminHandler() http.Handler { return s.adminSurface() }

@@ -40,3 +40,63 @@ func (s PatronSession) Grants(m PatronMode) bool {
 	}
 	return false
 }
+
+// ParsePatronMode parses a grantable mode name, reporting whether it is known.
+// An unknown mode is REJECTED rather than dropped: a token that silently lost a
+// grant would present a degraded experience as a working one (guardrail #7).
+func ParsePatronMode(s string) (PatronMode, bool) {
+	switch PatronMode(s) {
+	case ModeCaption:
+		return ModeCaption, true
+	case ModeHI:
+		return ModeHI, true
+	case ModeVIN:
+		return ModeVIN, true
+	default:
+		return "", false
+	}
+}
+
+// Valid reports whether m is a known grantable mode.
+func (m PatronMode) Valid() bool {
+	_, ok := ParsePatronMode(string(m))
+	return ok
+}
+
+// AudioStream maps a granted audio mode to its named stream (§6.5 / §10.2).
+// ModeCaption has no audio stream and reports false.
+func (m PatronMode) AudioStream() (StreamType, bool) {
+	switch m {
+	case ModeHI:
+		return StreamHI, true
+	case ModeVIN:
+		return StreamVIN, true
+	default:
+		return "", false
+	}
+}
+
+// ModeForStream is the inverse of AudioStream.
+func ModeForStream(s StreamType) (PatronMode, bool) {
+	switch s {
+	case StreamHI:
+		return ModeHI, true
+	case StreamVIN:
+		return ModeVIN, true
+	default:
+		return "", false
+	}
+}
+
+// RemainingAt reports how long the session still grants access at time now.
+// A session with no expiry reports zero: §9.4 requires per-show sessions that
+// auto-expire at show end, so an unbounded grant is a defect, not a convenience.
+func (s PatronSession) RemainingAt(now time.Time) time.Duration {
+	if s.ExpiresAt.IsZero() {
+		return 0
+	}
+	if d := s.ExpiresAt.Sub(now); d > 0 {
+		return d
+	}
+	return 0
+}

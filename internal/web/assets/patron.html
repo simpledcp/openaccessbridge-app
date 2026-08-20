@@ -4,24 +4,57 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
-  <title>CaptionBridge — Captions</title>
+  <title>{{.Title}}</title>
   <link rel="stylesheet" href="/static/patron.css">
 </head>
-<body class="theme-dark">
+<body class="theme-dark" data-mode="{{.Mode}}"{{if .Captions}} data-captions="1"{{end}}{{if .Audio}} data-audio="1"{{end}}>
   <!-- Auditorium identity is always visible so a patron or passing staff can spot
-       a wrong-room join or stale QR immediately (§7.2 / §8.5). Room name only —
-       never plot/title detail that would spoil the film. -->
+       a wrong-room join or stale code immediately (§7.2 / §8.5). Room name only —
+       never plot/title detail that would spoil the film. It is rendered
+       server-side so it is correct before any connection is made. -->
   <header id="topbar">
-    <div id="auditorium" aria-live="polite">Connecting…</div>
+    <div id="auditorium" aria-live="polite">{{.Auditorium}}</div>
     <div id="connstate" class="state state-connecting" role="status" aria-live="polite">Connecting…</div>
   </header>
 
+{{if .NeedCode}}
+  <!-- §9.4: this room requires a per-show code. The page says so calmly and offers
+       the one action that fixes it; it never explains why in protocol terms. -->
+  <main id="stage">
+    <div class="message waiting" id="accessmsg">{{.AccessMessage}}</div>
+    <form id="joinform" class="joinform">
+      <label class="ctl" for="joincode">Join code</label>
+      <input id="joincode" name="joincode" inputmode="latin" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" maxlength="16"
+             aria-describedby="accessmsg">
+      <button id="joinbtn" type="submit">Join</button>
+    </form>
+    <div class="message" id="joinerror" role="alert"></div>
+  </main>
+{{else}}
   <main id="stage" aria-live="polite" aria-atomic="true">
+  {{if .Captions}}
     <div id="caption" class="caption"></div>
+  {{end}}
     <div id="message" class="message"></div>
+  {{if .Audio}}
+    <!-- The listening panel. With no negotiated peer this shows the honest
+         "not available" state rather than a player that cannot play (B4/B2). -->
+    <section id="audiopanel" aria-label="Assistive audio">
+      <div id="audiostatus" class="message" role="status" aria-live="polite"></div>
+      <div id="streampicker" role="group" aria-label="Audio feed"></div>
+      <!-- §7.2 assumes headphones and asks for a speaker warning "where
+           detectable". No browser exposes whether output is routed to the
+           earpiece, a speaker or Bluetooth, so the guidance is shown to everyone
+           rather than inferred from something we cannot measure. §6.7 is why it
+           says WIRED: Bluetooth adds 100-300 ms on top of the jitter buffer. -->
+      <p id="headphonehint" class="hint">Wired headphones give the best result, especially for hearing assistance.</p>
+    </section>
+  {{end}}
   </main>
 
-  <nav id="controls" aria-label="Caption controls">
+  <nav id="controls" aria-label="Playback controls">
+  {{if .Captions}}
     <label class="ctl">
       Language
       <select id="lang" aria-label="Caption language"></select>
@@ -31,8 +64,28 @@
       <button id="smaller" aria-label="Smaller text">A−</button>
       <button id="bigger" aria-label="Larger text">A+</button>
     </div>
+  {{end}}
+  {{if .Audio}}
+    <label class="ctl">
+      Volume
+      <input id="volume" type="range" min="0" max="100" value="80" aria-label="Volume">
+    </label>
+    <!-- §6.7 receive-side tuning: "a small per-patron 'audio is choppy → add a
+         little buffer' control that trades latency for stability, so a patron on
+         poor RF can self-rescue without staff." -->
+    <label class="ctl">
+      Audio is choppy
+      <select id="buffer" aria-label="Add a little buffer if audio is choppy">
+        <option value="0">Fastest</option>
+        <option value="1" selected>Normal</option>
+        <option value="2">Add a little buffer</option>
+        <option value="3">Add more buffer</option>
+      </select>
+    </label>
+  {{end}}
     <button id="theme" class="ctl" aria-label="Toggle theme">Theme</button>
   </nav>
+{{end}}
 
   <footer id="legal">
     <span>CaptionBridge · local accessibility · no internet</span>

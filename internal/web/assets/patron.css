@@ -65,3 +65,34 @@ button, select {
   padding: 0.5em 0.8em; font-size: 2.8vmin; min-height: 44px; min-width: 44px;
 }
 #legal { text-align: center; color: var(--muted); font-size: 2.2vmin; padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom)); }
+
+/* Show-end is a calm, finished state — not an error and not a warning (§7.2). */
+.state-ended { color: var(--muted); }
+
+/* Assistive audio panel (§7.2). Targets are large and stacked so the whole panel
+   is reachable one-handed with a thumb in a dark auditorium. */
+#audiopanel {
+  display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+  width: 100%; max-width: 34ch; margin-top: 1rem;
+}
+#streampicker { display: flex; flex-direction: column; gap: 0.75rem; width: 100%; }
+.streambtn {
+  width: 100%; min-height: 15vmin; font-size: 3.6vmin; font-weight: 600;
+  text-align: center;
+}
+.streambtn.selected { border-color: var(--accent); color: var(--accent); }
+.streambtn.off { opacity: 0.45; }
+.hint { color: var(--muted); font-size: 2.4vmin; text-align: center; margin: 0; max-width: 32ch; }
+
+/* Join-by-code (§9.4). One field, one large button, nothing else to get wrong. */
+.joinform {
+  display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+  margin-top: 1.5rem; width: 100%; max-width: 26ch;
+}
+.joinform input {
+  width: 100%; text-align: center; letter-spacing: 0.25em; text-transform: uppercase;
+  background: rgba(255,255,255,0.08); color: var(--fg);
+  border: 1px solid rgba(255,255,255,0.25); border-radius: 8px;
+  padding: 0.5em 0.6em; font-size: 5vmin; min-height: 44px;
+}
+.joinform button { width: 100%; min-height: 12vmin; font-size: 3.4vmin; font-weight: 600; }
