@@ -393,10 +393,16 @@ func showChangeNewShow() Scenario {
 			connect(h, 30000, 0, rpl1, true)
 			h.AdvanceEval(1000 * time.Millisecond)
 			h.AssertCaption(t, "en", "Feature A")
+			h.Send(UpdateTimeline(45000, "1", acsp.PlayPlaying)) // well into show A
 			// New show: Terminate → GetNewLease → UpdateTimeline → SetRPL.
 			h.Send(TerminateLease())
 			h.AssertNoCaption(t, "en") // old content dropped
 			h.AssertNoCachedContent(t) // including the fetched timed text itself
+			// The timeline anchor went with the show: a stale position must not
+			// place the next show's first RPL, nor be reported on the dashboard.
+			if got := h.State().TimelinePositionMS; got != 0 {
+				t.Errorf("timeline after show end = %d, want 0", got)
+			}
 			h.Send(GetNewLease(30000))
 			h.Send(UpdateTimeline(0, "1", acsp.PlayPlaying))
 			h.Send(SetRPLInline(rpl2))
@@ -805,6 +811,11 @@ func unfetchableAsset() Scenario {
 			if h.State().State == model.StateError {
 				t.Errorf("an unfetchable asset must not take down the caption link")
 			}
+			// Degraded, but not SILENTLY degraded (guardrail #7): a language the
+			// media block will not serve has to reach the dashboard, not only the log.
+			if !h.HasWarning(acsp.WarnCaptionAssetUnavailable) {
+				t.Errorf("an unfetchable caption asset must raise an operator warning")
+			}
 		},
 	}
 }
@@ -867,6 +878,22 @@ func statusCarriesTimeline() Scenario {
 				t.Errorf("a bare keepalive moved the timeline to %d", got)
 			}
 			h.AssertCaption(t, "en", "Late")
+
+			// Nor may a status that reports the PLAY STATE but no position: servers
+			// push play state more often than position, and reading the missing
+			// field as a seek to zero rewinds the show under the patron.
+			h.Send(StatusAt(30000, 0, "1", acsp.PlayPlaying))
+			h.Evaluate()
+			if got := h.State().TimelinePositionMS; got != 20500 {
+				t.Errorf("a play-state-only status moved the timeline to %d, want 20500", got)
+			}
+			h.AssertCaption(t, "en", "Late")
+
+			// A pause with no position is the same story.
+			h.Send(StatusAt(30000, 0, "1", acsp.PlayPaused))
+			if got := h.State().TimelinePositionMS; got != 20500 {
+				t.Errorf("a play-state-only pause moved the timeline to %d, want 20500", got)
+			}
 		},
 	}
 }

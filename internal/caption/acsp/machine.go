@@ -20,6 +20,13 @@ import (
 // input for caption-link warnings.
 const WarnLeaseNearExpiry = "caption_lease_near_expiry"
 
+// WarnCaptionAssetUnavailable is raised when the media block will not serve a
+// timed-text resource the RPL names. The patron sees that language go blank, so
+// the condition has to be loud (guardrail #7 — no silent degradation — and §8.3
+// "the dashboard must shout"); a log line alone is exactly the failure mode
+// WarnLeaseNearExpiry above was raised for. Same canonical home in internal/model.
+const WarnCaptionAssetUnavailable = "caption_asset_unavailable"
+
 // defaultFetchTimeout bounds one RPL / timed-text fetch made from the request path.
 const defaultFetchTimeout = 5 * time.Second
 
@@ -256,6 +263,15 @@ func (m *Machine) handleStatus(req Request, now time.Time) Response {
 	// The periodic status carries lease AND timeline state (§5.2 request types); a
 	// status with no timeline field stays a pure keepalive.
 	if req.TimelineMS > 0 || req.PlayState != "" {
+		if req.TimelineMS <= 0 {
+			// A status that reports only the play state is NOT a seek to zero.
+			// Taking it as one rewinds the show, re-anchors every engine at the
+			// head and drags the fetch-ahead window back to reel 1 — a silent
+			// wrong-content failure on any server that pushes play state more often
+			// than position. Update Timeline stays the only request that moves the
+			// anchor (§5.2 request types).
+			req.TimelineMS = m.timelineMS
+		}
 		m.applyTimeline(req)
 	}
 	return Response{Type: ReqStatus, OK: true, State: string(m.state)}
@@ -456,6 +472,14 @@ func (m *Machine) loadReels() {
 	for range warns {
 		m.log.Warn(logging.EvAssetFetchFailed, logging.Field("reason", "reel_asset_unavailable"))
 	}
+	if len(warns) > 0 {
+		// One warning per load, not one per resource: the condition is "this show's
+		// captions are incomplete", and the count is the detail. The message carries
+		// no locator and no caption text (§9.4).
+		m.warn(model.Warning{Code: WarnCaptionAssetUnavailable,
+			Message:  "The cinema server did not serve every caption asset for this content; some languages may be blank.",
+			Severity: model.SeverityWarning})
+	}
 	m.ctrl.LoadReel(cues)
 }
 
@@ -550,6 +574,12 @@ func (m *Machine) purgeContent() {
 	m.languages = nil
 	m.loadedLangs = nil
 	m.playoutID = ""
+	// The timeline anchor belonged to the show that just ended. Keeping it would
+	// let a stale position place the NEXT show's first RPL (nextSegmentStart reads
+	// it to spot a mid-show reconnect), and would report the old position on the
+	// dashboard until the server re-anchors.
+	m.timelineMS = 0
+	m.playState = ""
 	m.loader.Purge()
 }
 
