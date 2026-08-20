@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 )
 
 // Frame is a block of interleaved float64 samples in [-1, 1].
@@ -21,7 +22,12 @@ type Frame struct {
 }
 
 // Source produces capture frames until closed. Start returns a channel that is
-// closed when the source stops (ctx cancel or Close).
+// closed when the source stops (ctx cancel or Close) — a closed channel is the
+// device telling the pipeline it has stopped delivering audio, never a reason to
+// keep serving the last healthy verdict (guardrail #7).
+//
+// A Source MAY additionally implement HealthReporter (health.go) to report real
+// presence/connection state; the pipeline prefers it when present.
 type Source interface {
 	Start(ctx context.Context) (<-chan Frame, error)
 	Describe() string
@@ -37,8 +43,15 @@ type SyntheticTone struct {
 	Channels   int
 	FrameSize  int // samples per channel per frame
 
-	phase  float64
-	cancel context.CancelFunc
+	phase float64
+
+	// healthMu guards the device-state fields below. Start runs on the pipeline's
+	// Run goroutine while Close is called from whoever is shutting the stream
+	// down (Stream.Stop), so the cancel func is shared state, not local state.
+	healthMu sync.Mutex
+	cancel   context.CancelFunc
+	started  bool
+	closed   bool
 }
 
 // Describe returns a human description (no content).
@@ -58,7 +71,10 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	if s.FrameSize <= 0 {
 		s.FrameSize = 480 // 10 ms @ 48 kHz
 	}
-	ctx, s.cancel = context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	s.healthMu.Lock()
+	s.started, s.closed, s.cancel = true, false, cancel
+	s.healthMu.Unlock()
 	out := make(chan Frame)
 	step := 2 * math.Pi * s.FreqHz / float64(s.SampleRate)
 	go func() {
@@ -85,10 +101,15 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	return out, nil
 }
 
-// Close stops the source.
+// Close stops the source. The Health seam then reports it as disconnected, so a
+// stopped source surfaces as a failed input rather than a frozen verdict (§6.6).
 func (s *SyntheticTone) Close() error {
-	if s.cancel != nil {
-		s.cancel()
+	s.healthMu.Lock()
+	s.closed = true
+	cancel := s.cancel
+	s.healthMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	return nil
 }
