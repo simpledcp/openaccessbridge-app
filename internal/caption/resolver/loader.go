@@ -116,6 +116,25 @@ type ParseWarning struct {
 	Count int
 }
 
+// LoadOutcome summarizes one fetch-ahead window load: what that load MEASURED
+// about the content in the window, whether or not anything was wrong with it.
+//
+// It exists so a caller can CLEAR a content warning on evidence. "The playout ID
+// changed" only says something changed; "the load that just ran found nothing
+// degraded and nothing missing" is a measurement of the content now being served
+// (§5.3, guardrail #7 — a condition must stop being reported because it passed,
+// not because a moment went by).
+type LoadOutcome struct {
+	// Scope is the cache namespace the load ran under: unique to this RPL's
+	// content, so two loads with the same scope describe the same show.
+	Scope string
+	// DegradedAssets is the number of assets that parsed with degradation, and
+	// MissingAssets the number that would not serve at all. Counts only — the
+	// classes travel on ParseWarning (§9.4).
+	DegradedAssets int
+	MissingAssets  int
+}
+
 // Loader turns an RPL into composition-timeline-relative cues per language, with a
 // bounded fetch-ahead window (§5.3): it fetches the current and next reel(s), not
 // the whole composition, and skips reels already past.
@@ -128,6 +147,11 @@ type Loader struct {
 	// list: that list means "this asset would not serve at all", and a degraded
 	// asset that DID serve must not be reported as a missing one. nil discards.
 	OnParseWarning func(ParseWarning)
+	// OnLoadComplete, when set, is called once at the END of every window load —
+	// after any OnParseWarning for that load — with what the load found. A caller
+	// holding a live warning set uses it to drop a content warning the current
+	// content no longer justifies. nil discards.
+	OnLoadComplete func(LoadOutcome)
 }
 
 // NewLoader builds a Loader.
@@ -217,6 +241,7 @@ func (l *Loader) Load(ctx context.Context, req WindowRequest) (map[string][]mode
 	}
 	out := make(map[string][]model.Cue)
 	var warnings []string
+	degraded := 0
 
 	for reelIdx := currentReelIdx; reelIdx <= last; reelIdx++ {
 		reel := r.Reels[reelIdx]
@@ -235,7 +260,9 @@ func (l *Loader) Load(ctx context.Context, req WindowRequest) (map[string][]mode
 				warnings = append(warnings, fmt.Sprintf("reel%d_%s_fetch_failed", reel.ReelNumber, lang))
 				continue
 			}
-			l.noteParseWarnings(reel.ReelNumber, lang, doc.Warnings)
+			if l.noteParseWarnings(reel.ReelNumber, lang, doc.Warnings) {
+				degraded++
+			}
 			for _, c := range doc.Cues {
 				c.StartMS += offset
 				c.EndMS += offset
@@ -248,15 +275,21 @@ func (l *Loader) Load(ctx context.Context, req WindowRequest) (map[string][]mode
 			}
 		}
 	}
+	if l.OnLoadComplete != nil {
+		l.OnLoadComplete(LoadOutcome{
+			Scope: req.Scope, DegradedAssets: degraded, MissingAssets: len(warnings),
+		})
+	}
 	return out, warnings, nil
 }
 
 // noteParseWarnings reports one document's parse degradation to OnParseWarning
-// and to the log. Repeats of a class are collapsed — a hundred cues clamped to
-// the same origin is one condition with a count, not a hundred conditions.
-func (l *Loader) noteParseWarnings(reelNumber int, lang string, classes []string) {
+// and to the log, reporting whether the document was degraded at all. Repeats of
+// a class are collapsed — a hundred cues clamped to the same origin is one
+// condition with a count, not a hundred conditions.
+func (l *Loader) noteParseWarnings(reelNumber int, lang string, classes []string) bool {
 	if len(classes) == 0 {
-		return
+		return false
 	}
 	seen := make(map[string]bool, len(classes))
 	distinct := make([]string, 0, len(classes))
@@ -281,4 +314,5 @@ func (l *Loader) noteParseWarnings(reelNumber int, lang string, classes []string
 			Classes: distinct, Count: len(classes),
 		})
 	}
+	return true
 }

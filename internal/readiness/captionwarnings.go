@@ -38,10 +38,23 @@ type CaptionWarnings struct {
 	raised   map[string]raisedWarning
 }
 
-// raisedWarning is one warning plus the link context it was raised against. The
-// context is what the clearing rules compare the current state with.
+// raisedWarning is one warning plus the link context it belongs to. The context
+// is what the clearing rules compare the current state with.
 type raisedWarning struct {
-	w         model.Warning
+	w model.Warning
+	// bound reports whether the context below has been established yet.
+	//
+	// The context is taken from the first state observed AFTER the raise, not
+	// from the last one observed before it, because a warning is raised from the
+	// ACSP machine's callbacks while the machine still holds its lock, part-way
+	// through handling the request that CAUSES the condition — the state
+	// describing that request is published at the end of the handler, after the
+	// callback has returned. Binding at raise time therefore stamps a warning
+	// about the incoming show with the OUTGOING show's playout ID, and the very
+	// next observation clears it as belonging to a show that has ended. That is
+	// how "this reel will show no captions" reached the dashboard and vanished
+	// before anyone could read it (guardrail #7).
+	bound     bool
 	playoutID string
 	server    string
 }
@@ -58,12 +71,23 @@ func NewCaptionWarnings(warnFraction float64) *CaptionWarnings {
 // Observe records the latest caption-link state. It is wired to
 // acsp.Options.OnState and is also called by the dashboard poll before Snapshot,
 // so the clearing rules always run against the freshest measurement available.
+//
+// It also BINDS any warning raised since the previous observation to this state:
+// see raisedWarning.bound for why the state after a raise, not the one before
+// it, is the one the warning is about.
 func (c *CaptionWarnings) Observe(link model.CaptionLinkState) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	c.link = link
+	for code, r := range c.raised {
+		if r.bound {
+			continue
+		}
+		r.bound, r.playoutID, r.server = true, link.CurrentPlayoutID, link.Server
+		c.raised[code] = r
+	}
 	c.mu.Unlock()
 }
 
@@ -76,7 +100,10 @@ func (c *CaptionWarnings) Raise(w model.Warning) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.raised[w.Code] = raisedWarning{w: w, playoutID: c.link.CurrentPlayoutID, server: c.link.Server}
+	// Deliberately UNBOUND, including on a re-raise: a re-raise means the
+	// condition was observed again, so it belongs to whatever the link reports
+	// next, not to the context of the first time it was seen.
+	c.raised[w.Code] = raisedWarning{w: w}
 }
 
 // Clear drops a code unconditionally (a caller that knows the condition ended).
@@ -117,6 +144,11 @@ func (c *CaptionWarnings) Snapshot() []model.Warning {
 // staleLocked applies the per-code clearing rule against the observed state.
 func (c *CaptionWarnings) staleLocked(r raisedWarning) bool {
 	link := c.link
+	if !r.bound {
+		// Nothing has been observed since it was raised, so there is no
+		// measurement saying the condition passed. Keep shouting.
+		return false
+	}
 	switch r.w.Code {
 	case model.WarnCaptionLeaseNearExpiry:
 		// Cleared by the same event that resets the machine's own leaseWarned
@@ -131,21 +163,32 @@ func (c *CaptionWarnings) staleLocked(r raisedWarning) bool {
 		leaseMS := link.RequestIntervalMS * 2
 		return leaseMS > 0 && float64(link.LeaseExpiresInMS) > c.fraction*float64(leaseMS)
 	case model.WarnCaptionAssetUnavailable, model.WarnCaptionParseDegraded:
-		// Both describe the content currently loaded. A different show, or no
-		// show at all, is a different question — the next load re-raises it if it
-		// is still true.
-		return !link.RPLLoaded || link.CurrentPlayoutID != r.playoutID
+		// Both describe the content currently loaded, and both are cleared by
+		// MEASUREMENT rather than from here: the caller clears them when a window
+		// load reports nothing missing / nothing degraded
+		// (resolver.Loader.OnLoadComplete).
+		//
+		// Comparing the observed playout ID with the one seen around the raise
+		// does NOT work and must not be reintroduced. The condition is found
+		// while LOADING the show, which happens before the server has necessarily
+		// told the appliance which playout is on screen (Set RPL can precede the
+		// first Update Timeline), so the warning gets filed under the previous
+		// playout — or under none — and the next observation clears it. "This
+		// reel will show no captions" would then never survive to be read.
+		//
+		// With no show loaded there is no content the warning can be about.
+		return !link.RPLLoaded
 	case model.WarnServerIdentityMismatch:
 		// The mismatch belongs to the announced connection. A torn-down link, or a
 		// DIFFERENT server on the other end, means the announce that raised it is
 		// gone; the next Announce re-evaluates the pinned identity (§8.5).
 		//
-		// An empty recorded server means the warning was raised DURING the announce
-		// that established the connection — the machine evaluates the pinned
-		// identity before it publishes the new state — so there is nothing to
-		// compare against and the mismatch stands until the link goes down. Getting
-		// this backwards would clear the wrong-room warning the instant it was
-		// raised, which is the one moment it has to survive.
+		// The bound server is the one the machine published immediately after
+		// evaluating the pinned identity — i.e. the wrong server itself — so the
+		// comparison holds the warning for exactly as long as the appliance is
+		// still talking to it. An empty bound server (the link was already down
+		// when it was observed) cannot contradict anything, so only the
+		// disconnected test applies.
 		return link.State == model.StateDisconnected ||
 			(r.server != "" && link.Server != r.server)
 	default:

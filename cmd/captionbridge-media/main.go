@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -161,9 +162,25 @@ func (m *manager) configure(prof model.AuditoriumProfile) model.MediaCommandResu
 	if err != nil {
 		return model.MediaCommandResult{Error: "channel mapping not recognized (§6.5): " + prof.ChannelMapping}
 	}
+	// The ONLY capture.Source in this build is the synthetic tone (BLOCKERS
+	// B3/B4). Two separate ways a profile can ask for something that does not
+	// exist, and both are refused rather than approximated:
+	//
+	//   - the process was started with --synthetic=false, so there is no source
+	//     at all;
+	//   - the profile names a REAL capture device. Running a tone under that
+	//     device's identity would put a verdict nobody measured into §10.5's
+	//     last_qualification and §10.8's audio_device_compat_profile, both of
+	//     which a tech reads as "how the booth's input measured".
 	if !m.synthetic {
 		return model.MediaCommandResult{
 			Error: "no capture backend for a real input device in this build (BLOCKERS B3/B4); refusing to substitute a synthetic source",
+		}
+	}
+	if !isSyntheticDeviceID(prof.InputDeviceID) {
+		return model.MediaCommandResult{
+			Error: "no capture backend for input device " + prof.InputDeviceID +
+				" in this build (BLOCKERS B3/B4); refusing to report a synthetic tone as that device",
 		}
 	}
 	// The mapping decides the shape the input must present, and the mapper is what
@@ -197,7 +214,7 @@ func (m *manager) configure(prof model.AuditoriumProfile) model.MediaCommandResu
 		tone := tones[sm.Stream]
 		deviceID := prof.InputDeviceID
 		if deviceID == "" {
-			deviceID = "synthetic-" + string(sm.Stream)
+			deviceID = syntheticDevicePrefix + string(sm.Stream)
 		}
 		m.order = append(m.order, sm.Stream)
 		m.slots[sm.Stream] = &slot{
@@ -233,7 +250,7 @@ func (m *manager) applyDefaultSynthetic() {
 		m.order = append(m.order, s.stream)
 		m.slots[s.stream] = &slot{
 			cfg: pipeline.StreamConfig{
-				DeviceID: "synthetic-" + string(s.stream), Stream: s.stream,
+				DeviceID: syntheticDevicePrefix + string(s.stream), Stream: s.stream,
 				Source: model.ChannelMono, Tier: m.tier, Logger: m.log,
 			},
 			channels: 1, freqHz: s.freq, amp: s.amp,
@@ -334,6 +351,20 @@ func (m *manager) statesLocked() []model.AudioStreamState {
 		}
 	}
 	return out
+}
+
+// syntheticDevicePrefix marks the stand-in device identities this process makes
+// up for itself. §10.5's input_device_id is otherwise a STABLE IDENTIFIER OF REAL
+// HARDWARE (capture.Device.ID, from /dev/snd/by-id), and this build can open none
+// of them.
+const syntheticDevicePrefix = "synthetic-"
+
+// isSyntheticDeviceID reports whether an auditorium profile's input_device_id can
+// be honored by the synthetic stand-in. An empty id means the installer has not
+// chosen a device yet (§6.4 step 1), which the stand-in may serve under its own
+// name; anything else names hardware.
+func isSyntheticDeviceID(id string) bool {
+	return id == "" || strings.HasPrefix(id, syntheticDevicePrefix)
 }
 
 // decodeStream reads a stream name payload ("HI" / "VI-N").

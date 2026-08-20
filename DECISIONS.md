@@ -153,8 +153,16 @@ whether the claim was measured; an active-but-unmeasured claim raises
 ### D22. Caption-path warnings are a live SET, cleared by measurement [§8.3, §5.2]
 The ACSP machine raises warnings as one-shot events; the dashboard needs the
 conditions that are true now. `readiness.CaptionWarnings` holds each raised
-warning and drops it when the observed link state shows the condition passed — a
-renewed lease, a new show, a torn-down link. Nothing expires on a timer. Defaults
+warning and drops it only when something MEASURED shows the condition passed: a
+status request that pushes the lease deadline back out, a window load that finds
+nothing missing and nothing degraded (`resolver.Loader.OnLoadComplete`), a
+torn-down link. Nothing expires on a timer, and nothing is cleared by the link
+state merely changing shape — the content warnings are raised part-way through
+loading a show, before the server has necessarily said which playout is on
+screen, so anything inferred from the link state at that moment files them under
+the wrong show and drops them unread. For the same reason a warning's link
+context is bound from the first state observed AFTER it was raised, not the last
+one seen before. Defaults
 (`caption_lease_warn_fraction` 0.25, `caption_asset_fetch_timeout_ms` 5000) are
 settings, not constants reached by omission; an out-of-range value falls back
 loudly.

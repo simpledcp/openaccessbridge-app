@@ -79,10 +79,7 @@ func main() {
 	// contract swaps in behind the same Resolver/Transport seam).
 	fetcher := &resolver.MemoryFetcher{Files: map[string][]byte{}}
 	res := resolver.NewPluggable(fetcher, nil, log)
-	loader := resolver.NewLoader(resolver.NewPipeline(res, resolver.NewCache(8<<20), log), 1)
-	loader.OnParseWarning = func(w resolver.ParseWarning) {
-		captionWarnings.Raise(parseDegradationWarning(w))
-	}
+	loader := newCaptionLoader(resolver.NewPipeline(res, resolver.NewCache(8<<20), log), 1, captionWarnings)
 	aud, _ := auditoriumProfile(store)
 	opts := captionMachineOptions(store, log, aud, captionWarnings)
 	opts.Controller, opts.Resolver, opts.Loader = ctrl, res, loader
@@ -217,6 +214,45 @@ func captionMachineOptions(store *config.SQLiteStore, log *logging.Logger, aud m
 		FetchTimeout:        assetFetchTimeout(store, log),
 		OnState:             w.Observe,
 		OnWarning:           w.Raise,
+	}
+}
+
+// newCaptionLoader builds the caption-asset loader together with the wiring that
+// makes a content degradation visible: every timed-text parse degradation is
+// raised into the dashboard's warning set, and every load reports what it found
+// so a condition that has passed is retired on evidence (§5.3, §5.4).
+//
+// It is one constructor rather than three lines at the call site so the tests
+// drive the SAME wiring the binary does. A hook assigned only in main() is a hook
+// no test can notice going missing.
+func newCaptionLoader(p *resolver.Pipeline, fetchAheadReels int, w *readiness.CaptionWarnings) *resolver.Loader {
+	loader := resolver.NewLoader(p, fetchAheadReels)
+	loader.OnParseWarning = func(pw resolver.ParseWarning) { w.Raise(parseDegradationWarning(pw)) }
+	loader.OnLoadComplete = captionLoadOutcomeSink(w)
+	return loader
+}
+
+// captionLoadOutcomeSink returns the hook that CLEARS the two content warnings
+// when the load that just ran found nothing to justify them (§5.3).
+//
+// This is the clearing half of guardrail #7. A caption-content condition must
+// stop being reported because a later load measured it gone, never because the
+// link state happened to change shape: the conditions are raised part-way
+// through loading a show, before the server has necessarily said which playout
+// is on screen, so anything inferred from the link state at that moment files
+// them under the wrong show and drops them unread.
+func captionLoadOutcomeSink(w *readiness.CaptionWarnings) func(resolver.LoadOutcome) {
+	return func(o resolver.LoadOutcome) {
+		// Ordered after this load's own OnParseWarning calls, so a load that DID
+		// find degradation never clears itself.
+		if o.DegradedAssets == 0 {
+			w.Clear(model.WarnCaptionParseDegraded)
+		}
+		// The machine raises the "did not serve every asset" warning from the same
+		// load's result, after Load returns, so clearing here cannot erase it.
+		if o.MissingAssets == 0 {
+			w.Clear(model.WarnCaptionAssetUnavailable)
+		}
 	}
 }
 

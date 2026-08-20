@@ -46,22 +46,65 @@ func TestLeaseWarningClearedWhenLeaseGone(t *testing.T) {
 	}
 }
 
-// TestAssetWarningsFollowTheShow: an "assets did not all serve" condition belongs
-// to the content loaded when it was raised. A new show re-asks the question.
-func TestAssetWarningsFollowTheShow(t *testing.T) {
+// TestContentWarningsSurviveAChangeOfShowAndAreClearedByMeasurement: the two
+// content warnings are raised part-way through LOADING a show, before the server
+// has necessarily said which playout is on screen — Set RPL can precede the first
+// Update Timeline. Clearing them because the observed playout ID no longer
+// matches the one seen around the raise therefore drops them unread, which is
+// exactly the silent degradation guardrail #7 forbids.
+//
+// They are cleared by the caller when a later window load MEASURES the condition
+// gone (resolver.Loader.OnLoadComplete), never by the link state changing shape.
+func TestContentWarningsSurviveAChangeOfShowAndAreClearedByMeasurement(t *testing.T) {
 	for _, code := range []string{model.WarnCaptionAssetUnavailable, model.WarnCaptionParseDegraded} {
 		c := NewCaptionWarnings(0)
-		c.Observe(leased(30000, 20000))
+		c.Observe(leased(30000, 20000)) // playout-1 is still the published show
+		// The incoming show's assets are loaded and found wanting.
 		c.Raise(model.Warning{Code: code, Severity: model.SeverityWarning})
-		if got := c.Snapshot(); !hasCode(got, code) {
-			t.Fatalf("%s: expected the warning to stand for the loaded show, got %v", code, codes(got))
-		}
+
 		next := leased(30000, 20000)
-		next.CurrentPlayoutID = "playout-2"
+		next.CurrentPlayoutID = "playout-2" // ...and only now is it published
 		c.Observe(next)
-		if got := c.Snapshot(); len(got) != 0 {
-			t.Fatalf("%s: a new show must clear it, got %v", code, codes(got))
+		if got := c.Snapshot(); !hasCode(got, code) {
+			t.Fatalf("%s: the warning describes the show that just loaded, got %v", code, codes(got))
 		}
+		// Still true on the next poll, and after another show change: nothing has
+		// measured it gone.
+		third := leased(30000, 20000)
+		third.CurrentPlayoutID = "playout-3"
+		c.Observe(third)
+		if got := c.Snapshot(); !hasCode(got, code) {
+			t.Fatalf("%s: only a measurement may clear it, got %v", code, codes(got))
+		}
+		// A clean load does clear it.
+		c.Clear(code)
+		if got := c.Snapshot(); len(got) != 0 {
+			t.Fatalf("%s: a clean load must clear it, got %v", code, codes(got))
+		}
+	}
+}
+
+// TestContentWarningsGoWithTheContent: with no RPL loaded there is no content the
+// warning can be about.
+func TestContentWarningsGoWithTheContent(t *testing.T) {
+	c := NewCaptionWarnings(0)
+	c.Observe(leased(30000, 20000))
+	c.Raise(model.Warning{Code: model.WarnCaptionParseDegraded, Severity: model.SeverityCritical})
+	gone := leased(30000, 20000)
+	gone.RPLLoaded = false
+	c.Observe(gone)
+	if got := c.Snapshot(); len(got) != 0 {
+		t.Fatalf("no content loaded, no content warning, got %v", codes(got))
+	}
+}
+
+// TestAWarningNotYetObservedIsNeverStale: before anything is observed there is
+// no measurement saying the condition passed, so the set keeps shouting.
+func TestAWarningNotYetObservedIsNeverStale(t *testing.T) {
+	c := NewCaptionWarnings(0)
+	c.Raise(model.Warning{Code: model.WarnCaptionAssetUnavailable, Severity: model.SeverityWarning})
+	if got := c.Snapshot(); len(got) != 1 {
+		t.Fatalf("an unobserved warning must be kept, got %v", codes(got))
 	}
 }
 
@@ -69,8 +112,9 @@ func TestAssetWarningsFollowTheShow(t *testing.T) {
 // must not evaporate while the appliance is still talking to the wrong server.
 func TestIdentityMismatchHoldsUntilTheLinkIsTornDown(t *testing.T) {
 	c := NewCaptionWarnings(0)
-	c.Observe(leased(30000, 20000))
+	c.Observe(model.CaptionLinkState{State: model.StateDisconnected})
 	c.Raise(model.Warning{Code: model.WarnServerIdentityMismatch, Severity: model.SeverityCritical})
+	c.Observe(leased(30000, 20000)) // the announce that raised it lands: server-a
 
 	// Time passes, the lease renews, the show changes — none of that makes it the
 	// right room.

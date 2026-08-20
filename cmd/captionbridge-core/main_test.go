@@ -108,6 +108,14 @@ func testStore(t *testing.T, prof model.AuditoriumProfile) *config.SQLiteStore {
 
 func newSupervisor(t *testing.T, store *config.SQLiteStore, dir string) *supervisor {
 	t.Helper()
+	sup, _ := newSupervisorWithFetcher(t, store, dir)
+	return sup
+}
+
+// newSupervisorWithFetcher also hands back the content fetcher, so a test can
+// serve a caption asset to the real ACSP machine.
+func newSupervisorWithFetcher(t *testing.T, store *config.SQLiteStore, dir string) (*supervisor, *resolver.MemoryFetcher) {
+	t.Helper()
 	log := logging.Nop()
 	hub := fanout.NewHub(fanout.Options{Auditorium: "Auditorium 3", MaxClients: 25})
 	ctrl := caption.NewController(caption.Options{Hub: hub})
@@ -117,7 +125,7 @@ func newSupervisor(t *testing.T, store *config.SQLiteStore, dir string) *supervi
 	cw := readiness.NewCaptionWarnings(0)
 	fetcher := &resolver.MemoryFetcher{Files: map[string][]byte{}}
 	res := resolver.NewPluggable(fetcher, nil, log)
-	loader := resolver.NewLoader(resolver.NewPipeline(res, resolver.NewCache(1<<20), log), 1)
+	loader := newCaptionLoader(resolver.NewPipeline(res, resolver.NewCache(1<<20), log), 1, cw)
 	aud, _ := auditoriumProfile(store)
 	opts := captionMachineOptions(store, log, aud, cw)
 	opts.Controller, opts.Resolver, opts.Loader = ctrl, res, loader
@@ -129,7 +137,7 @@ func newSupervisor(t *testing.T, store *config.SQLiteStore, dir string) *supervi
 		media:    newMediaClient(filepath.Join(dir, ipc.SocketMedia), log),
 		firewall: newFirewallClient(filepath.Join(dir, ipc.SocketFirewall), log),
 		machine:  acsp.New(opts), hub: hub, captionWarnings: cw,
-	}
+	}, fetcher
 }
 
 func mustProfile(name model.FirewallProfile) deploy.Profile {
@@ -590,4 +598,63 @@ func mustAud(t *testing.T, store *config.SQLiteStore) model.AuditoriumProfile {
 		t.Fatal("expected a stored auditorium profile")
 	}
 	return aud
+}
+
+// degradedTimedText is a timed-text asset whose <StartTime> origin falls after
+// every cue, so the parser drops them all: the reel will show no captions at all
+// (§5.4 all_cues_before_start_time).
+const degradedTimedText = `<?xml version="1.0"?><SubtitleReel xmlns="urn:sim:428">` +
+	`<Language>en</Language><EditRate>1000 1</EditRate><TimeCodeRate>1000</TimeCodeRate>` +
+	`<StartTime>00:00:09:000</StartTime><SubtitleList><Font>` +
+	`<Subtitle TimeIn="00:00:01:000" TimeOut="00:00:04:000"><Text>Line</Text></Subtitle>` +
+	`</Font></SubtitleList></SubtitleReel>`
+
+// TestParseDegradationSurvivesTheLoadThatRaisedIt drives the REAL machine and
+// loader over the real §5.2 sequence in which Set RPL precedes the first Update
+// Timeline — the order a server uses when it pushes the RPL before playback
+// starts.
+//
+// The parse warning is raised from inside the loader, part-way through handling
+// Set RPL, before the machine publishes the state describing the loaded show.
+// A warning set that stamps the raise with the PREVIOUS observed state files it
+// under the previous playout ID and drops it on the very next observation, so
+// "this reel will show no captions" never reaches the dashboard at all.
+func TestParseDegradationSurvivesTheLoadThatRaisedIt(t *testing.T) {
+	dir := t.TempDir()
+	store := testStore(t, model.AuditoriumProfile{AuditoriumID: "screen-3"})
+	sup, fetcher := newSupervisorWithFetcher(t, store, dir)
+	fetcher.Files["tt_en.xml"] = []byte(degradedTimedText)
+	rplBytes := sim.RPL("show-1", []sim.ReelSpec{{Number: 1, DurationMS: 60000, Resources: []sim.ResSpec{
+		{ID: "res-en", Type: "ClosedCaption", Language: "en", Locator: "tt_en.xml"},
+	}}})
+
+	sup.machine.Connected()
+	sup.machine.Handle(sim.Announce("srv", "Auditorium 3", ""))
+	sup.machine.Handle(sim.GetNewLease(30000))
+	sup.machine.Handle(sim.SetRPLInline(rplBytes))
+	sup.machine.Handle(sim.SetOutputMode(true))
+	sup.machine.Handle(sim.UpdateTimeline(0, "show-1", acsp.PlayPlaying))
+
+	st := sup.status()
+	if !hasCode(st.Warnings, model.WarnCaptionParseDegraded) {
+		t.Fatalf("a reel that lost every cue must reach the dashboard, got %v", codes(st.Warnings))
+	}
+	// And it is a CONDITION, not a one-shot: a second poll still reports it.
+	if st2 := sup.status(); !hasCode(st2.Warnings, model.WarnCaptionParseDegraded) {
+		t.Errorf("the condition is still true; it must still be reported, got %v", codes(st2.Warnings))
+	}
+
+	// A clean show clears it — by MEASUREMENT (the next window load found nothing
+	// degraded), not by the playout ID having moved on.
+	fetcher.Files["tt_clean.xml"] = sim.TimedText("en", []sim.CueSpec{{StartMS: 1000, EndMS: 4000, Text: "Fine"}})
+	clean := sim.RPL("show-2", []sim.ReelSpec{{Number: 1, DurationMS: 60000, Resources: []sim.ResSpec{
+		{ID: "res-en", Type: "ClosedCaption", Language: "en", Locator: "tt_clean.xml"},
+	}}})
+	sup.machine.Handle(sim.SetRPLInline(clean))
+	// The new RPL chains after the first on the composition timeline, so the
+	// server has to move the playhead into it for it to load.
+	sup.machine.Handle(sim.UpdateTimeline(60000, "show-2", acsp.PlayPlaying))
+	if st3 := sup.status(); hasCode(st3.Warnings, model.WarnCaptionParseDegraded) {
+		t.Errorf("a clean load must clear the degradation warning, got %v", codes(st3.Warnings))
+	}
 }

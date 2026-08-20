@@ -32,8 +32,7 @@ func newManager(t *testing.T, synthetic bool) *manager {
 func TestConfigureAppliesTheStoredChannelMapping(t *testing.T) {
 	m := newManager(t, true)
 	res := m.configure(model.AuditoriumProfile{
-		AuditoriumID: "screen-3", InputDeviceID: "usb-XYZ-interface-00",
-		ChannelMapping: "stereo:L=HI,R=VI-N",
+		AuditoriumID: "screen-3", ChannelMapping: "stereo:L=HI,R=VI-N",
 	})
 	if !res.OK {
 		t.Fatalf("configure refused a valid mapping: %s", res.Error)
@@ -54,9 +53,11 @@ func TestConfigureAppliesTheStoredChannelMapping(t *testing.T) {
 	if hi.channels != 2 {
 		t.Errorf("a stereo split needs a 2-channel input, got %d", hi.channels)
 	}
-	// The stored device identity reaches the stream state (§10.5 input_device_id).
-	if hi.cfg.DeviceID != "usb-XYZ-interface-00" {
-		t.Errorf("device id = %q, want the configured one", hi.cfg.DeviceID)
+	// With no device chosen yet, the streams run under the stand-in's OWN name.
+	// Labelling them with a booth device's identity is what would turn a tone
+	// into a fabricated measurement of that device (see the test below).
+	if !strings.HasPrefix(hi.cfg.DeviceID, syntheticDevicePrefix) {
+		t.Errorf("device id = %q, want the synthetic stand-in's own name", hi.cfg.DeviceID)
 	}
 }
 
@@ -106,16 +107,41 @@ func TestConfigureRefusesAnUnrecognizedMapping(t *testing.T) {
 // TestConfigureRefusesARealDeviceRatherThanFakeIt: there is no ALSA capture
 // source yet (B3/B4). Serving a booth's configured input with a synthetic tone
 // would be a fabricated measurement, so the process refuses and lets core shout.
+//
+// The gate is the PROFILE's device, not the --synthetic flag: with the flag on
+// (its default, and what the systemd unit runs) a stored input_device_id would
+// otherwise label a tone with the booth's hardware identity, and core persists
+// that as §10.5 last_qualification and §10.8 audio_device_compat_profile — a
+// verdict on hardware nothing ever opened.
 func TestConfigureRefusesARealDeviceRatherThanFakeIt(t *testing.T) {
-	m := newManager(t, false)
-	res := m.configure(model.AuditoriumProfile{
-		InputDeviceID: "usb-real-device-00", ChannelMapping: "mono:HI",
-	})
-	if res.OK {
-		t.Fatalf("a real capture device must not be served by a synthetic source")
+	for _, synthetic := range []bool{true, false} {
+		m := newManager(t, synthetic)
+		m.applyDefaultSynthetic()
+		res := m.configure(model.AuditoriumProfile{
+			InputDeviceID: "usb-Focusrite_Scarlett_2i2-00", ChannelMapping: "mono:HI",
+		})
+		if res.OK {
+			t.Fatalf("synthetic=%v: a real capture device must not be served by a synthetic source", synthetic)
+		}
+		if !strings.Contains(res.Error, "B3") {
+			t.Errorf("synthetic=%v: the refusal should name the blocker, got %q", synthetic, res.Error)
+		}
+		// And no stream may end up wearing that device's identity.
+		for _, st := range m.states() {
+			if st.InputDeviceID == "usb-Focusrite_Scarlett_2i2-00" {
+				t.Errorf("synthetic=%v: a stream is reporting itself as the real device", synthetic)
+			}
+		}
 	}
-	if !strings.Contains(res.Error, "B3") {
-		t.Errorf("the refusal should name the blocker, got %q", res.Error)
+}
+
+// TestNoSourceAtAllIsRefused: --synthetic=false leaves this build with no
+// capture.Source whatsoever, so even a device-less profile is refused.
+func TestNoSourceAtAllIsRefused(t *testing.T) {
+	m := newManager(t, false)
+	res := m.configure(model.AuditoriumProfile{ChannelMapping: "mono:HI"})
+	if res.OK {
+		t.Fatalf("with no capture backend at all, configure must refuse")
 	}
 	if len(m.slots) != 0 {
 		t.Errorf("a refused configure must not install a plan, got %v", m.slots)

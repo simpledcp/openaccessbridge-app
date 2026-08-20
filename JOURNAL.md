@@ -117,3 +117,30 @@ running system use it:
 Verified live: three processes up, media reconfigured from the stored profile
 (mono → L/R), firewall applied through the helper (dry-run, no root), the
 dashboard reporting measured facts, and §10.5/§10.8 written from real passes.
+
+### Review pass on the wiring lane
+
+Re-verified each claim by mutation (revert, watch the test fail, restore). Two
+real defects were found and repaired:
+
+- **The media process was labelling a synthetic tone with the booth's hardware
+  identity.** The B3/B4 refusal was gated on the `--synthetic` flag rather than
+  on the profile's `input_device_id`, so with the flag at its default (what the
+  systemd unit runs) a stored device id produced a tone reported AS that device —
+  and core then persisted the resulting verdict as §10.5 `last_qualification` and
+  §10.8 `audio_device_compat_profile`. The gate is now the profile's device.
+- **Caption content warnings were cleared before anyone could read them.** They
+  are raised from inside the window load, which happens while handling Set RPL —
+  which can precede the first Update Timeline — so the playout-ID comparison filed
+  them under the previous show and the next observation dropped them. Clearing is
+  now a measurement: `Loader.OnLoadComplete` reports what every load found, and a
+  load that finds nothing wrong is what retires the warning.
+
+Verified live on this host: three processes up; `media.configure` refuses
+`usb-Focusrite_Scarlett_2i2-00` by name and honours a device-less
+`stereo:L=HI,R=VI-N` (HI←left, VI-N←right reaching the dashboard); the firewall
+posture reports `firewall_introspected=false` with "nft list failed: Operation
+not permitted", i.e. loud rather than green (B5); §10.8 records a code-only
+failure reason from a pass that really ran. The firewall APPLY path was skipped
+on this run — the store has no interfaces or allowlist — which is the documented
+"awaiting setup" branch, not a confirmation that apply works end to end.

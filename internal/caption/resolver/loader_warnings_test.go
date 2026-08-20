@@ -154,3 +154,57 @@ func hasClass(classes []string, want string) bool {
 	}
 	return false
 }
+
+// TestLoadOutcomeReportsWhatTheLoadFound: a warning about the content being
+// served can only be retired on evidence, and the evidence is a later load that
+// found nothing wrong. The outcome is reported for EVERY load, including the
+// clean ones — a hook that only fires on failure can raise a condition but never
+// clear it (guardrail #7).
+func TestLoadOutcomeReportsWhatTheLoadFound(t *testing.T) {
+	mb := &MemoryFetcher{Files: map[string][]byte{
+		"bad.xml": []byte(ttDocStartTime("en", "Line", 1000, 2000, 9000)),
+		"ok.xml":  []byte(ttDoc("en", "Line", 1000, 2000)),
+	}}
+	loader := NewLoader(NewPipeline(NewPluggable(mb, nil, nil), NewCache(1<<20), nil), 0)
+	var got []LoadOutcome
+	var order []string
+	loader.OnParseWarning = func(ParseWarning) { order = append(order, "warn") }
+	loader.OnLoadComplete = func(o LoadOutcome) {
+		order = append(order, "complete")
+		got = append(got, o)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		locator  string
+		scope    string
+		degraded int
+		missing  int
+	}{
+		{"degraded", "bad.xml", "playout-1", 1, 0},
+		{"clean", "ok.xml", "playout-2", 0, 0},
+		{"missing", "gone.xml", "playout-3", 0, 1},
+	} {
+		got, order = nil, nil
+		if _, _, err := loader.Load(context.Background(), WindowRequest{
+			RPL: oneReelRPL("res-1", tc.locator), Languages: []string{"en"}, Scope: tc.scope,
+		}); err != nil {
+			t.Fatalf("%s: Load: %v", tc.name, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("%s: expected exactly one outcome per load, got %d", tc.name, len(got))
+		}
+		o := got[0]
+		if o.Scope != tc.scope {
+			t.Errorf("%s: scope = %q, want %q", tc.name, o.Scope, tc.scope)
+		}
+		if o.DegradedAssets != tc.degraded || o.MissingAssets != tc.missing {
+			t.Errorf("%s: outcome = %+v, want degraded=%d missing=%d", tc.name, o, tc.degraded, tc.missing)
+		}
+		// The outcome must land AFTER this load's own per-asset warnings, or a
+		// caller clearing on a clean count would erase the raise it just made.
+		if len(order) == 0 || order[len(order)-1] != "complete" {
+			t.Errorf("%s: the outcome must be reported last, got %v", tc.name, order)
+		}
+	}
+}
