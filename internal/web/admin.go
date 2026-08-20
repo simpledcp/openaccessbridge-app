@@ -14,7 +14,7 @@ import (
 func (s *Server) adminMux() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/admin", s.requireAdmin(s.serveAdminPage))
-	mux.Handle("/static/", noStore(s.static))
+	mux.Handle("/static/", noStore(s.adminStatic))
 	mux.HandleFunc("/api/admin/status", s.requireAdmin(s.handleAdminStatus))
 	mux.HandleFunc("/healthz", handleHealth)
 

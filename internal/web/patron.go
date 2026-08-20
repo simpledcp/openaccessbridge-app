@@ -38,7 +38,7 @@ func (s *Server) patronMux() http.Handler {
 	mux.HandleFunc("/accessibility", s.servePatronPage)
 	mux.HandleFunc("/caption", s.servePatronPage)
 	mux.HandleFunc("/listen", s.servePatronPage)
-	mux.Handle("/static/", noStore(s.static))
+	mux.Handle("/static/", noStore(s.patronStatic))
 	mux.HandleFunc("/api/patron/join", postOnly(s.handlePatronJoin))
 	mux.HandleFunc("/api/caption/stream", s.handleCaptionSSE)
 	mux.HandleFunc("/api/caption/ws", s.handleCaptionWS)

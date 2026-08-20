@@ -115,6 +115,11 @@ func main() {
 		// (BLOCKERS B4/B2), and the patron page reports listening as unavailable
 		// rather than drawing a player that cannot play.
 		Status: sup.status,
+		// The §6.4 calibration wizard reaches captionbridge-media over the SAME
+		// loopback socket dir this process was given. Without it the wizard falls
+		// back to the default location and reports "the media process is not
+		// answering" for every device whenever core runs with --socket-dir.
+		MediaSocketDir: *socketDir,
 	})
 	if err != nil {
 		log.Error(logging.EvProcessUnhealthy, logging.Field("error", err.Error()))

@@ -79,14 +79,21 @@ type Deps struct {
 
 // Server owns the patron and admin HTTP servers.
 type Server struct {
-	cfg        Config
-	deps       Deps
-	patron     *http.Server
-	admin      *http.Server
-	static     http.Handler
-	setup      *SetupManager
-	sessions   *SessionStore
-	patronTmpl *template.Template
+	cfg    Config
+	deps   Deps
+	patron *http.Server
+	admin  *http.Server
+	// patronStatic serves ONLY the patron assets, and adminStatic only the admin
+	// ones. §7.2 forbids any admin/diagnostic leakage onto the patron surface and
+	// says it is "enforced by route separation and bind-address separation" — a
+	// single shared asset handler quietly defeats both, because the patron
+	// listener then serves the dashboard's markup and its booth diagnostics to
+	// the untrusted BYOD network.
+	patronStatic http.Handler
+	adminStatic  http.Handler
+	setup        *SetupManager
+	sessions     *SessionStore
+	patronTmpl   *template.Template
 }
 
 // NewServer validates the configuration and builds the patron + admin servers.
@@ -120,15 +127,24 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	patronStatic, err := surfaceFS(sub, patronAssets)
+	if err != nil {
+		return nil, err
+	}
+	adminStatic, err := surfaceFS(sub, adminAssets)
+	if err != nil {
+		return nil, err
+	}
 	tmpl, err := template.ParseFS(assetsFS, "assets/patron.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse patron page: %w", err)
 	}
 	s := &Server{
-		cfg:        cfg,
-		deps:       deps,
-		static:     http.StripPrefix("/static/", http.FileServer(http.FS(sub))),
-		patronTmpl: tmpl.Lookup("patron.html"),
+		cfg:          cfg,
+		deps:         deps,
+		patronStatic: http.StripPrefix("/static/", http.FileServer(http.FS(patronStatic))),
+		adminStatic:  http.StripPrefix("/static/", http.FileServer(http.FS(adminStatic))),
+		patronTmpl:   tmpl.Lookup("patron.html"),
 	}
 	if s.patronTmpl == nil {
 		return nil, errors.New("patron page template missing")
@@ -287,3 +303,46 @@ func (s *Server) PatronHandler() http.Handler { return s.patronMux() }
 
 // AdminHandler exposes the admin surface (used by tests via httptest).
 func (s *Server) AdminHandler() http.Handler { return s.calibrationSurface() }
+
+// patronAssets and adminAssets partition the embedded assets by SURFACE. A file
+// must be listed to be served, so a new admin screen cannot reach the patron
+// network by being added to the same directory (§7.2, §8.4).
+var (
+	patronAssets = []string{"patron.html", "patron.css", "patron.js"}
+	adminAssets  = []string{
+		"admin.html", "admin.css", "admin.js",
+		"setup.html", "setup.js",
+		"calibrate.html", "calibrate.css", "calibrate.js",
+	}
+)
+
+// allowFS wraps an fs.FS and serves only an explicit allowlist of names.
+// Anything else reports fs.ErrNotExist, so a file cannot reach a surface merely
+// by sharing a directory with one that belongs there.
+type allowFS struct {
+	src     fs.FS
+	allowed map[string]bool
+}
+
+func (a allowFS) Open(name string) (fs.File, error) {
+	if !a.allowed[name] {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+	return a.src.Open(name)
+}
+
+// surfaceFS builds the allowlisted view for one surface. It verifies every named
+// asset exists NOW, so a renamed or deleted file breaks startup instead of
+// silently 404ing in a booth before a show.
+func surfaceFS(src fs.FS, names []string) (fs.FS, error) {
+	allowed := make(map[string]bool, len(names))
+	for _, n := range names {
+		f, err := src.Open(n)
+		if err != nil {
+			return nil, fmt.Errorf("embedded asset %s: %w", n, err)
+		}
+		f.Close()
+		allowed[n] = true
+	}
+	return allowFS{src: src, allowed: allowed}, nil
+}
