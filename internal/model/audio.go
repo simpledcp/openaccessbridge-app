@@ -56,21 +56,36 @@ func (q QualifierState) Rank() int {
 // VI feed, or clean HI audio and no captions. Audio samples are CONTENT and are
 // never persisted or logged — only these measurements are.
 type AudioStreamState struct {
-	InputDeviceID    string         `json:"input_device_id"`
-	StreamType       StreamType     `json:"stream_type"`
-	SourceChannel    SourceChannel  `json:"source_channel"`
-	SampleRate       int            `json:"sample_rate"`
-	Channels         int            `json:"channels"`
-	LevelDBFS        float64        `json:"level_dbfs"`
-	NoiseFloorDBFS   float64        `json:"noise_floor_dbfs"`
-	Clipping         bool           `json:"clipping"`
-	Silence          bool           `json:"silence"`
-	DCOffset         float64        `json:"dc_offset"`
-	Status           QualifierState `json:"status"`
-	LatencyMSEst     int            `json:"latency_ms_estimate"`
-	Present          bool           `json:"present"`
-	DeviceConnected  bool           `json:"device_connected"`
-	ConnectedClients int            `json:"connected_clients"`
+	InputDeviceID  string         `json:"input_device_id"`
+	StreamType     StreamType     `json:"stream_type"`
+	SourceChannel  SourceChannel  `json:"source_channel"`
+	SampleRate     int            `json:"sample_rate"`
+	Channels       int            `json:"channels"`
+	LevelDBFS      float64        `json:"level_dbfs"`
+	NoiseFloorDBFS float64        `json:"noise_floor_dbfs"`
+	Clipping       bool           `json:"clipping"`
+	Silence        bool           `json:"silence"`
+	DCOffset       float64        `json:"dc_offset"`
+	Status         QualifierState `json:"status"`
+	// LatencyMSEst is the appliance-side ENCODE-PATH estimate in milliseconds
+	// (capture period + Opus frame). It is NOT a glass-to-ear figure: the Wi-Fi
+	// hop, the browser jitter buffer (the dominant term) and the phone's audio
+	// output are outside this appliance and unmeasured. 0 means no encoder ran.
+	LatencyMSEst int `json:"latency_ms_estimate"`
+	// LatencyMeasured reports whether an end-to-end latency was actually
+	// MEASURED. It stays false until the Phase 0C loopback calibration runs on
+	// real hardware (BLOCKERS B3, §11.4), so the dashboard can render "not
+	// measured" instead of presenting an estimate as a measurement.
+	LatencyMeasured  bool `json:"latency_measured"`
+	Present          bool `json:"present"`
+	DeviceConnected  bool `json:"device_connected"`
+	ConnectedClients int  `json:"connected_clients"`
+	// Dropouts counts capture periods the input device failed to deliver
+	// (§6.3 stability, §6.6 "dropouts").
+	Dropouts int `json:"dropouts"`
+	// EncoderState is what the media backend is actually doing for this stream
+	// (§6.6 "encoder state") — e.g. unknown / unavailable / ready_no_transport.
+	EncoderState string `json:"encoder_state"`
 	// Reasons are plain-language explanations for the verdict (§6.3). They carry
 	// no audio content.
 	Reasons []string `json:"reasons,omitempty"`

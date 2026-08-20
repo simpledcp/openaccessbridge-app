@@ -12,19 +12,51 @@ package encode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 )
 
+// ErrNoEncoder reports that NOTHING was encoded because no encoder is present.
+// NullBackend returns it from SmokeTest instead of nil so a no-op stand-in can
+// never be mistaken for a proven media path (kickoff: never fabricate results).
+var ErrNoEncoder = errors.New("encode: no Opus encoder on this host; nothing was encoded")
+
 // OpusParams captures the low-latency Opus tuning from §6.7.
 type OpusParams struct {
-	FrameMS     int    // 10 ms target (20 ms stability fallback)
-	Application string // "lowdelay"/"restricted-lowdelay"/"voip"
-	FEC         bool   // enabled for Wi-Fi resilience
-	DTX         bool   // OFF for HI/VI-N (don't gate speech onsets)
-	Bitrate     int    // bits/sec
+	FrameMS int // 10 ms target (20 ms stability fallback)
+	// Application is the §6.7 voice/low-delay setting. It is the knob with the
+	// most direct effect on the encoder's own algorithmic delay, so it is
+	// mapped onto the encoder element rather than left at its default — see
+	// opusAudioType for the accepted values.
+	Application string
+	FEC         bool // enabled for Wi-Fi resilience
+	DTX         bool // OFF for HI/VI-N (don't gate speech onsets)
+	Bitrate     int  // bits/sec
+}
+
+// opusAudioType maps OpusParams.Application onto GStreamer opusenc's audio-type
+// property (§6.7 "application=lowdelay/restricted-lowdelay voice settings").
+//
+// libopus names three applications (voip, audio, restricted_lowdelay); the
+// GStreamer element exposes them as voice / generic / restricted-lowdelay. It
+// has no separate "lowdelay" value, so §6.7's `lowdelay` spelling maps onto
+// restricted-lowdelay — the lowest-delay mode the element offers. An
+// unrecognized value is an error, never a silent fallback to the element
+// default (guardrail #7).
+func opusAudioType(application string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(application)) {
+	case "", "restricted-lowdelay", "restricted_lowdelay", "lowdelay", "low-delay":
+		return "restricted-lowdelay", nil
+	case "voip", "voice":
+		return "voice", nil
+	case "audio", "generic":
+		return "generic", nil
+	default:
+		return "", fmt.Errorf("encode: unknown Opus application %q (§6.7: restricted-lowdelay|lowdelay|voip|voice|audio|generic)", application)
+	}
 }
 
 // DefaultOpusParams returns the §6.7 low-latency defaults.
@@ -80,7 +112,9 @@ func (g *GStreamerBackend) bin() string {
 // SmokeTest runs: audiotestsrc → audioconvert → audioresample → opusenc → fakesink
 // for dur, proving the capture/encode chain works locally (kickoff item 3). It uses
 // a synthetic tone source so no hardware is required, and discards the output
-// (fakesink) so nothing is persisted.
+// (fakesink) so nothing is persisted. Every §6.7 codec knob — frame size,
+// audio-type, FEC and DTX — is passed to the element; none is left at its
+// default while the docs claim it was tuned.
 func (g *GStreamerBackend) SmokeTest(ctx context.Context, dur time.Duration, p OpusParams) error {
 	if !g.Available() {
 		return fmt.Errorf("gstreamer opus pipeline unavailable on this host")
@@ -90,6 +124,10 @@ func (g *GStreamerBackend) SmokeTest(ctx context.Context, dur time.Duration, p O
 	numBuffers := int(dur.Milliseconds()) / maxInt(p.FrameMS, 10)
 	if numBuffers < 1 {
 		numBuffers = 1
+	}
+	audioType, err := opusAudioType(p.Application)
+	if err != nil {
+		return err
 	}
 	dtx := boolToTF(p.DTX)
 	fec := boolToTF(p.FEC)
@@ -101,6 +139,7 @@ func (g *GStreamerBackend) SmokeTest(ctx context.Context, dur time.Duration, p O
 		fmt.Sprintf("audio/x-raw,rate=%d,channels=1", sampleRate), "!",
 		"opusenc", fmt.Sprintf("bitrate=%d", maxInt(p.Bitrate, 32000)),
 		fmt.Sprintf("frame-size=%d", maxInt(p.FrameMS, 10)),
+		fmt.Sprintf("audio-type=%s", audioType),
 		fmt.Sprintf("dtx=%s", dtx), fmt.Sprintf("inband-fec=%s", fec), "!",
 		"fakesink", "sync=false",
 	}
@@ -112,13 +151,21 @@ func (g *GStreamerBackend) SmokeTest(ctx context.Context, dur time.Duration, p O
 	return nil
 }
 
-// NullBackend is a no-op backend used where media is disabled or in unit tests.
+// NullBackend is a no-op stand-in used where media is disabled or in unit tests.
+// It encodes NOTHING: SmokeTest reports ErrNoEncoder rather than returning nil,
+// so a host with no GStreamer can never be shown as having a working encoder or
+// a measured encode-path latency (kickoff: never fabricate results).
 type NullBackend struct{}
 
-func (NullBackend) Name() string    { return "null" }
+func (NullBackend) Name() string { return "null" }
+
+// Available reports true: the stand-in itself can always be selected. What it
+// cannot do — encode — is reported by SmokeTest.
 func (NullBackend) Available() bool { return true }
+
+// SmokeTest always fails with ErrNoEncoder: nothing was encoded.
 func (NullBackend) SmokeTest(context.Context, time.Duration, OpusParams) error {
-	return nil
+	return ErrNoEncoder
 }
 
 // Select returns the best available backend: GStreamer if present, else Null.

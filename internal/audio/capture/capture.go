@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 )
 
 // Frame is a block of interleaved float64 samples in [-1, 1].
@@ -21,7 +22,12 @@ type Frame struct {
 }
 
 // Source produces capture frames until closed. Start returns a channel that is
-// closed when the source stops (ctx cancel or Close).
+// closed when the source stops (ctx cancel or Close) — a closed channel is the
+// device telling the pipeline it has stopped delivering audio, never a reason to
+// keep serving the last healthy verdict (guardrail #7).
+//
+// A Source MAY additionally implement HealthReporter (health.go) to report real
+// presence/connection state; the pipeline prefers it when present.
 type Source interface {
 	Start(ctx context.Context) (<-chan Frame, error)
 	Describe() string
@@ -39,6 +45,10 @@ type SyntheticTone struct {
 
 	phase  float64
 	cancel context.CancelFunc
+
+	healthMu sync.Mutex
+	started  bool
+	closed   bool
 }
 
 // Describe returns a human description (no content).
@@ -58,6 +68,9 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	if s.FrameSize <= 0 {
 		s.FrameSize = 480 // 10 ms @ 48 kHz
 	}
+	s.healthMu.Lock()
+	s.started, s.closed = true, false
+	s.healthMu.Unlock()
 	ctx, s.cancel = context.WithCancel(ctx)
 	out := make(chan Frame)
 	step := 2 * math.Pi * s.FreqHz / float64(s.SampleRate)
@@ -85,8 +98,12 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	return out, nil
 }
 
-// Close stops the source.
+// Close stops the source. The Health seam then reports it as disconnected, so a
+// stopped source surfaces as a failed input rather than a frozen verdict (§6.6).
 func (s *SyntheticTone) Close() error {
+	s.healthMu.Lock()
+	s.closed = true
+	s.healthMu.Unlock()
 	if s.cancel != nil {
 		s.cancel()
 	}

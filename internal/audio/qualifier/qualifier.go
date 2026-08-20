@@ -6,9 +6,15 @@
 // calibration wizard and continuously during playback.
 //
 // Measurements (§6.3): peak and RMS dBFS, sample-saturation clipping, sustained
-// silence, a low-percentile noise-floor estimate, and DC offset. Classification
-// is conservative — any one defect demotes the verdict — so a degraded input is
-// surfaced before showtime rather than failing silently during a show.
+// silence, a low-percentile noise-floor estimate, DC offset, and mono-vs-stereo
+// capability. Classification is conservative — any one defect demotes the
+// verdict — so a degraded input is surfaced before showtime rather than failing
+// silently during a show.
+//
+// Sustained silence is a property of TIME, not of one block, so the caller
+// tracks how long the input has been continuously silent and hands it in
+// (Input.SilentForMS / Input.PrevSilent); the qualifier applies the §6.3
+// duration and noise-floor rules to it. It never invents history it lacks.
 package qualifier
 
 import (
@@ -18,8 +24,10 @@ import (
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
-// minDBFS is the floor we report for digital silence so dB arithmetic stays finite.
-const minDBFS = -120.0
+// MinDBFS is the floor reported for digital silence so dB arithmetic stays
+// finite. Callers use it as the "no measurement" value for level/floor fields so
+// a dead input never renders as 0 dBFS — which would read as FULL SCALE.
+const MinDBFS = -120.0
 
 // saturationDBFS is the level at/above which a sample is counted as truly saturated
 // (essentially full scale). It is deliberately distinct from the early-warning
@@ -39,6 +47,13 @@ type Thresholds struct {
 	HighNoiseFloorDBFS float64 // estimated noise floor above this is "high" (when signal rides above it).
 	DCOffsetAbs        float64 // |mean sample| above this flags a DC offset.
 
+	// Sustained-silence knobs (§6.3 "duration + noise-floor context"). Silence
+	// during playback is never judged from a single analysis block.
+	SustainedSilenceMS int     // continuous silence before a DEAD input (no measurable floor) fails.
+	QuietPassageMS     int     // continuous silence before a LIVE-but-quiet input fails.
+	DeadInputFloorDBFS float64 // noise floor at/below this is digital zero: no signal at all.
+	SilenceRearmDB     float64 // hysteresis: dB above SilenceDBFS needed to clear a silent state.
+
 	// Supporting knobs.
 	ClipSampleFraction float64 // fraction of near-full-scale samples that also counts as clipping.
 	ExcellentMinDBFS   float64 // lower bound of the pristine RMS band.
@@ -48,9 +63,16 @@ type Thresholds struct {
 	MinDynamicRangeDB  float64 // signal-minus-floor gap required before a high floor is blamed on noise.
 }
 
-// DefaultThresholds returns field-tested defaults for a consumer USB/line input
-// (§6.2 tier 1–2). They err toward warning early: overload within 0.5 dB of full
-// scale, silence below −60 dBFS, mic-level below −40 dBFS.
+// DefaultThresholds returns the defaults for a consumer USB/line input — §6.2
+// tier 2, the default shipped input. They err toward warning early: overload
+// within 0.5 dB of full scale, silence below −60 dBFS, mic-level below −40 dBFS.
+// Silence must persist for 2 s (a dead input, no measurable floor) or 30 s (a
+// live line that is merely quiet) before it is reported as a fault — never on
+// the strength of a single analysis block.
+//
+// These are engineering defaults, not measurements: calibrating them against
+// real dongles/jacks/interfaces is hardware-gated (BLOCKERS B3). Per-tier
+// profiles are in ThresholdsForTier (tier.go).
 func DefaultThresholds() Thresholds {
 	return Thresholds{
 		ClipDBFS:           -0.5,
@@ -58,6 +80,10 @@ func DefaultThresholds() Thresholds {
 		LowLevelDBFS:       -40,
 		HighNoiseFloorDBFS: -45,
 		DCOffsetAbs:        0.02,
+		SustainedSilenceMS: 2000,
+		QuietPassageMS:     30000,
+		DeadInputFloorDBFS: -90,
+		SilenceRearmDB:     3,
 		ClipSampleFraction: 0.01,
 		ExcellentMinDBFS:   -30,
 		HotDBFS:            -6,
@@ -69,8 +95,13 @@ func DefaultThresholds() Thresholds {
 
 // normalized fills any zero-valued field from the defaults so callers can pass a
 // partial Thresholds (or the zero value) and still get sane behavior.
-func (t Thresholds) normalized() Thresholds {
-	d := DefaultThresholds()
+func (t Thresholds) normalized() Thresholds { return t.WithDefaults(DefaultThresholds()) }
+
+// WithDefaults fills any zero-valued field of t from base, so a caller can
+// override only the knobs it cares about on top of a per-tier profile (§6.2)
+// instead of restating the whole struct.
+func (t Thresholds) WithDefaults(base Thresholds) Thresholds {
+	d := base
 	if t.ClipDBFS == 0 {
 		t.ClipDBFS = d.ClipDBFS
 	}
@@ -104,23 +135,53 @@ func (t Thresholds) normalized() Thresholds {
 	if t.MinDynamicRangeDB == 0 {
 		t.MinDynamicRangeDB = d.MinDynamicRangeDB
 	}
+	if t.SustainedSilenceMS == 0 {
+		t.SustainedSilenceMS = d.SustainedSilenceMS
+	}
+	if t.QuietPassageMS == 0 {
+		t.QuietPassageMS = d.QuietPassageMS
+	}
+	if t.DeadInputFloorDBFS == 0 {
+		t.DeadInputFloorDBFS = d.DeadInputFloorDBFS
+	}
+	if t.SilenceRearmDB == 0 {
+		t.SilenceRearmDB = d.SilenceRearmDB
+	}
 	return t
 }
 
 // Input is one analysis block for a single configured input. Samples are floats in
-// [-1, 1], interleaved when Channels > 1. The block is treated as representative of
-// the moment (sustained silence/clipping are judged over the block).
+// [-1, 1], interleaved when Channels > 1.
 type Input struct {
-	Samples          []float64
-	SampleRate       int
-	Channels         int
-	RequiredChannels int // channels the configured mapping needs; 0 = no requirement.
+	Samples    []float64
+	SampleRate int
+	// Channels describes the ANALYSIS LANE in Samples — what the channel mapper
+	// handed over, which is 1 for every mode except stereo-pair (§6.5). It is
+	// used to de-interleave the block, never to judge hardware capability.
+	Channels int
+	// DeviceChannels is what the capture HARDWARE offers, before the mapper
+	// reduced it to a lane. The mono-vs-stereo capability check (§6.3) uses this,
+	// so a legal stereo mapping — which necessarily hands over a 1-channel lane —
+	// is not mistaken for a mono device. 0 falls back to Channels.
+	DeviceChannels int
+	// RequiredChannels is what the configured mapping needs; 0 = no requirement.
+	RequiredChannels int
 	Present          bool
 	DeviceConnected  bool
 	DuringPlayback   bool // true once the source is meant to be playing — silence is then a fault.
-	InputDeviceID    string
-	StreamType       model.StreamType
-	SourceChannel    model.SourceChannel
+	// SilentForMS is how long this input has been CONTINUOUSLY silent, INCLUDING
+	// this block, as tracked by the caller across blocks (§6.3 "duration +
+	// noise-floor context"). Zero means the caller tracks no history — a
+	// one-shot calibration analysis — and silence is then judged on this block
+	// alone. A live pipeline always passes a positive value.
+	SilentForMS int
+	// PrevSilent reports whether the caller's previous block was judged silent.
+	// With it the silence test applies SilenceRearmDB hysteresis, so a level
+	// sitting on the threshold cannot flap the verdict block by block.
+	PrevSilent    bool
+	InputDeviceID string
+	StreamType    model.StreamType
+	SourceChannel model.SourceChannel
 }
 
 // Analyze qualifies one input block and returns its transient state (§6.3 / §10.2).
@@ -138,6 +199,19 @@ func Analyze(in Input, th Thresholds) model.AudioStreamState {
 		DeviceConnected: in.DeviceConnected,
 	}
 
+	// The lane width de-interleaves the block; the DEVICE width is what §6.3
+	// reports as the input's mono/stereo capability. They differ whenever the
+	// mapper has already reduced a stereo device to one lane (§6.5).
+	channels := in.Channels
+	if channels <= 0 {
+		channels = 1
+	}
+	deviceChannels := in.DeviceChannels
+	if deviceChannels <= 0 {
+		deviceChannels = channels
+	}
+	st.Channels = deviceChannels
+
 	// --- Presence / device health (§6.3): the hardest fail. ---
 	if !in.Present || !in.DeviceConnected {
 		st.Status = model.QualFailed
@@ -145,34 +219,28 @@ func Analyze(in Input, th Thresholds) model.AudioStreamState {
 		return st
 	}
 
-	channels := in.Channels
-	if channels <= 0 {
-		channels = 1
-	}
-	// --- Mono/stereo capability: an impossible mapping fails before showtime. ---
-	if in.RequiredChannels > channels {
+	// --- Mono/stereo capability (§6.3): judged on what the DEVICE offers, not on
+	// the width of the lane the mapper produced. A stereo split legally hands
+	// over one lane from a two-channel device; blaming the lane width here would
+	// fail every legal stereo mapping (§6.5 reserves Failed for mappings the
+	// detected hardware cannot satisfy). ---
+	if in.RequiredChannels > deviceChannels {
 		st.Status = model.QualFailed
 		st.Reasons = []string{"input appears mono, but this profile requires two channels"}
 		return st
 	}
 
-	m := measure(in.Samples, channels, in.SampleRate, th)
+	m := measure(in.Samples, channels, in.SampleRate, in.PrevSilent, th)
 	st.LevelDBFS = m.rmsDBFS
 	st.NoiseFloorDBFS = m.noiseFloorDBFS
 	st.DCOffset = m.dc
 	st.Clipping = m.clipping
 	st.Silence = m.silent
 
-	// --- Sustained silence: a fault only once the source is supposed to be playing. ---
+	// --- Sustained silence (§6.3): a fault only once the source is supposed to
+	// be playing, and only once it has LASTED. ---
 	if m.silent {
-		if in.DuringPlayback {
-			st.Status = model.QualFailed
-			st.Reasons = []string{"configured input is silent during playback"}
-		} else {
-			st.Status = model.QualMarginal
-			st.Reasons = []string{"no signal detected; play your source to qualify the input"}
-		}
-		return st
+		return silenceVerdict(st, in, m, th)
 	}
 
 	// --- Marginal defects: accumulate every applicable reason, then demote. ---
@@ -224,6 +292,65 @@ func Analyze(in Input, th Thresholds) model.AudioStreamState {
 	return st
 }
 
+// silenceVerdict classifies a silent block against §6.3's requirement to
+// "distinguish 'no signal' from 'quiet passage' via duration + noise-floor
+// context".
+//
+// Duration: the caller reports how long the input has been continuously silent
+// (Input.SilentForMS). One quiet 200 ms block is never a fault mid-show — a film
+// has quiet beats and a VI-N narration feed is silent between descriptions.
+//
+// Noise-floor context: a floor that has collapsed to digital zero means there is
+// NO signal at all — an unplugged jack or a dead cable — and fails after the
+// short SustainedSilenceMS. A floor still sitting at the room/line level means a
+// live input that merely has nothing on it, so it is given the far longer
+// QuietPassageMS before anything is said about it.
+//
+// (The digital-zero test assumes an analog input, which is what tiers 0–2 ship.
+// A digitally muted tier-3 AES3/Dante feed also reads as exact zeros, so a
+// tier-3 deployment should lengthen SustainedSilenceMS; calibrating that needs
+// hardware, BLOCKERS B3.)
+//
+// Stream type: HI carries the whole soundtrack, so a live line with nothing on
+// it for that long is a fault. VI-N narration is INTERMITTENT BY DESIGN — the
+// gap between descriptions is the normal state — so a live VI-N line that is
+// merely quiet is reported as Marginal and never failed on quiet alone. A VI-N
+// line with no signal at all still fails: that is §6.3's "Failed: configured VI
+// input is silent during playback".
+func silenceVerdict(st model.AudioStreamState, in Input, m metrics, th Thresholds) model.AudioStreamState {
+	if !in.DuringPlayback {
+		st.Status = model.QualMarginal
+		st.Reasons = []string{"no signal detected; play your source to qualify the input"}
+		return st
+	}
+	dead := m.noiseFloorDBFS <= th.DeadInputFloorDBFS
+	need := th.QuietPassageMS
+	if dead {
+		need = th.SustainedSilenceMS
+	}
+	if in.SilentForMS > 0 && in.SilentForMS < need {
+		// Quiet, but not yet sustained long enough to be a fault. Report the
+		// condition out loud rather than either failing on one block or hiding
+		// it — the stream stays usable, and staff can see it is being watched.
+		st.Status = model.QualUsable
+		st.Reasons = []string{"input is quiet; watching for sustained silence before reporting a fault"}
+		return st
+	}
+	if dead {
+		st.Status = model.QualFailed
+		st.Reasons = []string{"configured input is silent during playback — no signal at all; check the cable and the source"}
+		return st
+	}
+	if in.StreamType == model.StreamVIN {
+		st.Status = model.QualMarginal
+		st.Reasons = []string{"no narration on this VI-N input for a sustained period — the line is live, so this may simply be a gap between descriptions"}
+		return st
+	}
+	st.Status = model.QualFailed
+	st.Reasons = []string{"configured input is silent during playback — the line is live but carries no programme audio"}
+	return st
+}
+
 // metrics holds the raw DSP results for one block.
 type metrics struct {
 	peakDBFS       float64
@@ -235,14 +362,19 @@ type metrics struct {
 	silent         bool
 }
 
-// measure computes peak/RMS/DC, sample-saturation clipping, sustained silence, and
-// a low-percentile noise-floor estimate. Per-frame channels are averaged to a mono
+// measure computes peak/RMS/DC, sample-saturation clipping, block silence, and a
+// low-percentile noise-floor estimate. Per-frame channels are averaged to a mono
 // analysis stream for level/DC/floor; clipping scans every raw sample so a single
-// saturated channel still counts.
-func measure(samples []float64, channels, sampleRate int, th Thresholds) metrics {
+// saturated channel still counts. channels is the LANE width, so a stereo-pair
+// lane is de-interleaved into real frames rather than being windowed at half its
+// true duration.
+//
+// prevSilent carries the caller's previous silence state so the silence test can
+// apply re-arm hysteresis; the DURATION rules live in silenceVerdict.
+func measure(samples []float64, channels, sampleRate int, prevSilent bool, th Thresholds) metrics {
 	var m metrics
 	if len(samples) == 0 || channels <= 0 {
-		m.peakDBFS, m.rmsDBFS, m.noiseFloorDBFS = minDBFS, minDBFS, minDBFS
+		m.peakDBFS, m.rmsDBFS, m.noiseFloorDBFS = MinDBFS, MinDBFS, MinDBFS
 		m.silent = true
 		return m
 	}
@@ -272,7 +404,7 @@ func measure(samples []float64, channels, sampleRate int, th Thresholds) metrics
 
 	if frames == 0 {
 		// Fewer samples than channels: degenerate, treat as silence.
-		m.rmsDBFS, m.noiseFloorDBFS = minDBFS, minDBFS
+		m.rmsDBFS, m.noiseFloorDBFS = MinDBFS, MinDBFS
 		m.silent = true
 		return m
 	}
@@ -293,7 +425,14 @@ func measure(samples []float64, channels, sampleRate int, th Thresholds) metrics
 	}
 	m.dc = sum / float64(frames)
 	m.rmsDBFS = linToDB(math.Sqrt(sumSq / float64(frames)))
-	m.silent = m.rmsDBFS < th.SilenceDBFS
+	// Re-arm hysteresis: once silent, the level must climb SilenceRearmDB ABOVE
+	// the silence threshold before the input counts as live again, so a signal
+	// hovering on the threshold does not flap the verdict every block (§6.3).
+	silenceAt := th.SilenceDBFS
+	if prevSilent {
+		silenceAt += th.SilenceRearmDB
+	}
+	m.silent = m.rmsDBFS < silenceAt
 	m.noiseFloorDBFS = noiseFloor(mono, sampleRate, th)
 	return m
 }
@@ -308,7 +447,7 @@ func noiseFloor(mono []float64, sampleRate int, th Thresholds) float64 {
 		win = len(mono)
 	}
 	if win < 1 {
-		return minDBFS
+		return MinDBFS
 	}
 	var dbs []float64
 	for start := 0; start+win <= len(mono); start += win {
@@ -319,7 +458,7 @@ func noiseFloor(mono []float64, sampleRate int, th Thresholds) float64 {
 		dbs = append(dbs, linToDB(math.Sqrt(sq/float64(win))))
 	}
 	if len(dbs) == 0 {
-		return minDBFS
+		return MinDBFS
 	}
 	sort.Float64s(dbs)
 	idx := int(th.NoiseFloorPct * float64(len(dbs)-1))
@@ -351,14 +490,14 @@ func SineWave(freqHz, amplitude float64, sampleRate, channels, frames int) []flo
 	return out
 }
 
-// linToDB converts a linear magnitude to dBFS, clamped at minDBFS.
+// linToDB converts a linear magnitude to dBFS, clamped at MinDBFS.
 func linToDB(lin float64) float64 {
 	if lin <= 0 {
-		return minDBFS
+		return MinDBFS
 	}
 	db := 20 * math.Log10(lin)
-	if db < minDBFS {
-		return minDBFS
+	if db < MinDBFS {
+		return MinDBFS
 	}
 	return db
 }
