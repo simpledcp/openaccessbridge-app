@@ -3,6 +3,7 @@ package webrtcpeer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	"github.com/simpledcp/captionbridge/internal/audio/encode"
+	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
@@ -360,4 +362,217 @@ func waitFor(t *testing.T, within time.Duration, cond func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("condition not reached within " + within.String())
+}
+
+// §6.7's patrons "join and leave mid-show", and the one they do most is switch
+// feeds: assets/patron.js re-offers on the SAME control socket, so under the
+// same peer id. The peer they switched away from is closed, and pion delivers
+// its final state change on a goroutine of its own — so it can land after the
+// replacement is already registered.
+//
+// Keyed by peer id, that stale transition took the peer the patron was actually
+// listening to out of the hub and closed it: their audio stopped for the rest of
+// the show, having done nothing but change feeds. This asserts the transition is
+// keyed by peer IDENTITY, so history cannot reach the present.
+func TestAStaleTransitionCannotTouchTheCurrentPeer(t *testing.T) {
+	h := newHub(t)
+	if err := h.Publish(model.StreamHI, newFakeEncoder()); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Publish(model.StreamVIN, newFakeEncoder()); err != nil {
+		t.Fatal(err)
+	}
+	onHI := newBrowser(t)
+	if err := onHI.connect(t, h, "one-socket", model.StreamHI, 0); err != nil {
+		t.Fatal(err)
+	}
+	onHI.waitForAudio(t, 3, 10*time.Second)
+	h.mu.Lock()
+	stale := h.peers["one-socket"]
+	h.mu.Unlock()
+	if stale == nil {
+		t.Fatal("the first peer was never registered")
+	}
+
+	// The patron switches HI -> VI-N on the same socket.
+	onVIN := newBrowser(t)
+	if err := onVIN.connect(t, h, "one-socket", model.StreamVIN, 0); err != nil {
+		t.Fatal(err)
+	}
+	onVIN.waitForAudio(t, 3, 10*time.Second)
+	waitFor(t, 5*time.Second, func() bool { return h.Listeners(model.StreamVIN) == 1 })
+	if n := h.Peers(); n != 1 {
+		t.Fatalf("switching feeds left %d peers, want 1: the peer switched away from was not released", n)
+	}
+
+	// Now the transitions the replaced peer still owed us, arriving late.
+	h.onPeerState(stale, webrtc.PeerConnectionStateDisconnected)
+	h.onPeerState(stale, webrtc.PeerConnectionStateClosed)
+
+	if n := h.Peers(); n != 1 {
+		t.Fatalf("a stale transition evicted the live peer: %d peers remain", n)
+	}
+	if n := h.Listeners(model.StreamVIN); n != 1 {
+		t.Fatalf("§6.6 listener count = %d after a stale transition, want 1", n)
+	}
+	before := onVIN.got.Load()
+	time.Sleep(300 * time.Millisecond)
+	if onVIN.got.Load() <= before {
+		t.Fatal("the patron's audio stopped after a stale transition from the feed they switched away from")
+	}
+}
+
+// A patron who reloads reaches the hub as a fresh offer. Whether it arrives on a
+// new control socket (new peer id) or the same one, the peer that came before it
+// must be gone — a peer connection and its SRTP session per reload would
+// accumulate for the length of a show.
+func TestReofferReleasesThePeerItReplaces(t *testing.T) {
+	h := newHub(t)
+	if err := h.Publish(model.StreamHI, newFakeEncoder()); err != nil {
+		t.Fatal(err)
+	}
+	var replaced []*peer
+	for i := 0; i < 4; i++ {
+		b := newBrowser(t)
+		if err := b.connect(t, h, "one-socket", model.StreamHI, 0); err != nil {
+			t.Fatalf("reload %d: %v", i, err)
+		}
+		b.waitForAudio(t, 3, 10*time.Second)
+		if n := h.Peers(); n != 1 {
+			t.Fatalf("after %d reloads the hub holds %d peers, want 1", i+1, n)
+		}
+		h.mu.Lock()
+		replaced = append(replaced, h.peers["one-socket"])
+		h.mu.Unlock()
+	}
+	waitFor(t, 5*time.Second, func() bool { return h.Listeners(model.StreamHI) == 1 })
+
+	// Dropping the old peer from the map is not releasing it. Each superseded
+	// peer connection — and the SRTP session, DTLS transport and ICE agent under
+	// it — must actually be CLOSED, or a patron whose phone reconnects through a
+	// show leaves one running per reload.
+	for i, p := range replaced[:len(replaced)-1] {
+		waitFor(t, 5*time.Second, func() bool {
+			return p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed
+		})
+		if p.pc.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			t.Fatalf("the peer replaced by reload %d is still open: it was dropped from the hub but never closed", i+1)
+		}
+	}
+}
+
+// D11 / §9.5 again, this time under the arrival pattern a full auditorium
+// actually produces: everyone scans the QR at once. The cap has to count peers
+// that are mid-negotiation too, or N offers racing each other all see the same
+// free slot and the appliance admits more phones than the profile allows.
+func TestSubscriberCapHoldsUnderConcurrentOffers(t *testing.T) {
+	h := newHub(t)
+	if err := h.Publish(model.StreamHI, newFakeEncoder()); err != nil {
+		t.Fatal(err)
+	}
+	const cap = 2
+	const offers = 6
+	var wg sync.WaitGroup
+	var admitted atomic.Int64
+	for i := 0; i < offers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			b := newBrowser(t)
+			if err := b.connect(t, h, fmt.Sprintf("peer-%d", i), model.StreamHI, cap); err == nil {
+				admitted.Add(1)
+			} else if !errors.Is(err, ErrAtCapacity) {
+				t.Errorf("offer %d failed for a reason other than the cap: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if n := admitted.Load(); n > cap {
+		t.Fatalf("%d of %d concurrent offers were admitted against a cap of %d", n, offers, cap)
+	}
+	if n := h.Peers(); n > cap {
+		t.Fatalf("the hub holds %d peers against a cap of %d", n, cap)
+	}
+}
+
+// §6.6 asks for the connected listener count and §9.4 says to log state
+// transitions and counts. A departure that logs nothing leaves an operator's
+// only record of the count monotonically increasing — every phone that ever
+// connected still apparently listening. This asserts the count comes back down
+// in the log, and that the departure carries no client identifier with it.
+func TestADepartingSubscriberIsLoggedWithTheNewCount(t *testing.T) {
+	logs := &syncBuffer{}
+	h := newHubLogging(t, logs)
+	if err := h.Publish(model.StreamHI, newFakeEncoder()); err != nil {
+		t.Fatal(err)
+	}
+	stay, leave := newBrowser(t), newBrowser(t)
+	if err := stay.connect(t, h, "stays", model.StreamHI, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := leave.connect(t, h, "leaves", model.StreamHI, 0); err != nil {
+		t.Fatal(err)
+	}
+	stay.waitForAudio(t, 3, 10*time.Second)
+	leave.waitForAudio(t, 3, 10*time.Second)
+	waitFor(t, 5*time.Second, func() bool { return h.Listeners(model.StreamHI) == 2 })
+
+	h.ClosePeer("leaves")
+	waitFor(t, 5*time.Second, func() bool {
+		return strings.Contains(logs.String(), string(logging.EvWebRTCPeerClosed))
+	})
+	line := lastEventLine(t, logs.String(), string(logging.EvWebRTCPeerClosed))
+	if !strings.Contains(line, `"listeners":1`) {
+		t.Fatalf("a subscriber left and the log did not record the count coming down:\n%s", line)
+	}
+	// §9.4: the peer id is a client identifier and must not travel to the log.
+	for _, id := range []string{"leaves", "stays"} {
+		if strings.Contains(logs.String(), id) {
+			t.Fatalf("the peer id %q reached the log:\n%s", id, logs.String())
+		}
+	}
+}
+
+func newHubLogging(t *testing.T, logs *syncBuffer) *Hub {
+	t.Helper()
+	requireRoutableInterface(t)
+	h, err := New(Options{Log: logging.New(logging.Options{Component: "test", JSON: true, Writer: logs})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	return h
+}
+
+// syncBuffer is a concurrency-safe log sink: pion delivers state changes from
+// its own goroutines.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func lastEventLine(t *testing.T, logs, event string) string {
+	t.Helper()
+	found := ""
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, `"event":"`+event+`"`) {
+			found = line
+		}
+	}
+	if found == "" {
+		t.Fatalf("no %s event in:\n%s", event, logs)
+	}
+	return found
 }

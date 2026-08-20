@@ -160,7 +160,10 @@ caption path is validated against the simulator scenario suite instead.
 - Read `buildplan.md` sections on demand; do not rely on memory for protocol detail.
 - DECISIONS.md records every OPEN-item default (configurable); BLOCKERS.md records
   what hardware/artifact clears each gate.
-- **Do not trust a "done" claim without the test that fails without it.** Two
+- **Do not trust a "done" claim without the test that fails without it.** The
+  §6.7 review pass mutated every claimed behaviour: three passed with the
+  behaviour removed, and one hid a real mid-show fault (a stale peer callback
+  keyed by id closed the patron's live peer when they switched feeds). Two
   fabrications were caught by adversarial review, not by the test suite: a
   synthetic tone reported under the booth's real hardware identity and persisted
   as §10.5 `last_qualification`, and a §10.8 readiness stamp written by pressing

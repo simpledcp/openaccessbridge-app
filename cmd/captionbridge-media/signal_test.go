@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simpledcp/captionbridge/internal/audio/capture"
 	"github.com/simpledcp/captionbridge/internal/audio/encode"
 	"github.com/simpledcp/captionbridge/internal/ipc"
 	"github.com/simpledcp/captionbridge/internal/logging"
@@ -162,4 +163,39 @@ func TestSyntheticStreamsReachAMeasuredEncoderState(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("streams never reached encoder state %q: %+v", want, m.states())
+}
+
+// The stand-in source now feeds a LIVE encode a patron listens to, so it must
+// run at 1x. capture.SyntheticTone generates as fast as its consumer reads
+// unless it is paced, and an unpaced generator would hand the Opus encoder hours
+// of audio in minutes: the phone would play a chipmunk tone, the queue in
+// internal/audio/encode would overflow and count dropped blocks that never
+// happened at the input, and every wall-clock figure measured around this stream
+// would describe the generator rather than a booth feed (B3).
+//
+// capture.TestRealtimeToneIsPacedAtOneTimesSpeed proves Realtime means 1x; this
+// asserts the media process actually asks for it, which is the half that was
+// only a comment.
+func TestTheStandInSourceFeedingALiveEncodeIsPaced(t *testing.T) {
+	m := newLoggedManager(t, &syncBuffer{})
+	m.applyDefaultSynthetic()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.slots) == 0 {
+		t.Fatal("no streams were configured")
+	}
+	for name, s := range m.slots {
+		if s.src == nil {
+			t.Fatalf("%s has no capture source running", name)
+		}
+		tone, ok := s.src.(*capture.SyntheticTone)
+		if !ok {
+			// A real capture device paces itself; only the stand-in can run away.
+			continue
+		}
+		if !tone.Realtime {
+			t.Fatalf("%s feeds a live Opus encode from an UNPACED generator: a patron would hear it at many times speed", name)
+		}
+	}
 }

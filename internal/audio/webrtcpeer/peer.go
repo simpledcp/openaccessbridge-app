@@ -253,23 +253,9 @@ func (h *Hub) Answer(ctx context.Context, peerID string, stream model.StreamType
 		return "", ErrClosed
 	}
 	src := h.sources[stream]
-	if src == nil {
-		h.mu.Unlock()
-		return "", ErrNoSource
-	}
-	// A re-offer from a peer id we already hold is a reconnect: the old peer is
-	// torn down first so a browser that reloaded cannot leave an orphan peer
-	// (and an orphan SRTP session) behind it.
-	prior := h.takePeerLocked(peerID)
-	if maxPeers > 0 && len(h.peers) >= maxPeers {
-		h.mu.Unlock()
-		closePeers([]*peer{prior})
-		return "", ErrAtCapacity
-	}
 	h.mu.Unlock()
-	if prior != nil {
-		closePeers([]*peer{prior})
-		h.log.Info(logging.EvWebRTCPeerReconnect, logging.Field("stream", string(stream)))
+	if src == nil {
+		return "", ErrNoSource
 	}
 
 	pc, err := h.api.NewPeerConnection(webrtc.Configuration{
@@ -298,49 +284,97 @@ func (h *Hub) Answer(ctx context.Context, peerID string, stream model.StreamType
 			}
 		}
 	}()
-	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) { h.onPeerState(peerID, stream, s) })
+	// The callback closes over THIS peer, never over its id. pion dispatches
+	// state changes on a goroutine of its own, so a peer that has already been
+	// replaced — a patron switching HI to VI-N re-offers on the same control
+	// socket, and so under the same peer id — can deliver its final "closed"
+	// AFTER its replacement is registered. Keyed by id, that stale callback
+	// evicted and closed the peer the patron was actually listening to, taking
+	// their audio down mid-show. Keyed by identity, it can only reach its own.
+	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) { h.onPeerState(p, s) })
 
+	// Admit the peer BEFORE negotiating, under one lock with the capacity check,
+	// so D11's concurrent-client cap counts peers that are mid-negotiation as
+	// well as peers already answered: two offers arriving together must not both
+	// see the last free slot (§9.5's per-profile client target). Admission also
+	// replaces whatever peer this id already held — a browser that reloaded or
+	// switched feeds must not leave an orphan peer and SRTP session behind it.
+	h.mu.Lock()
+	if h.closed || h.sources[stream] != src {
+		h.mu.Unlock()
+		_ = pc.Close()
+		return "", ErrNoSource
+	}
+	prior := h.takePeerLocked(peerID)
+	if maxPeers > 0 && len(h.peers) >= maxPeers {
+		h.mu.Unlock()
+		_ = pc.Close()
+		closePeers([]*peer{prior})
+		return "", ErrAtCapacity
+	}
+	h.peers[peerID] = p
+	h.mu.Unlock()
+	if prior != nil {
+		closePeers([]*peer{prior})
+		h.log.Info(logging.EvWebRTCPeerReconnect, logging.Field("stream", string(stream)))
+	}
+
+	// The peer is in the map from here on, so every failure path has to take it
+	// back out: a peer left behind for an offer that never got an answer would
+	// hold a slot against the cap for the rest of the show.
+	fail := func(err error) (string, error) {
+		h.removePeer(p)
+		_ = pc.Close()
+		return "", err
+	}
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer, SDP: offerSDP,
 	}); err != nil {
-		_ = pc.Close()
-		return "", fmt.Errorf("webrtcpeer: offer rejected: %w", err)
+		return fail(fmt.Errorf("webrtcpeer: offer rejected: %w", err))
 	}
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		_ = pc.Close()
-		return "", fmt.Errorf("webrtcpeer: create answer: %w", err)
+		return fail(fmt.Errorf("webrtcpeer: create answer: %w", err))
 	}
 	gathered := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
-		_ = pc.Close()
-		return "", fmt.Errorf("webrtcpeer: set local description: %w", err)
+		return fail(fmt.Errorf("webrtcpeer: set local description: %w", err))
 	}
 	gctx, cancel := context.WithTimeout(ctx, h.gather)
 	defer cancel()
 	select {
 	case <-gathered:
 	case <-gctx.Done():
-		_ = pc.Close()
-		return "", fmt.Errorf("webrtcpeer: host candidate gathering did not complete: %w", gctx.Err())
+		return fail(fmt.Errorf("webrtcpeer: host candidate gathering did not complete: %w", gctx.Err()))
 	}
 	local := pc.LocalDescription()
 	if local == nil {
-		_ = pc.Close()
-		return "", errors.New("webrtcpeer: no local description after gathering")
+		return fail(errors.New("webrtcpeer: no local description after gathering"))
 	}
 
 	h.mu.Lock()
-	if h.closed || h.sources[stream] != src {
-		// The source went away while we were negotiating: do not hand back an
-		// answer for a peer bound to a track that no longer produces audio.
-		h.mu.Unlock()
-		_ = pc.Close()
-		return "", ErrNoSource
-	}
-	h.peers[peerID] = p
+	stillOurs := !h.closed && h.sources[stream] == src && h.peers[peerID] == p
 	h.mu.Unlock()
+	if !stillOurs {
+		// The source went away while we were negotiating, or a later offer from
+		// this patron replaced us: do not hand back an answer for a peer bound to
+		// a track that no longer produces audio.
+		return fail(ErrNoSource)
+	}
 	return local.SDP, nil
+}
+
+// removePeer takes one peer out of the map BY IDENTITY, leaving a different peer
+// that has since claimed the same id alone. Every removal goes through here or
+// through takePeerLocked's callers for exactly that reason.
+func (h *Hub) removePeer(p *peer) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.peers[p.id] != p {
+		return false
+	}
+	delete(h.peers, p.id)
+	return true
 }
 
 // AddCandidate applies one trickled ICE candidate from a browser.
@@ -361,8 +395,23 @@ func (h *Hub) AddCandidate(peerID string, c webrtc.ICECandidateInit) error {
 func (h *Hub) ClosePeer(peerID string) {
 	h.mu.Lock()
 	p := h.takePeerLocked(peerID)
+	var listeners int
+	if p != nil {
+		listeners = h.listenersLocked(p.stream)
+	}
 	h.mu.Unlock()
+	if p == nil {
+		return
+	}
 	closePeers([]*peer{p})
+	// A patron leaving is a state transition with a count attached, and without
+	// this line the log's §6.6 listener count only ever goes UP: an operator
+	// reading it after a show would count everyone who ever connected as still
+	// listening. The peer id is NOT logged — it is a client identifier (§9.4).
+	h.log.Info(logging.EvWebRTCPeerClosed,
+		logging.Field("stream", string(p.stream)),
+		logging.Field("reason", "subscriber_left"),
+		logging.Field("listeners", listeners))
 }
 
 // Peers reports the number of peer connections the hub is holding, connected or
@@ -437,35 +486,52 @@ const rtpWriteErrorLogEvery = 500
 // onPeerState records connect/disconnect transitions and reaps a peer that the
 // ICE agent gave up on, so a phone that left the auditorium does not stay in the
 // listener count or hold a peer connection open.
-func (h *Hub) onPeerState(peerID string, stream model.StreamType, s webrtc.PeerConnectionState) {
+//
+// It takes the peer itself rather than its id: pion delivers these on its own
+// goroutine, so a transition can land after the hub has already replaced or
+// dropped this peer. `current` is the guard — a state change from a peer the hub
+// no longer holds is history, and must not touch whichever peer holds its id now
+// (see the callback registration in Answer).
+func (h *Hub) onPeerState(p *peer, s webrtc.PeerConnectionState) {
+	stream := p.stream
 	switch s {
 	case webrtc.PeerConnectionStateConnected:
 		h.mu.Lock()
-		if p := h.peers[peerID]; p != nil {
+		current := h.peers[p.id] == p
+		if current {
 			p.connected = true
 		}
 		listeners := h.listenersLocked(stream)
 		h.mu.Unlock()
+		if !current {
+			return
+		}
 		h.log.Info(logging.EvWebRTCPeerConnected,
 			logging.Field("stream", string(stream)),
 			logging.Field("listeners", listeners))
 	case webrtc.PeerConnectionStateDisconnected:
 		h.mu.Lock()
-		if p := h.peers[peerID]; p != nil {
+		current := h.peers[p.id] == p
+		if current {
 			p.connected = false
 		}
 		h.mu.Unlock()
+		if !current {
+			return
+		}
 		h.log.Warn(logging.EvWebRTCPeerReconnect,
 			logging.Field("stream", string(stream)),
 			logging.Field("reason", "ice_disconnected"))
 	case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
-		h.mu.Lock()
-		p := h.takePeerLocked(peerID)
-		listeners := h.listenersLocked(stream)
-		h.mu.Unlock()
-		if p == nil {
+		if !h.removePeer(p) {
+			// Already gone — a stale transition, or a peer the hub tore down
+			// itself. Its connection is closed either way; there is nothing to
+			// report and nothing to release.
 			return
 		}
+		h.mu.Lock()
+		listeners := h.listenersLocked(stream)
+		h.mu.Unlock()
 		go closePeers([]*peer{p})
 		h.log.Info(logging.EvWebRTCPeerClosed,
 			logging.Field("stream", string(stream)),

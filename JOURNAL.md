@@ -373,3 +373,59 @@ receive-only Pion peer with `iceServers: []`, an offer over `/api/audio/ws`, the
 answer applied — and asserts Opus RTP arrives, that the answer carries `typ host`
 candidates and no `srflx`/`relay`/`stun:`/`turn:`, and that the surface declares
 the source a test tone.
+
+## Review-and-repair pass on the §6.7 audio path
+
+The §6.7 build was re-run and re-checked rather than taken on trust: the
+end-to-end proof was executed here (25+ Opus RTP packets at a Go subscriber over
+the real three-process appliance, plus a hand-written client against a manually
+started appliance), and each "done" was mutated to see whether a test actually
+fails without it. Most held. Three things did not, and one of them was a real
+mid-show fault.
+
+- **A stale peer transition took down the patron's live peer.** `Hub.onPeerState`
+  was keyed by peer ID, and pion dispatches state changes on its own goroutine.
+  A patron switching HI → VI-N re-offers on the SAME control socket, so under the
+  same peer id: the peer they left was closed, and its late "closed" callback
+  found the id in the map — now held by their NEW peer — evicted it and closed
+  it. The patron's audio stopped for the rest of the show, for changing feeds.
+  Reproduced deterministically before fixing. The callback now closes over the
+  peer OBJECT and every mutation is identity-guarded
+  (`TestAStaleTransitionCannotTouchTheCurrentPeer`).
+- **D11's client cap could be walked straight past.** Peers were admitted to the
+  hub only after ICE gathering, so the capacity check counted answered peers but
+  not the ones mid-negotiation. Under the arrival pattern a real auditorium
+  produces — everyone scans the QR at once — 6 of 6 concurrent offers were
+  admitted against a cap of 2 (measured). Admission now happens under one lock
+  with the check, before negotiating, and every failure path takes the peer back
+  out (`TestSubscriberCapHoldsUnderConcurrentOffers`).
+- **The log's §6.6 listener count only ever went up.** A clean departure logged
+  nothing, so a post-show log read as though every phone that ever connected was
+  still listening. `ClosePeer` now records the departure with the resulting count
+  (and still no peer id — §9.4).
+
+Three claimed behaviours were correct but unpinned; they now have tests that fail
+without them: an encoder that emits nothing must never be reported "streaming"
+even inside its one-second proof window (the previous test only checked the end
+state, so reporting healthy-on-launch passed); the media process must hand its
+stand-in source to a live encode PACED (`Realtime`), which was only a comment;
+and §6.7's topology is now checked against real processes — two subscribers to
+one stream, and the number of `gst-launch` children must equal the number of
+named streams being served, not the number of clients. That last one catches the
+shape the plan rules out: with a deliberate second encoder per stream it reports
+"4 encoder children for 2 streams being served".
+
+Checked and found honest: availability is gated on a measured RTP packet count;
+`latency_measured` is still false and the dashboard still says "not measured"
+beside the encode-path estimate under its own name; the connected-listener count
+moves 0 → 1 → 0 with a real subscriber (a constant fails the E2E); the synthetic
+tone keeps its attribution on both the patron and admin surfaces. No SDP body,
+ICE candidate, ICE ufrag or peer id appears in any of the three processes' logs
+on a live run; no audio reaches disk; there is no STUN/TURN or internet-reachable
+configuration anywhere in the tree.
+
+One claim did not reproduce: `perfect-timestamp=true` on `opusenc` was reported
+as necessary to keep the RTP clock frame-spaced, but with the current
+`fdsrc blocksize` the timestamps are exactly 480 ticks per packet with or without
+it, under paced and bursty writes alike. The flag is correct and harmless, so it
+stays — but it is not load-bearing and nothing fails without it.

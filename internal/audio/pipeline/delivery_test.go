@@ -254,6 +254,43 @@ func TestAnEncoderThatProducesNoRTPIsReportedUnavailable(t *testing.T) {
 	}
 }
 
+// The same guard, watched CONTINUOUSLY rather than only at the end. Reporting
+// "streaming" the moment the encoder process is launched and correcting it a
+// second later would still hand a real patron a stream that cannot start, and
+// the end-state assertion above would not notice: the window is exactly the one
+// the availability projection reads. So the state must never once be streaming
+// while nothing has come out of the encoder (§6.6; kickoff: nothing unmeasured
+// is reported as measured).
+func TestASilentEncoderIsNeverOnceReportedStreaming(t *testing.T) {
+	rtp := &fakeRTP{emit: false}
+	backend := &streamingBackend{stream: rtp}
+	sink := newSink()
+	src := &capture.SyntheticTone{FreqHz: 440, Amplitude: 0.3, SampleRate: testRate, Channels: 1, FrameSize: 480}
+	st := NewStream(src, backend, StreamConfig{
+		Stream: model.StreamHI, Source: model.ChannelMono,
+		AnalysisWindow: 50 * time.Millisecond, Delivery: sink,
+	})
+	run(t, st)
+
+	seenUnavailable := false
+	deadline := time.After(6 * time.Second)
+	for !seenUnavailable {
+		state := st.Status()
+		if state.EncoderState == EncoderStreaming {
+			t.Fatalf("an encoder that has produced no RTP was reported as streaming: %+v", state)
+		}
+		if state.EncoderState == EncoderUnavailable && rtp.isClosed() {
+			seenUnavailable = true
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("the silent encoder was never reported unavailable; last state: %+v", state)
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+}
+
 // A live encode that dies mid-show must take the published source down with it
 // and be reported, not frozen at its last healthy state (guardrail #7).
 func TestAnEncoderThatDiesIsUnpublishedAndReported(t *testing.T) {
