@@ -43,10 +43,13 @@ type SyntheticTone struct {
 	Channels   int
 	FrameSize  int // samples per channel per frame
 
-	phase  float64
-	cancel context.CancelFunc
+	phase float64
 
+	// healthMu guards the device-state fields below. Start runs on the pipeline's
+	// Run goroutine while Close is called from whoever is shutting the stream
+	// down (Stream.Stop), so the cancel func is shared state, not local state.
 	healthMu sync.Mutex
+	cancel   context.CancelFunc
 	started  bool
 	closed   bool
 }
@@ -68,10 +71,10 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	if s.FrameSize <= 0 {
 		s.FrameSize = 480 // 10 ms @ 48 kHz
 	}
+	ctx, cancel := context.WithCancel(ctx)
 	s.healthMu.Lock()
-	s.started, s.closed = true, false
+	s.started, s.closed, s.cancel = true, false, cancel
 	s.healthMu.Unlock()
-	ctx, s.cancel = context.WithCancel(ctx)
 	out := make(chan Frame)
 	step := 2 * math.Pi * s.FreqHz / float64(s.SampleRate)
 	go func() {
@@ -103,9 +106,10 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 func (s *SyntheticTone) Close() error {
 	s.healthMu.Lock()
 	s.closed = true
+	cancel := s.cancel
 	s.healthMu.Unlock()
-	if s.cancel != nil {
-		s.cancel()
+	if cancel != nil {
+		cancel()
 	}
 	return nil
 }

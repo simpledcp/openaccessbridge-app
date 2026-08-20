@@ -188,6 +188,19 @@ func (s *Stream) Run(ctx context.Context, duringPlayback bool) error {
 			lastFrame = now
 			s.noteConnection(true, "")
 
+			// --- A frame the driver could not describe (no channel count, no
+			// rate, or a length that is not a whole number of frames) cannot be
+			// de-interleaved or measured. Report it; do NOT drop it quietly.
+			// Dropping it looks harmless but is the worst outcome available: the
+			// arriving frames keep the stale-frame watchdog fed while nothing is
+			// ever qualified, so the stream sits on its startup verdict forever
+			// (§6.3 stability, §1.2 guardrail 7 no silent degradation). ---
+			if !frameUsable(f) {
+				s.failLive("capture device delivered an unusable frame — it reported no channel count, no sample rate, or a truncated buffer")
+				acc = acc[:0]
+				continue
+			}
+
 			// --- §6.3 stability: the format is re-checked on EVERY frame, not
 			// latched from the first one. A device that renumbers or re-opens at
 			// another rate/width is a fault to report, not something to
@@ -231,9 +244,19 @@ func (s *Stream) qualify(interleaved []float64, sampleRate, deviceChannels int, 
 		return
 	}
 	present, connected := s.health()
-	windowMS := int(s.cfg.AnalysisWindow.Milliseconds())
-	if windowMS < 1 {
-		windowMS = 1
+	// How much real time this block covers. It is MEASURED from the block, not
+	// assumed to be AnalysisWindow: frames are accumulated until the window is
+	// filled, so a device whose capture period is longer than the window
+	// delivers longer blocks. §6.3's sustained-silence rule is a duration test,
+	// so it has to count the audio that actually arrived — counting nominal
+	// windows would silently stretch a 2 s threshold to 8 s on a device with a
+	// 200 ms period, i.e. delay a real fault.
+	blockMS := blockDurationMS(len(interleaved), deviceChannels, sampleRate)
+	if blockMS < 1 {
+		blockMS = int(s.cfg.AnalysisWindow.Milliseconds())
+	}
+	if blockMS < 1 {
+		blockMS = 1
 	}
 	st := qualifier.Analyze(qualifier.Input{
 		Samples:    lane,
@@ -247,7 +270,7 @@ func (s *Stream) qualify(interleaved []float64, sampleRate, deviceChannels int, 
 		Present:          present,
 		DeviceConnected:  connected,
 		DuringPlayback:   duringPlayback,
-		SilentForMS:      s.silentMS + windowMS,
+		SilentForMS:      s.silentMS + blockMS,
 		PrevSilent:       s.prevSilent,
 		InputDeviceID:    s.cfg.DeviceID,
 		StreamType:       s.cfg.Stream,
@@ -256,7 +279,7 @@ func (s *Stream) qualify(interleaved []float64, sampleRate, deviceChannels int, 
 
 	// Sustained-silence accumulator for the next block (§6.3 duration context).
 	if st.Silence {
-		s.silentMS += windowMS
+		s.silentMS += blockMS
 		s.prevSilent = true
 	} else {
 		s.silentMS = 0
@@ -524,6 +547,23 @@ func framePeriodMS(f capture.Frame) int {
 		return 0
 	}
 	return (len(f.Samples) / f.Channels) * 1000 / f.SampleRate
+}
+
+// frameUsable reports whether a capture frame describes itself well enough to be
+// de-interleaved and measured (§6.1 "per-input channel count detected"). A frame
+// that does not is a fault to report, not one to skip.
+func frameUsable(f capture.Frame) bool {
+	return f.SampleRate > 0 && f.Channels > 0 && len(f.Samples) > 0 && len(f.Samples)%f.Channels == 0
+}
+
+// blockDurationMS is how much real time an interleaved analysis block covers. It
+// is what the §6.3 duration rules are measured against; 0 means the block cannot
+// be timed and the caller falls back to the configured window.
+func blockDurationMS(samples, channels, sampleRate int) int {
+	if channels <= 0 || sampleRate <= 0 {
+		return 0
+	}
+	return (samples / channels) * 1000 / sampleRate
 }
 
 // demote lowers a verdict to at most `to` and records why. §6.3 classification is

@@ -53,6 +53,13 @@ func itoa(n int) string {
 // usbStream0 is the snd-usb-audio descriptor format (/proc/asound/cardN/stream0),
 // the only place the kernel publishes a USB device's channel count without the
 // device being opened.
+//
+// The PLAYBACK section deliberately advertises MORE channels than the capture
+// section, and the capture section deliberately lists two altsettings: an input
+// device must be reported by what it can CAPTURE (the widest capture altsetting,
+// 2), never by an output width it happens to offer (8). §6.1 detects the
+// "per-input channel count", and a wrong count would make a legal stereo mapping
+// look satisfiable on a mono input, or the reverse (§6.5).
 const usbStream0 = `USB Audio Device at usb-0000:00:14.0-1, high speed : USB Audio
 
 Playback:
@@ -60,7 +67,7 @@ Playback:
   Interface 1
     Altset 1
     Format: S24_3LE
-    Channels: 2
+    Channels: 8
     Endpoint: 0x01 (1 OUT) (ADAPTIVE)
     Rates: 48000, 44100
 
@@ -68,6 +75,11 @@ Capture:
   Status: Stop
   Interface 2
     Altset 1
+    Format: S16_LE
+    Channels: 1
+    Endpoint: 0x82 (2 IN) (ASYNC)
+    Rates: 48000, 44100
+    Altset 2
     Format: S24_3LE
     Channels: 2
     Endpoint: 0x82 (2 IN) (ASYNC)
@@ -145,6 +157,7 @@ func TestEnumerateFixture(t *testing.T) {
 			friendly: "Scarlett Solo USB",
 			wantID:   "by-id:usb-Focusrite_Scarlett_Solo_USB-00,0",
 			wantKind: DeviceIDByID, wantStable: true,
+			// 2, not the 8 the PLAYBACK section advertises.
 			wantChannels: 2, wantALSA: "hw:1,0",
 		},
 		{
