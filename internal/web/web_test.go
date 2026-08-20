@@ -126,8 +126,10 @@ func TestWebSocketStreamsCaptionAndSwitchesLanguage(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	if got := readWSText(t, ctx, c); !strings.Contains(got, "English cue") {
-		t.Fatalf("initial ws message = %q", got)
+	// The first frame is the out-of-band language negotiation result (§7.1/D8);
+	// the caption state follows.
+	if got := readWSState(t, ctx, c); !strings.Contains(got, "English cue") {
+		t.Fatalf("initial ws state = %q", got)
 	}
 	// Switch language in place without reconnect.
 	if err := c.Write(ctx, websocket.MessageText, []byte(`{"type":"setLanguage","language":"fr"}`)); err != nil {
@@ -140,6 +142,20 @@ func TestWebSocketStreamsCaptionAndSwitchesLanguage(t *testing.T) {
 		}
 	}
 	t.Fatalf("did not receive French cue after language switch")
+}
+
+// readWSState reads frames until a caption state frame arrives, skipping the
+// web layer's own control frames (language negotiation, show end).
+func readWSState(t *testing.T, ctx context.Context, c *websocket.Conn) string {
+	t.Helper()
+	for i := 0; i < 8; i++ {
+		got := readWSText(t, ctx, c)
+		if strings.Contains(got, `"type":"state"`) {
+			return got
+		}
+	}
+	t.Fatalf("no caption state frame received")
+	return ""
 }
 
 func scanFor(r interface{ Read([]byte) (int, error) }, want string, timeout time.Duration) bool {

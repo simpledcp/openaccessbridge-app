@@ -100,11 +100,21 @@ func main() {
 
 	srv, err := web.NewServer(web.Config{
 		Profile: profile, PatronBind: *patronBind, AdminBind: *adminBind,
-		Auditorium: *auditorium, DefaultLanguage: "en",
+		Auditorium: *auditorium, AuditoriumID: auditoriumID(store),
+		// §9.4: the locked profiles require a per-show patron token; Lab and Booth
+		// Diagnostic stay open. An unrecognised stored profile requires one too —
+		// the gate fails closed (web.RequirePerShowToken).
+		DefaultLanguage: "en", PerShowToken: web.RequirePerShowToken(profile),
 	}, web.Deps{
 		Hub: hub, Log: log, Store: store,
 		Languages: func() []web.LangOption { return langOptions(machine.State().AvailableLanguages) },
-		Status:    sup.status,
+		// The patron audio surface projects this down to availability only; no
+		// device name, level or reason string reaches a patron (§7.2).
+		Audio: sup.media.audio,
+		// Deps.Signaler stays nil: there is no webrtcbin peer to relay to
+		// (BLOCKERS B4/B2), and the patron page reports listening as unavailable
+		// rather than drawing a player that cannot play.
+		Status: sup.status,
 	})
 	if err != nil {
 		log.Error(logging.EvProcessUnhealthy, logging.Field("error", err.Error()))
@@ -288,6 +298,18 @@ func langOptions(langs []string) []web.LangOption {
 		out = append(out, web.LangOption{Code: l, Label: l})
 	}
 	return out
+}
+
+// auditoriumID is the stable room id bound into per-show patron tokens (§8.5).
+// Empty lets internal/web derive one from the displayed room name.
+func auditoriumID(store *config.SQLiteStore) string {
+	profiles, _ := store.ListAuditoriumProfiles()
+	for _, p := range profiles {
+		if p.AuditoriumID != "" {
+			return p.AuditoriumID
+		}
+	}
+	return ""
 }
 
 func preferredLanguages(store *config.SQLiteStore) []string {
