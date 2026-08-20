@@ -20,7 +20,6 @@ import (
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
 	"github.com/simpledcp/captionbridge/internal/caption/resolver"
 	"github.com/simpledcp/captionbridge/internal/config"
-	"github.com/simpledcp/captionbridge/internal/deploy"
 	"github.com/simpledcp/captionbridge/internal/ipc"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
@@ -79,13 +78,13 @@ func main() {
 	mc := &mediaClient{sockPath: socketPath(*socketDir, ipc.SocketMedia)}
 	go mc.pollLoop(ctx)
 
-	// §9.4: the locked profiles require a per-show patron token; Lab and Booth
-	// Diagnostic stay open. deploy.Profile.PerShowToken had no consumer before.
-	dp, _ := deploy.Get(profile)
 	srv, err := web.NewServer(web.Config{
 		Profile: profile, PatronBind: *patronBind, AdminBind: *adminBind,
 		Auditorium: *auditorium, AuditoriumID: auditoriumID(store),
-		DefaultLanguage: "en", PerShowToken: dp.PerShowToken,
+		// §9.4: the locked profiles require a per-show patron token; Lab and Booth
+		// Diagnostic stay open. An unrecognised stored profile requires one too —
+		// the gate fails closed (web.RequirePerShowToken).
+		DefaultLanguage: "en", PerShowToken: web.RequirePerShowToken(profile),
 	}, web.Deps{
 		Hub: hub, Log: log, Store: store,
 		Languages: func() []web.LangOption { return langOptions(machine.State().AvailableLanguages) },

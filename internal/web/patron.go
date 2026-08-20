@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
+	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
@@ -65,13 +67,20 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 // identity and mode only — never a server address, interface, device or log line
 // (§7.2 no admin/diagnostic leakage).
 type patronPageData struct {
-	Mode          string // accessibility | caption | listen
-	Captions      bool
-	Audio         bool
-	Title         string
-	Auditorium    string
-	NeedCode      bool
+	Mode       string // accessibility | caption | listen
+	Captions   bool
+	Audio      bool
+	Title      string
+	Auditorium string
+	NeedCode   bool
+	// ShowEnded suppresses the join form: §7.2's show-end state is "a polite
+	// 'this show has ended'", not an invitation to type a code that cannot work.
+	ShowEnded     bool
 	AccessMessage string
+	// ModeMessage explains a control the session was NOT granted. Drawing the
+	// control anyway would leave the patron on "Reconnecting…" forever while its
+	// transport answered 403 — a silent degradation (guardrail #7).
+	ModeMessage string
 }
 
 func modeForPath(path string) (mode string, captions, audio bool) {
@@ -110,15 +119,36 @@ func (s *Server) servePatronPage(w http.ResponseWriter, r *http.Request) {
 		Title:      patronTitle(mode),
 		Auditorium: s.cfg.Auditorium,
 	}
-	if _, err := s.authorize(r); err != nil {
+	sess, err := s.authorize(r)
+	if err != nil {
 		data.NeedCode = true
+		data.ShowEnded = errors.Is(err, ErrShowEnded) || errors.Is(err, ErrSessionExpired)
 		data.AccessMessage = patronAccessCopy(err)
+	} else {
+		// §10.4: render only what this session was actually granted. The caption
+		// and audio transports enforce the same grants, so a control drawn
+		// without its grant is a control that can never connect.
+		data.Captions = captions && grantsCaption(sess)
+		data.Audio = audio && grantsAnyAudio(sess)
+		data.ModeMessage = ungrantedCopy(captions && !data.Captions, audio && !data.Audio)
+	}
+	s.renderPatron(w, data)
+}
+
+// renderPatron writes the patron page. It renders into memory first so a template
+// failure cannot leave a half-drawn page on a patron's phone with a 200 already
+// committed — a broken page is indistinguishable from a broken appliance from the
+// seat, so the failure has to be whole (guardrail #7).
+func (s *Server) renderPatron(w http.ResponseWriter, data patronPageData) {
+	var buf bytes.Buffer
+	if err := s.patronTmpl.Execute(&buf, data); err != nil {
+		s.deps.Log.Error(logging.EvStateTransition, logging.Field("phase", "patron_page_render_failed"))
+		http.Error(w, "This room's system is not ready. Please contact theater staff.", http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := s.patronTmpl.Execute(w, data); err != nil {
-		http.Error(w, "not found", http.StatusInternalServerError)
-	}
+	_, _ = w.Write(buf.Bytes())
 }
 
 func patronTitle(mode string) string {
@@ -159,6 +189,25 @@ func (s *Server) authorize(r *http.Request) (*model.PatronSession, error) {
 // session means the token gate is off, which grants everything.
 func grantsCaption(sess *model.PatronSession) bool {
 	return sess == nil || sess.Grants(model.ModeCaption)
+}
+
+// grantsAnyAudio reports whether the session may listen to either named stream.
+func grantsAnyAudio(sess *model.PatronSession) bool {
+	return sess == nil || sess.Grants(model.ModeHI) || sess.Grants(model.ModeVIN)
+}
+
+// ungrantedCopy is the calm sentence shown in place of a control this room's code
+// does not include (§7.2 clear, non-technical error states).
+func ungrantedCopy(lostCaptions, lostAudio bool) string {
+	switch {
+	case lostCaptions && lostAudio:
+		return "This room's code does not include captions or assistive audio. Please contact theater staff."
+	case lostCaptions:
+		return "Captions are not included in this room's code. Please contact theater staff."
+	case lostAudio:
+		return "Assistive audio is not included in this room's code. Please contact theater staff."
+	}
+	return ""
 }
 
 // patronAccessCopy turns a session error into calm, non-technical patron copy

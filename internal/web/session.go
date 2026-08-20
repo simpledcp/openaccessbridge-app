@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/simpledcp/captionbridge/internal/config"
+	"github.com/simpledcp/captionbridge/internal/deploy"
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
@@ -84,6 +85,23 @@ var (
 	ErrNoExpiry        = errors.New("session token carries no expiry")
 )
 
+// RequirePerShowToken reports whether a deployment profile requires a per-show
+// patron token on the patron surface (§9.4; deploy.Profile.PerShowToken is true
+// for Patron-Facing and Low-Cost Replacement, false for Lab and Booth
+// Diagnostic).
+//
+// An UNKNOWN profile requires one. active_profile is a free-form string in the
+// config store, and deploy.Get's zero Profile has PerShowToken=false — so
+// reading it without checking the ok would silently OPEN the patron surface of a
+// locked install on a typo or a renamed profile. A security gate fails closed.
+func RequirePerShowToken(profile model.FirewallProfile) bool {
+	p, ok := deploy.Get(profile)
+	if !ok {
+		return true
+	}
+	return p.PerShowToken
+}
+
 // SessionStore mints and validates per-show patron sessions. It is in-memory only
 // (§9.4); the signing key is the sole thing it reads from or writes to config.
 type SessionStore struct {
@@ -96,9 +114,14 @@ type SessionStore struct {
 	byCode map[string]model.PatronSession
 	// codeBySession is the reverse lookup so the admin surface can re-read a code.
 	codeBySession map[string]string
-	// endedShows records shows whose tokens are revoked, with the latest expiry
-	// they could carry so the map can be pruned.
-	endedShows map[string]time.Time
+	// endedSessions records revoked sessions by SESSION id, with the expiry they
+	// carry so the map can be pruned. Keying this by SHOW id was wrong: a show id
+	// is operator-supplied and repeats (the same title, or a re-issued code for
+	// the show already running), and a repeat then minted a token that was
+	// revoked before it was ever handed out. Exactly one session is live at a
+	// time — Issue supersedes — so the session id revokes the same grant without
+	// poisoning a future one.
+	endedSessions map[string]time.Time
 	// showEnd is closed when the current show ends, so live patron connections can
 	// deliver a polite "this show has ended" instead of dangling (§7.2).
 	showEnd chan struct{}
@@ -123,7 +146,7 @@ func NewSessionStore(auditoriumID string, store config.Store) (*SessionStore, er
 		now:           time.Now,
 		byCode:        make(map[string]model.PatronSession),
 		codeBySession: make(map[string]string),
-		endedShows:    make(map[string]time.Time),
+		endedSessions: make(map[string]time.Time),
 		showEnd:       make(chan struct{}),
 	}, nil
 }
@@ -304,7 +327,7 @@ func (s *SessionStore) Validate(token string) (model.PatronSession, error) {
 		return model.PatronSession{}, ErrSessionExpired
 	}
 	s.mu.Lock()
-	_, ended := s.endedShows[sess.ShowID]
+	_, ended := s.endedSessions[sess.SessionID]
 	s.mu.Unlock()
 	if ended {
 		return model.PatronSession{}, ErrShowEnded
@@ -323,7 +346,7 @@ func (s *SessionStore) EndShow() {
 
 func (s *SessionStore) endShowLocked(signal bool) {
 	if s.current != nil {
-		s.endedShows[s.current.ShowID] = s.current.ExpiresAt
+		s.endedSessions[s.current.SessionID] = s.current.ExpiresAt
 		s.current = nil
 	}
 	s.byCode = make(map[string]model.PatronSession)
@@ -339,13 +362,13 @@ func (s *SessionStore) endShowLocked(signal bool) {
 	}
 }
 
-// pruneEndedLocked drops revocations that can no longer matter because every token
-// they could cover has expired on its own.
+// pruneEndedLocked drops revocations that can no longer matter because the token
+// they cover has expired on its own.
 func (s *SessionStore) pruneEndedLocked() {
 	now := s.now()
-	for show, exp := range s.endedShows {
+	for id, exp := range s.endedSessions {
 		if !exp.IsZero() && now.After(exp) {
-			delete(s.endedShows, show)
+			delete(s.endedSessions, id)
 		}
 	}
 }

@@ -21,7 +21,8 @@
   <!-- §9.4: this room requires a per-show code. The page says so calmly and offers
        the one action that fixes it; it never explains why in protocol terms. -->
   <main id="stage">
-    <div class="message waiting" id="accessmsg">{{.AccessMessage}}</div>
+    <div class="message {{if .ShowEnded}}state-ended{{else}}waiting{{end}}" id="accessmsg">{{.AccessMessage}}</div>
+  {{if not .ShowEnded}}
     <form id="joinform" class="joinform">
       <label class="ctl" for="joincode">Join code</label>
       <input id="joincode" name="joincode" inputmode="latin" autocomplete="off"
@@ -30,6 +31,7 @@
       <button id="joinbtn" type="submit">Join</button>
     </form>
     <div class="message" id="joinerror" role="alert"></div>
+  {{end}}
   </main>
 {{else}}
   <main id="stage" aria-live="polite" aria-atomic="true">
@@ -37,6 +39,11 @@
     <div id="caption" class="caption"></div>
   {{end}}
     <div id="message" class="message"></div>
+  {{if .ModeMessage}}
+    <!-- A control this session was not granted is replaced by the reason, never
+         drawn as a control that cannot connect (§7.2, §10.4). -->
+    <p id="modenote" class="hint">{{.ModeMessage}}</p>
+  {{end}}
   {{if .Audio}}
     <!-- The listening panel. With no negotiated peer this shows the honest
          "not available" state rather than a player that cannot play (B4/B2). -->

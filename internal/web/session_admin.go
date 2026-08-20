@@ -110,9 +110,16 @@ func (s *Server) handleAdminSessionEnd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sessionResponse(r *http.Request, issued IssuedSession) SessionResponse {
+	sess := issued.PatronSession
+	// §10.4's client_count_caption. It is a real count of live fan-out
+	// subscribers, not an estimate; the hub is already on Deps, so leaving this
+	// at zero understated a full house to the booth.
+	if s.deps.Hub != nil {
+		sess.ClientCountCaption = s.deps.Hub.ClientCount()
+	}
 	return SessionResponse{
 		Active:               true,
-		PatronSession:        issued.PatronSession,
+		PatronSession:        sess,
 		JoinCode:             issued.JoinCode,
 		JoinURL:              s.joinURL(r, issued.Token),
 		PerShowTokenRequired: s.cfg.PerShowToken,
