@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dcst:SubtitleReel xmlns:dcst="http://www.smpte-ra.org/schemas/428-7/2010/DCST">
+  <dcst:Id>urn:uuid:44444444-4444-4444-4444-444444444444</dcst:Id>
+  <dcst:ContentTitleText>Known-answer fixture (do not embed real titles)</dcst:ContentTitleText>
+  <dcst:IssueDate>2020-01-01T00:00:00.000-00:00</dcst:IssueDate>
+  <dcst:ReelNumber>2</dcst:ReelNumber>
+  <dcst:Language>en-US</dcst:Language>
+  <dcst:EditRate>24 1</dcst:EditRate>
+  <dcst:TimeCodeRate>24</dcst:TimeCodeRate>
+  <!-- Real-world assets are authored on an hour-offset timecode axis; cue times
+       are on the same axis and must be normalized against this origin (§5.4). -->
+  <dcst:StartTime>01:00:00:00</dcst:StartTime>
+  <dcst:SubtitleList>
+    <dcst:Font ID="theFont" Color="FFFFFFFF" Weight="normal" Size="42">
+      <dcst:Subtitle SpotNumber="1" TimeIn="01:00:01:00" TimeOut="01:00:04:12">
+        <dcst:Text Valign="bottom" Vposition="8">Hello world</dcst:Text>
+      </dcst:Subtitle>
+      <dcst:Subtitle SpotNumber="2" TimeIn="01:00:05:00" TimeOut="01:00:07:00">
+        <dcst:Text>[MUSIC PLAYING]</dcst:Text>
+      </dcst:Subtitle>
+      <!-- Straddles the origin: the in-point clamps to 0, the cue survives. -->
+      <dcst:Subtitle SpotNumber="3" TimeIn="00:59:59:00" TimeOut="01:00:00:12">
+        <dcst:Text>Straddles the origin</dcst:Text>
+      </dcst:Subtitle>
+      <!-- Entirely before the origin: never displayable, dropped with a warning. -->
+      <dcst:Subtitle SpotNumber="4" TimeIn="00:59:50:00" TimeOut="00:59:52:00">
+        <dcst:Text>Before the origin</dcst:Text>
+      </dcst:Subtitle>
+    </dcst:Font>
+  </dcst:SubtitleList>
+</dcst:SubtitleReel>

@@ -42,12 +42,22 @@ type Document struct {
 	EditRate     EditRate
 	TimeCodeRate float64 // editable units (frames/ticks) per second used for conversion
 	Cues         []model.Cue
+	// StartTimeMS is the document's <StartTime> origin in milliseconds — the
+	// point on the reel/timeline the cue timecodes are authored against (§5.4).
+	// Cues are ALREADY normalized against it; it is exposed for diagnostics, and
+	// callers must NOT subtract it a second time.
+	StartTimeMS int64
 	// Warnings record non-fatal parse issues as classes/counts — never content.
 	Warnings []string
 
 	// raw stages cues before time resolution (rate may appear after subtitles in
 	// malformed files); drained by resolveTimes.
 	raw []rawCue
+	// rawStartTime stages the <StartTime> text for the same reason.
+	rawStartTime string
+	// fonts is the stack of enclosing <Font> attribute frames whose opaque style
+	// is carried into each cue (§5.4 defer-styling).
+	fonts []map[string]string
 }
 
 // Parse reads timed-text XML from r and returns a normalized Document. It returns
@@ -103,6 +113,12 @@ func ParseBytes(b []byte) (*Document, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse timed text: %w", err)
 		}
+		if ee, ok := tok.(xml.EndElement); ok {
+			if strings.EqualFold(ee.Name.Local, "font") {
+				doc.popFont()
+			}
+			continue
+		}
 		se, ok := tok.(xml.StartElement)
 		if !ok {
 			continue
@@ -123,6 +139,13 @@ func ParseBytes(b []byte) (*Document, error) {
 					doc.TimeCodeRate = n
 				}
 			}
+		case "starttime":
+			// The reel/timeline origin the cue timecodes are authored against.
+			// Staged as text: the rate it converts at may not be known yet (§5.4).
+			var v string
+			if err := dec.DecodeElement(&v, &se); err == nil {
+				doc.rawStartTime = strings.TrimSpace(v)
+			}
 		case "language":
 			if doc.Language == "" {
 				var v string
@@ -130,6 +153,10 @@ func ParseBytes(b []byte) (*Document, error) {
 					doc.Language = strings.TrimSpace(v)
 				}
 			}
+		case "font":
+			// <Font> encloses the subtitles it styles; its attributes ride along
+			// as opaque pass-through on every cue inside it (§5.4).
+			doc.pushFont(se.Attr)
 		case "subtitle":
 			var st xmlSubtitle
 			if err := dec.DecodeElement(&st, &se); err != nil {
@@ -157,21 +184,23 @@ func ParseBytes(b []byte) (*Document, error) {
 }
 
 // xmlSubtitle matches a <Subtitle> element by local name regardless of namespace.
+// Everything except the timing attributes is captured verbatim: the grammars
+// disagree on attribute spelling (Interop "VAlign" vs ST 428-7 "Valign"), and
+// styling/positioning is opaque pass-through anyway (§5.4), so it is collected
+// generically rather than field by field.
 type xmlSubtitle struct {
-	SpotNumber string       `xml:"SpotNumber,attr"`
-	TimeIn     string       `xml:"TimeIn,attr"`
-	TimeOut    string       `xml:"TimeOut,attr"`
-	VPosition  string       `xml:"VPosition,attr"`
-	HPosition  string       `xml:"HPosition,attr"`
-	VAlign     string       `xml:"VAlign,attr"`
-	HAlign     string       `xml:"HAlign,attr"`
-	Texts      []xmlTextRun `xml:"Text"`
+	TimeIn  string       `xml:"TimeIn,attr"`
+	TimeOut string       `xml:"TimeOut,attr"`
+	Attrs   []xml.Attr   `xml:",any,attr"`
+	Texts   []xmlTextRun `xml:"Text"`
 }
 
-// xmlTextRun captures a <Text> line's inner XML so nested font runs / <br/> are
-// flattened to plain text and newlines.
+// xmlTextRun captures a <Text> line's attributes plus its inner XML, so nested
+// font runs / <br/> flatten to plain text and newlines. Both shipped grammars
+// carry positioning on <Text>, not on <Subtitle>.
 type xmlTextRun struct {
-	Inner string `xml:",innerxml"`
+	Attrs []xml.Attr `xml:",any,attr"`
+	Inner string     `xml:",innerxml"`
 }
 
 // rawCue holds a cue with its still-textual times, resolved later once the rate is known.
@@ -196,17 +225,83 @@ func (d *Document) appendSubtitle(st xmlSubtitle) {
 		Language: d.Language,
 		Kind:     model.TrackUnknown, // stamped by the RPL/429-12 layer
 	}
-	if pos := positionMap(st); len(pos) > 0 {
+
+	// Opaque pass-through (§5.4): style accumulates outer→inner (enclosing
+	// <Font>, then the <Subtitle>, then the first <Text> run); positioning is
+	// declared per <Text> in both grammars, so the first run that carries any
+	// wins — per-line positioning is deferred with the rest of the rendering.
+	style := d.currentFontStyle()
+	pos := map[string]string{}
+	mergeAttrs(st.Attrs, style, pos)
+	for _, t := range st.Texts {
+		runPos := map[string]string{}
+		mergeAttrs(t.Attrs, style, runPos)
+		if len(runPos) > 0 {
+			for k, v := range runPos {
+				pos[k] = v
+			}
+			break
+		}
+	}
+	if len(style) > 0 {
+		cue.Style = style
+	}
+	if len(pos) > 0 {
 		cue.Position = pos
 	}
 	d.raw = append(d.raw, rawCue{cue: cue, timeIn: st.TimeIn, timeOut: st.TimeOut})
 }
 
-// raw is the staging slice of cues prior to time resolution.
+// pushFont enters an enclosing <Font>, inheriting the frame around it so nested
+// fonts merge outer→inner.
+func (d *Document) pushFont(attrs []xml.Attr) {
+	frame := map[string]string{}
+	if n := len(d.fonts); n > 0 {
+		for k, v := range d.fonts[n-1] {
+			frame[k] = v
+		}
+	}
+	mergeAttrs(attrs, frame, map[string]string{})
+	d.fonts = append(d.fonts, frame)
+}
+
+// popFont leaves an enclosing <Font>. Tolerant of unbalanced markup (the decoder
+// runs non-strict, so a stray close tag must not panic the parse).
+func (d *Document) popFont() {
+	if n := len(d.fonts); n > 0 {
+		d.fonts = d.fonts[:n-1]
+	}
+}
+
+// currentFontStyle copies the innermost enclosing <Font> frame.
+func (d *Document) currentFontStyle() map[string]string {
+	m := map[string]string{}
+	if n := len(d.fonts); n > 0 {
+		for k, v := range d.fonts[n-1] {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// resolveTimes drains the staged cues, converting their timecodes at the resolved
+// rate and normalizing them against the document's <StartTime> origin so the
+// result is a single timeline-relative start_ms/end_ms (§5.4). Assets are
+// routinely authored on an hour-offset axis (01:00:00:00); without the
+// subtraction every cue is an hour late and never displays.
 //
-//nolint:unused // populated by appendSubtitle, drained by resolveTimes
+//nolint:unused // populated by appendSubtitle, drained here
 func (d *Document) resolveTimes() {
 	rate := d.TimeCodeRate
+	if d.rawStartTime != "" {
+		if origin, err := TimecodeToMS(d.rawStartTime, rate); err == nil {
+			d.StartTimeMS = origin
+		} else {
+			d.Warnings = append(d.Warnings, "starttime_parse_error")
+		}
+	}
+	origin := d.StartTimeMS
+	droppedBeforeOrigin := 0
 	for _, rc := range d.raw {
 		startMS, err1 := TimecodeToMS(rc.timeIn, rate)
 		endMS, err2 := TimecodeToMS(rc.timeOut, rate)
@@ -218,30 +313,73 @@ func (d *Document) resolveTimes() {
 			d.Warnings = append(d.Warnings, "cue_end_before_start")
 			continue
 		}
+		if origin > 0 {
+			startMS -= origin
+			endMS -= origin
+			if endMS <= 0 {
+				// Ends at or before the origin: never displayable. Drop it loudly
+				// rather than emit a negative interval.
+				d.Warnings = append(d.Warnings, "cue_before_start_time")
+				droppedBeforeOrigin++
+				continue
+			}
+			if startMS < 0 {
+				// Straddles the origin: clamp the in-point, keep the cue.
+				d.Warnings = append(d.Warnings, "cue_clamped_to_start_time")
+				startMS = 0
+			}
+		}
 		c := rc.cue
 		c.StartMS = startMS
 		c.EndMS = endMS
 		d.Cues = append(d.Cues, c)
 	}
+	// The origin swallowing EVERY cue is a different failure class from one stray
+	// early cue: it means the asset's <StartTime> does not mean what this
+	// PROVISIONAL grammar assumes, and the reel silently loses all captions.
+	// Recorded as its own class so the caller can escalate it rather than read it
+	// as n ordinary per-cue warnings (guardrail #7, §5.4 "degrade to no caption"
+	// — but never quietly).
+	if droppedBeforeOrigin > 0 && len(d.Cues) == 0 {
+		d.Warnings = append(d.Warnings, "all_cues_before_start_time")
+	}
 	d.raw = nil
+	d.rawStartTime = ""
+	d.fonts = nil
 }
 
-// positionMap captures opaque position attributes for pass-through (not rendered).
-func positionMap(st xmlSubtitle) map[string]string {
-	m := map[string]string{}
-	add := func(k, v string) {
-		if v != "" {
-			m[k] = v
+// positionAttrs are the opaque positioning attributes split out of the style map
+// into Cue.Position. Both are carried, neither is rendered (§5.4).
+var positionAttrs = map[string]bool{
+	"vposition": true,
+	"hposition": true,
+	"zposition": true,
+	"valign":    true,
+	"halign":    true,
+}
+
+// mergeAttrs sorts opaque attributes into the position and style maps, keyed by
+// lowercased local name so the Interop and ST 428-7 spellings agree. Namespace
+// declarations and the SpotNumber identifier are not styling and are skipped;
+// TimeIn/TimeOut never reach here (they are decoded into their own fields).
+func mergeAttrs(attrs []xml.Attr, style, pos map[string]string) {
+	for _, a := range attrs {
+		if a.Value == "" {
+			continue
 		}
+		if a.Name.Space == "xmlns" || strings.EqualFold(a.Name.Local, "xmlns") {
+			continue
+		}
+		k := strings.ToLower(a.Name.Local)
+		if k == "spotnumber" {
+			continue
+		}
+		if positionAttrs[k] {
+			pos[k] = a.Value
+			continue
+		}
+		style[k] = a.Value
 	}
-	add("vposition", st.VPosition)
-	add("hposition", st.HPosition)
-	add("valign", st.VAlign)
-	add("halign", st.HAlign)
-	if len(m) == 0 {
-		return nil
-	}
-	return m
 }
 
 // flattenInnerXML strips markup from a <Text> element's inner XML, keeping

@@ -7,6 +7,7 @@
 package caption
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
@@ -60,6 +61,10 @@ func (c *Controller) LoadReel(cuesByLang map[string][]model.Cue) {
 		if _, ok := cuesByLang[lang]; !ok {
 			eng.Close()
 			delete(c.engines, lang)
+			// The retired engine will never push again, so the hub must blank
+			// the language itself or its subscribers keep the last reel's cue
+			// on screen forever (§5.2 item 5).
+			c.hub.ClearLanguage(lang)
 		}
 	}
 
@@ -82,11 +87,29 @@ func (c *Controller) LoadReel(cuesByLang map[string][]model.Cue) {
 			}
 			c.engines[lang] = eng
 		}
+		// The ST 429-12 grade rides on the cues; publish it so the patron copy is
+		// right ("Closed captions" vs "Subtitles available") from reel load, not
+		// only once the first cue fires (§5.4).
+		c.hub.SetTrackKind(lang, trackKind(cues))
 		eng.SetCues(lang, cues)
 		if !existed {
 			seedFromRef(eng, ref)
 		}
 	}
+	sort.Strings(c.langs)
+}
+
+// trackKind reports the most accessibility-preferred track kind present in a cue
+// set, so a language backed by a ClosedCaption track is labeled caption-grade
+// even if the reel mixes kinds (§5.4 track-selection model).
+func trackKind(cues []model.Cue) model.TrackKind {
+	best := model.TrackUnknown
+	for _, c := range cues {
+		if c.Kind.AccessibilityRank() < best.AccessibilityRank() {
+			best = c.Kind
+		}
+	}
+	return best
 }
 
 // seedFromRef applies the reference engine's play state/position to a fresh engine.
@@ -183,6 +206,16 @@ func (c *Controller) SeekTo(posMS int64) {
 	c.applyTimeline(func(e *timing.Engine) { e.SeekTo(posMS) })
 }
 
+// CompositionChanged handles an SPL/CPL change mid-lease (§5.5): a new
+// composition arriving without a Terminate Lease. Every engine discards its
+// prediction, so the incoming reel's cues are never resolved against the
+// outgoing composition's timeline; the next Update Timeline re-anchors. Patrons
+// see the waiting status in the meantime rather than a stale cue.
+func (c *Controller) CompositionChanged() {
+	c.applyTimeline(func(e *timing.Engine) { e.CompositionChanged() })
+	c.hub.PublishStatus(model.PatronCaptionWaiting)
+}
+
 // CommsLost signals a momentary interruption; captions keep showing (§5.2 item 2).
 func (c *Controller) CommsLost() {
 	c.applyTimeline(func(e *timing.Engine) { e.CommsLost() })
@@ -215,7 +248,8 @@ func (c *Controller) Evaluate() {
 	c.ref.Evaluate()
 }
 
-// Languages returns the currently loaded languages.
+// Languages returns the currently loaded languages, sorted so the list is stable
+// across calls (LoadReel's source map has no order of its own).
 func (c *Controller) Languages() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -237,4 +271,21 @@ func (c *Controller) MaxDriftMS() int64 {
 		}
 	}
 	return max
+}
+
+// WarnBudgetMS returns the configured drift warn threshold (§5.5 / D9). Zero in
+// Options takes the timing package's D9 default, which is what this reports.
+func (c *Controller) WarnBudgetMS() int64 { return c.ref.WarnBudgetMS() }
+
+// OverBudget reports whether any language engine's measured drift has broken the
+// configured budget. Exposed so the readiness/dashboard layer can raise a loud
+// warning instead of drift being merely a number on a diagnostics panel (§5.5,
+// guardrail #7 no silent degradation).
+func (c *Controller) OverBudget() bool {
+	for _, e := range c.contentEngines() {
+		if e.OverBudget() {
+			return true
+		}
+	}
+	return false
 }
