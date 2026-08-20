@@ -2,7 +2,8 @@
 /* Behaviour tests for internal/web/assets/patron.js, run by TestPatronClient in
  * internal/web/patron_client_test.go. Each case names the buildplan requirement it
  * defends. Nothing here asserts anything about a real phone, a real Wi-Fi network
- * or real audio — those remain BLOCKERS B2/B4.
+ * or real audio — those remain BLOCKER B2. The real appliance path is proven
+ * against real processes in cmd/captionbridge-core/audio_e2e_test.go.
  */
 
 const assert = require("assert");
@@ -182,6 +183,91 @@ test("a feed that goes away mid-show clears the selection loudly", () => {
   assert.match(env.els.audiostatus.textContent, /too low/i);
 });
 
+/* §6.7: "SDP offer/answer + ICE are exchanged over the existing local web
+ * server's WebSocket — no third-party signaling", and the local path is host
+ * candidates only: "no internet STUN/TURN is expected or permitted". */
+test("the offer goes over the local audio socket with no STUN or TURN", async () => {
+  const env = load({ mode: "listen" });
+  env.audioSockets()[0].open();
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{ stream: "HI", label: "Hearing assistance", available: true }],
+  });
+  env.client.chooseStream("HI");
+
+  const pc = env.peers()[0];
+  assert.ok(pc, "no peer connection was created for an available feed");
+  // (Compared by length: the array is built inside the vm context, so it is an
+  // Array from another realm and deepStrictEqual would reject it on prototype.)
+  assert.ok(pc.config.iceServers, "the patron peer was given no ICE configuration at all");
+  assert.strictEqual(pc.config.iceServers.length, 0, "the patron peer was given STUN/TURN servers");
+
+  await Promise.resolve();
+  await Promise.resolve();
+  const sent = env.audioSockets()[0].sent;
+  const offer = sent.filter(function (m) { return m.type === "offer"; })[0];
+  assert.ok(offer, "no offer was sent over the appliance's own socket: " + JSON.stringify(sent));
+  assert.strictEqual(offer.stream, "HI");
+  assert.ok(offer.sdp, "the offer carried no SDP");
+
+  // The appliance's answer, relayed back over the same socket, is applied.
+  env.client.handleAudioFrame({ type: "answer", stream: "HI", sdp: "v=0\r\nfake-answer\r\n" });
+  await Promise.resolve();
+  assert.match(pc.remoteDescription.sdp, /fake-answer/);
+});
+
+/* THE HONESTY LINE (BLOCKER B3). A patron can really receive audio now, but on
+ * an appliance with no capture hardware what they receive is a generated tone.
+ * The page must keep saying so while it plays — clearing the status on ontrack
+ * would quietly turn a test tone into "the auditorium's HI feed". */
+test("a feed that is a test tone says so while it is playing", () => {
+  const env = load({ mode: "listen" });
+  env.audioSockets()[0].open();
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{ stream: "HI", label: "Hearing assistance", available: true, test_tone: true }],
+  });
+  env.client.chooseStream("HI");
+  const pc = env.peers()[0];
+  pc.fireTrack({ streams: [{}] });
+  assert.match(env.els.audiostatus.textContent, /test tone/i);
+  assert.doesNotMatch(env.els.audiostatus.textContent, /synthetic-|device|dbfs/i);
+});
+
+/* A real input carries no such note — the attribution must follow the source,
+ * not decorate every stream. */
+test("a real feed carries no test-tone note", () => {
+  const env = load({ mode: "listen" });
+  env.audioSockets()[0].open();
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{ stream: "HI", label: "Hearing assistance", available: true }],
+  });
+  env.client.chooseStream("HI");
+  env.peers()[0].fireTrack({ streams: [{}] });
+  assert.strictEqual(env.els.audiostatus.textContent, "");
+});
+
+/* §6.3: a Marginal input is offered WITH its warning, never silently. */
+test("a cautioned feed keeps its warning visible while playing", () => {
+  const env = load({ mode: "listen" });
+  env.audioSockets()[0].open();
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{
+      stream: "HI", label: "Hearing assistance", available: true,
+      caution: true, reason: "This feed may be uneven right now.",
+    }],
+  });
+  env.client.chooseStream("HI");
+  env.peers()[0].fireTrack({ streams: [{}] });
+  assert.match(env.els.audiostatus.textContent, /may be uneven/i);
+});
+
 /* §7.1: /caption is captions only and /listen is audio only — the client must not
  * open the other surface's socket. */
 test("each route opens only its own transports", () => {
@@ -198,17 +284,19 @@ test("each route opens only its own transports", () => {
   assert.strictEqual(both.audioSockets().length, 1);
 });
 
-let failed = 0;
-for (const c of cases) {
-  try {
-    c.fn();
-    console.log("ok   - " + c.name);
-  } catch (e) {
-    failed++;
-    console.log("FAIL - " + c.name + ": " + (e && e.message ? e.message : e));
+(async function run() {
+  let failed = 0;
+  for (const c of cases) {
+    try {
+      await c.fn();
+      console.log("ok   - " + c.name);
+    } catch (e) {
+      failed++;
+      console.log("FAIL - " + c.name + ": " + (e && e.message ? e.message : e));
+    }
   }
-}
-if (failed > 0) {
-  console.log(failed + " patron client case(s) failed");
-  process.exit(1);
-}
+  if (failed > 0) {
+    console.log(failed + " patron client case(s) failed");
+    process.exit(1);
+  }
+})();

@@ -59,8 +59,10 @@ type Deps struct {
 	// availability model by internal/web/audio.go (§6.6 → §7.2). Nil means no
 	// audio is configured, which the patron page reports honestly.
 	Audio func() []model.AudioStreamState
-	// Signaler relays WebRTC SDP/ICE to captionbridge-media (§6.7). Nil in the
-	// shipped binary — see the SEAM note on AudioSignaler (BLOCKERS B4/B2).
+	// Signaler relays WebRTC SDP/ICE to captionbridge-media, which owns the peers
+	// and the encoders (§6.7, D20). cmd/captionbridge-core supplies the
+	// production one; nil means this build cannot serve audio at all, which the
+	// patron page reports in plain language rather than drawing a dead player.
 	Signaler AudioSignaler
 	// Calibration drives the §6.4 audio calibration wizard: the device list and
 	// the live input meter both come from captionbridge-media, which owns every

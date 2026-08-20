@@ -82,6 +82,7 @@ func TestInvariant_EncoderStateVocabularyMatches(t *testing.T) {
 		{pipeline.EncoderUnknown, model.EncoderStateUnknown},
 		{pipeline.EncoderUnavailable, model.EncoderStateUnavailable},
 		{pipeline.EncoderReadyNoTransport, model.EncoderStateReadyNoTransport},
+		{pipeline.EncoderStreaming, model.EncoderStateStreaming},
 	}
 	for _, p := range pairs {
 		if p[0] != p[1] {

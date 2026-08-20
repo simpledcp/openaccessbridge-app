@@ -115,3 +115,62 @@ func TestSyntheticToneStartCloseAreRaceFree(t *testing.T) {
 		cancel()
 	}
 }
+
+// A stand-in that FEEDS AN ENCODER has to run at 1x (§6.7). Unpaced, the source
+// generates as fast as the consumer reads, so a patron would receive minutes of
+// audio in seconds — and every wall-clock figure measured around it (capture
+// gaps, dropouts, encoder throughput) would describe the generator rather than a
+// booth feed. Tests that only want N blocks still get the unpaced source.
+func TestRealtimeToneIsPacedAtOneTimesSpeed(t *testing.T) {
+	const frameSize, rate, want = 480, 48000, 10 // 10 ms frames, 100 ms of audio
+	src := &SyntheticTone{
+		FreqHz: 440, Amplitude: 0.3, SampleRate: rate, Channels: 1,
+		FrameSize: frameSize, Realtime: true,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := src.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	start := time.Now()
+	for i := 0; i < want; i++ {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				t.Fatal("the source stopped early")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("only %d frames arrived in 3s", i)
+		}
+	}
+	elapsed := time.Since(start)
+	audio := time.Duration(want) * time.Duration(frameSize) * time.Second / time.Duration(rate)
+	// Generous lower bound (scheduling jitter, a loaded box): the point is that
+	// 100 ms of audio does not arrive in microseconds.
+	if elapsed < audio/2 {
+		t.Fatalf("%s of audio was delivered in %s: the source is not paced in real time", audio, elapsed)
+	}
+	if elapsed > 4*audio {
+		t.Fatalf("%s of audio took %s to deliver: the pacing is drifting badly", audio, elapsed)
+	}
+}
+
+// Without Realtime the source stays as fast as the consumer, which is what the
+// qualifier's block-count tests depend on.
+func TestUnpacedToneStaysFast(t *testing.T) {
+	src := &SyntheticTone{FreqHz: 440, Amplitude: 0.3, SampleRate: 48000, Channels: 1, FrameSize: 480}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := src.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	start := time.Now()
+	for i := 0; i < 100; i++ {
+		<-ch
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("100 unpaced frames took %s", elapsed)
+	}
+}

@@ -32,14 +32,45 @@ const (
 	// EncoderUnknown: the encode path has not been exercised yet.
 	EncoderUnknown = "unknown"
 	// EncoderUnavailable: no Opus encoder ran — either none is installed on this
-	// host (BLOCKERS B4) or the smoke encode failed. Nothing is being encoded,
+	// host (no gst-launch/opusenc) or the encode failed. Nothing is being encoded,
 	// and no latency figure is reported for the encode path.
 	EncoderUnavailable = "unavailable"
-	// EncoderReadyNoTransport: a real Opus encode was proven locally, but there
-	// is still no WebRTC subscriber transport (webrtcbin is gated by B2/B4), so
+	// EncoderReadyNoTransport: a real Opus encode was proven locally, but this
+	// stream has no subscriber transport attached (no DeliverySink), so
 	// ConnectedClients is honestly 0 rather than unreported.
 	EncoderReadyNoTransport = "ready_no_transport"
+	// EncoderStreaming: a live Opus encode is running for this stream AND has
+	// produced RTP packets that were read out of it and handed to the WebRTC
+	// fan-out. It is set from that measured packet count, never from "the
+	// encoder process started" — a pipeline that spawned and then emitted
+	// nothing is reported as unavailable (§6.6, guardrail #7).
+	EncoderStreaming = "streaming"
 )
+
+// deliveryProofDeadline is how long a freshly started live encode has to produce
+// its first RTP packet before it is reported as unavailable. The §6.7 encoder
+// emits a packet per 10 ms frame, so a second is two orders of magnitude of
+// slack — long enough for process start-up, short enough that a wedged encoder
+// reaches the dashboard as a fault within one poll.
+const deliveryProofDeadline = time.Second
+
+// deliveryRetryInterval bounds how often a failed live encode is retried. A
+// missing encoder (no gst-launch) must not be re-spawned once per capture frame.
+const deliveryRetryInterval = 5 * time.Second
+
+// DeliverySink is the WebRTC fan-out a running stream publishes its encoder to
+// (§6.7). It is declared here, on the consumer side, so this package stays free
+// of the WebRTC stack: internal/audio/webrtcpeer.Hub implements it.
+//
+// Publish hands over ONE encoder for a named stream — §6.7's "one
+// capture/analysis/Opus source per named stream" — which the sink then
+// distributes to one peer connection per subscriber.
+type DeliverySink interface {
+	Publish(stream model.StreamType, rtp encode.RTPStream) error
+	Unpublish(stream model.StreamType)
+	// Listeners is §6.6's "connected listener count" for this stream.
+	Listeners(stream model.StreamType) int
+}
 
 // DefaultSampleRate is the §6.1 fixed internal capture format. A device running
 // at any other rate is a configuration fault, not something to resample around.
@@ -76,6 +107,12 @@ type StreamConfig struct {
 	// Logger receives the §9.4 audio events (verdict transitions, clipping,
 	// sustained silence, device connect/disconnect). nil = discard.
 	Logger *logging.Logger
+	// Delivery is the WebRTC fan-out this stream feeds (§6.7). When it is set
+	// and the backend can stream, the stream starts ONE live Opus/RTP encode of
+	// its mapped lane and publishes it there. Nil means this chain analyses its
+	// input but delivers to nobody — the calibration wizard's measurement runs
+	// (§6.4), and every test that only wants a verdict.
+	Delivery DeliverySink
 }
 
 // Stream runs one capture→map→qualify chain and exposes its latest state.
@@ -106,6 +143,11 @@ type Stream struct {
 	lastSilenceFail bool
 	connected       bool
 	connKnown       bool
+	// Live-delivery state (§6.7), owned by the Run goroutine.
+	rtp        encode.RTPStream
+	rtpStarted time.Time
+	rtpRetryAt time.Time
+	lastDrops  uint64
 }
 
 // NewStream builds a Stream. backend may be nil (no encode smoke).
@@ -152,6 +194,10 @@ func (s *Stream) Run(ctx context.Context, duringPlayback bool) error {
 	}
 	s.noteConnection(true, "")
 	s.probeEncoder(ctx)
+	// Whatever ends this chain — cancellation, a device that stopped, an error —
+	// takes the live encode and its subscribers with it. Leaving a gst-launch
+	// child and a published track behind would keep a dead stream on the air.
+	defer s.stopDelivery()
 
 	stale := s.staleTimeout()
 	tick := stale / 2
@@ -209,6 +255,10 @@ func (s *Stream) Run(ctx context.Context, duringPlayback bool) error {
 				if s.frames > 1 {
 					s.formatChanges++
 					s.failLive("input device changed capture format mid-stream — it may be renumbering or re-enumerating")
+					// The live encode was started for the OLD format, so it can
+					// no longer describe this input. Tear it down; the next
+					// usable frame starts one for the format now arriving.
+					s.stopDelivery()
 				}
 				s.rate, s.channels = f.SampleRate, f.Channels
 				s.capturePeriodMS = framePeriodMS(f)
@@ -222,6 +272,14 @@ func (s *Stream) Run(ctx context.Context, duringPlayback bool) error {
 				acc = acc[:0]
 				continue
 			}
+			// --- §6.7 delivery. The mapped lane goes to the encoder frame by
+			// frame, BESIDE the analysis tap rather than behind it: the
+			// qualifier accumulates a 200 ms analysis window, and routing
+			// delivery through that accumulator would add the whole window to
+			// the latency budget for no benefit. This is the split
+			// EncoderPathLatencyMS documents. ---
+			s.deliver(ctx, f)
+
 			if target <= 0 {
 				continue
 			}
@@ -296,11 +354,14 @@ func (s *Stream) qualify(interleaved []float64, sampleRate, deviceChannels int, 
 		demote(&st, model.QualMarginal, "audio dropouts detected on this input")
 	}
 
+	s.checkDelivery()
 	st.EncoderState = s.encoderState
 	st.LatencyMSEst = s.latencyEstimateMS()
-	// LatencyMeasured stays false: no end-to-end latency has been measured (see
-	// EncoderPathLatencyMS). ConnectedClients stays 0: there is no WebRTC
-	// subscriber transport yet, so any other number would be invented.
+	// §6.6's connected listener count, read from the WebRTC fan-out. It is 0
+	// when there is no transport attached, which is a fact rather than a
+	// placeholder. LatencyMeasured stays false either way: a listener count is
+	// not a glass-to-ear measurement (§11.4, BLOCKER B2).
+	st.ConnectedClients = s.listeners()
 	s.publish(st)
 }
 
@@ -403,10 +464,157 @@ func (s *Stream) health() (present, connected bool) {
 	return true, true
 }
 
+// deliver hands one capture frame's mapped lane to the live encoder, starting
+// the encode on the first frame whose format is known (§6.7).
+func (s *Stream) deliver(ctx context.Context, f capture.Frame) {
+	if s.cfg.Delivery == nil {
+		return
+	}
+	lane, err := mapper.Extract(s.cfg.Source, f.Samples, f.Channels)
+	if err != nil {
+		// The mapping cannot be satisfied by this input. qualify() reports that
+		// as a Failed verdict with the reason; delivering a lane we could not
+		// build is the one thing that must not happen.
+		return
+	}
+	if s.rtp == nil {
+		s.startDelivery(ctx, f.SampleRate)
+	}
+	if s.rtp == nil {
+		return
+	}
+	if err := s.rtp.WritePCM(lane); err != nil {
+		s.log.Warn(logging.EvAudioEncoderStopped,
+			logging.Field("stream", string(s.cfg.Stream)),
+			logging.Field("reason", "encoder_write_failed"))
+		s.stopDelivery()
+	}
+}
+
+// startDelivery opens ONE live Opus/RTP encode for this named stream and
+// publishes it to the fan-out. A backend that cannot stream (no gst-launch on
+// this host) leaves the stream reported as having no encoder — never as
+// streaming something nobody encoded.
+func (s *Stream) startDelivery(ctx context.Context, sampleRate int) {
+	if !s.rtpRetryAt.IsZero() && time.Now().Before(s.rtpRetryAt) {
+		return
+	}
+	s.rtpRetryAt = time.Now().Add(deliveryRetryInterval)
+
+	streamer, ok := s.backend.(encode.Streamer)
+	if !ok {
+		s.encoderState = EncoderUnavailable
+		return
+	}
+	p := encode.DefaultOpusParams()
+	s.opusFrameMS = p.FrameMS
+	rtp, err := streamer.StartRTP(ctx, encode.PCMFormat{
+		SampleRate: sampleRate, Channels: laneChannels(s.cfg.Source),
+	}, p)
+	if err != nil {
+		s.encoderState = EncoderUnavailable
+		s.log.Warn(logging.EvAudioEncoderStopped,
+			logging.Field("stream", string(s.cfg.Stream)),
+			logging.Field("reason", "encoder_start_failed"))
+		return
+	}
+	if err := s.cfg.Delivery.Publish(s.cfg.Stream, rtp); err != nil {
+		_ = rtp.Close()
+		s.encoderState = EncoderUnavailable
+		s.log.Warn(logging.EvAudioEncoderStopped,
+			logging.Field("stream", string(s.cfg.Stream)),
+			logging.Field("reason", "publish_failed"))
+		return
+	}
+	s.rtp, s.rtpStarted, s.lastDrops = rtp, time.Now(), 0
+	// EncoderUnknown, not "streaming": the encoder has been STARTED, and nothing
+	// has been encoded until a packet comes out of it (checkDelivery).
+	s.encoderState = EncoderUnknown
+	s.log.Info(logging.EvStateTransition,
+		logging.Field("phase", "audio_encode_started"),
+		logging.Field("stream", string(s.cfg.Stream)),
+		// "capture_rate_hz", not "sample_rate": the §9.4 redaction guard denies
+		// any key containing "sample" (audio samples are content), and a field
+		// that logs as [REDACTED] tells an operator nothing.
+		logging.Field("capture_rate_hz", sampleRate),
+		logging.Field("frame_ms", p.FrameMS))
+}
+
+// stopDelivery closes the live encode and takes its subscribers off it.
+func (s *Stream) stopDelivery() {
+	if s.rtp == nil {
+		return
+	}
+	if s.cfg.Delivery != nil {
+		s.cfg.Delivery.Unpublish(s.cfg.Stream)
+	}
+	_ = s.rtp.Close()
+	s.rtp = nil
+	if s.encoderState == EncoderStreaming {
+		s.encoderState = EncoderUnavailable
+	}
+}
+
+// checkDelivery turns the live encode's OBSERVED counters into the §6.6 encoder
+// state. Nothing here is inferred from the encoder having been launched: the
+// state says "streaming" only once RTP packets have actually been read out of
+// it, and an encode that stops or never produces one is reported as unavailable
+// so the dashboard raises its loud warning (readiness §8.3).
+func (s *Stream) checkDelivery() {
+	if s.cfg.Delivery == nil || s.rtp == nil {
+		return
+	}
+	if err := s.rtp.Err(); err != nil {
+		s.log.Warn(logging.EvAudioEncoderStopped,
+			logging.Field("stream", string(s.cfg.Stream)),
+			logging.Field("reason", "encoder_exited"))
+		s.stopDelivery()
+		s.encoderState = EncoderUnavailable
+		return
+	}
+	st := s.rtp.Stats()
+	if st.FramesDropped > s.lastDrops {
+		// Audio the encoder could not take is a gap in a patron's ear. It is
+		// reported as a COUNT, never left silent (guardrail #7).
+		s.log.Warn(logging.EvAudioEncoderDropped,
+			logging.Field("stream", string(s.cfg.Stream)),
+			logging.Field("dropped_blocks", st.FramesDropped))
+		s.lastDrops = st.FramesDropped
+	}
+	switch {
+	case st.PacketsOut > 0:
+		s.encoderState = EncoderStreaming
+	case time.Since(s.rtpStarted) > deliveryProofDeadline:
+		s.log.Warn(logging.EvAudioEncoderStopped,
+			logging.Field("stream", string(s.cfg.Stream)),
+			logging.Field("reason", "no_rtp_produced"))
+		s.stopDelivery()
+		s.encoderState = EncoderUnavailable
+	}
+}
+
+// listeners is §6.6's connected listener count for this stream, read from the
+// fan-out. With no transport attached it is 0 — which is the truth, not a
+// placeholder.
+func (s *Stream) listeners() int {
+	if s.cfg.Delivery == nil {
+		return 0
+	}
+	return s.cfg.Delivery.Listeners(s.cfg.Stream)
+}
+
 // probeEncoder runs the one-shot encode smoke so the dashboard can show whether
 // the media path is alive (§6.6 encoder state). A backend that encodes nothing
 // reports EncoderUnavailable and contributes NO latency figure.
+//
+// A stream with a DeliverySink skips it: the live encode this stream is about to
+// start is stronger evidence than a smoke test of a different pipeline, and
+// spending 200 ms proving an encoder twice delays the audio a patron is waiting
+// for.
 func (s *Stream) probeEncoder(ctx context.Context) {
+	if s.cfg.Delivery != nil {
+		return
+	}
 	if s.backend == nil || !s.backend.Available() {
 		s.encoderState = EncoderUnavailable
 		return
@@ -453,11 +661,14 @@ func (s *Stream) observeArrival(f capture.Frame, gap time.Duration) {
 }
 
 // latencyEstimateMS returns the encode-path estimate, or 0 when no encoder ran.
+// Only the two states in which an encode really happened contribute a figure.
 func (s *Stream) latencyEstimateMS() int {
-	if s.encoderState != EncoderReadyNoTransport {
+	switch s.encoderState {
+	case EncoderReadyNoTransport, EncoderStreaming:
+		return EncoderPathLatencyMS(s.capturePeriodMS, s.opusFrameMS)
+	default:
 		return 0
 	}
-	return EncoderPathLatencyMS(s.capturePeriodMS, s.opusFrameMS)
 }
 
 // EncoderPathLatencyMS estimates the APPLIANCE-side audio latency: the capture

@@ -9,27 +9,37 @@ package web
 // picker, volume, and the "add a little buffer if choppy" control. §8.4 scopes
 // /api/audio/* to "authorized local audio streams only".
 //
-// WHAT IS REAL HERE AND WHAT IS A SEAM. The availability model, the patron-safe
-// projection, the picker's server contract and the signaling relay are real
-// software and are tested. The appliance-side WebRTC PEER is not: it is GStreamer
-// webrtcbin, whose development libraries are absent on this host (BLOCKER B4), and
-// there are no real phones to negotiate with (BLOCKER B2). So Deps.Signaler is nil
-// in the shipped binary, and when it is nil this layer tells the patron the audio
-// feed is unavailable in plain language. It never renders a player that cannot
-// play, and it never reports a peer that was not established.
+// WHAT IS REAL HERE AND WHAT IS STILL GATED. The availability model, the
+// patron-safe projection, the picker's server contract and the signaling relay
+// are real software and are tested, and the appliance-side WebRTC peer now
+// exists: captionbridge-media answers offers with pion (DECISIONS D20), fed by a
+// live Opus encode per named stream. What is NOT here is a real audio source or
+// a real phone: on a host with no capture hardware the audio a patron receives
+// is a generated tone (BLOCKER B3), which this surface says out loud, and the
+// jitter buffer that dominates §6.7's latency budget cannot be measured without
+// a phone fleet (BLOCKER B2).
+//
+// Availability is therefore MEASURED rather than assumed: a stream is offered
+// only when the media process reports a live encoder for it, so the page never
+// draws a player for audio that cannot start.
 //
 // NO DIAGNOSTIC LEAKAGE (§7.2). Nothing on this surface carries a device name, a
 // dBFS figure, a qualifier reason string, an encoder state or a server address —
-// only "available: yes/no" and one calm sentence. SDP bodies and ICE candidates
-// are relayed but never logged (§9.4).
+// only "available: yes/no", one calm sentence, and a plain statement when what
+// is playing is a test tone. SDP bodies, ICE candidates and the per-connection
+// peer id are relayed but never logged (§9.4).
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/simpledcp/captionbridge/internal/ipc"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 )
@@ -52,6 +62,14 @@ type PatronStream struct {
 	// Caution marks a stream that is offered but degraded (QualifierState
 	// Marginal). It is offered WITH the warning, never silently (guardrail #7).
 	Caution bool `json:"caution,omitempty"`
+	// TestTone marks a stream carrying a GENERATED TONE rather than this
+	// auditorium's audio feed (BLOCKER B3: no capture hardware). Now that a
+	// patron can really receive this stream, they have to be told what they are
+	// hearing — a listener who is handed a sine wave and told nothing would
+	// reasonably conclude the accessibility feed is broken. It is a statement
+	// about the CONTENT, not a diagnostic: no device, level or reason travels
+	// with it (§7.2).
+	TestTone bool `json:"test_tone,omitempty"`
 }
 
 // PatronAudio is the whole /api/audio/streams document.
@@ -97,10 +115,16 @@ func projectStreams(states []model.AudioStreamState, granted func(model.StreamTy
 		}
 		ps := PatronStream{Stream: t, Label: streamLabel(t)}
 		st, configured := byType[t]
+		ps.TestTone = configured && model.SyntheticDevice(st.InputDeviceID)
 		switch {
 		case !configured:
 			ps.Reason = unavailableCopy(ps.Label)
 		case !st.DeviceConnected, !st.Present, st.Status == model.QualFailed:
+			ps.Reason = unavailableCopy(ps.Label)
+		case st.EncoderState != model.EncoderStateStreaming:
+			// The input may be perfect, but nothing is encoding it, so nothing
+			// can reach this patron. Offering the feed here would draw a player
+			// that cannot start (§6.6 encoder state → §7.2 patron copy).
 			ps.Reason = unavailableCopy(ps.Label)
 		case st.Silence:
 			// Sustained silence on a configured input is §7.2's "signal is too
@@ -133,15 +157,30 @@ func (s *Server) audioSnapshot(sess *model.PatronSession) PatronAudio {
 		}
 	}
 	doc := PatronAudio{Streams: projectStreams(states, granted)}
+	// Playback is available when this appliance can REALLY serve a listening
+	// session: there is a relay to the media process, and at least one stream
+	// this session may pick is being encoded right now. Either half missing is
+	// reported as unavailable with calm copy rather than a player that cannot
+	// start (guardrail #7).
 	if s.deps.Signaler == nil {
-		// SEAM (B4/B2): no webrtcbin peer exists, so there is nothing to listen
-		// to. Say so plainly rather than showing a player that cannot start.
-		doc.PlaybackReason = "Listening on your phone is not available in this auditorium right now. Please contact theater staff."
+		doc.PlaybackReason = playbackUnavailableCopy
 		return doc
 	}
-	doc.PlaybackAvailable = true
+	for _, ps := range doc.Streams {
+		if ps.Available {
+			doc.PlaybackAvailable = true
+			break
+		}
+	}
+	if !doc.PlaybackAvailable {
+		doc.PlaybackReason = playbackUnavailableCopy
+	}
 	return doc
 }
+
+// playbackUnavailableCopy is the whole-surface "you cannot listen here right
+// now" state in §7.2's plain language. It names nothing about why.
+const playbackUnavailableCopy = "Listening on your phone is not available in this auditorium right now. Please contact theater staff."
 
 // handleAudioStreams serves the patron-safe availability document (§8.4
 // "/api/audio/* authorized local audio streams only").
@@ -175,13 +214,54 @@ type SignalFrame struct {
 // — no third-party signaling", and the local path is host-ICE-candidate only (no
 // STUN/TURN), so an implementation must never reach the internet.
 //
-// SEAM: no production implementation exists. The appliance-side peer is webrtcbin
-// (BLOCKER B4) and there are no real phones to negotiate with (BLOCKER B2). Tests
-// inject a loopback implementation to exercise this relay end to end.
+// peerID identifies ONE patron's control socket for the life of that connection.
+// The media process holds one peer connection per id, which is what lets a
+// browser's trickled candidates find their peer and — more importantly — what
+// lets a patron who closed the page have their peer torn down instead of leaked.
+// It is minted per connection here, is meaningless outside this appliance, and
+// must never be logged: it is a client identifier (§9.4).
+//
+// The production implementation lives in cmd/captionbridge-core (signaler.go);
+// tests inject a loopback one to exercise this relay without a media process.
 type AudioSignaler interface {
 	// Signal relays one frame from a patron and returns the frames to send back.
 	// Implementations must not log SDP or candidate bodies.
-	Signal(ctx context.Context, in SignalFrame) ([]SignalFrame, error)
+	Signal(ctx context.Context, peerID string, in SignalFrame) ([]SignalFrame, error)
+}
+
+// newPeerID mints the opaque per-connection identifier described above.
+func newPeerID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Without randomness two patrons could collide on one peer and take each
+		// other's audio down. Falling back to a guessable id is worse than
+		// having none: an empty id makes the media process refuse the offer.
+		return ""
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// ErrPlaybackRefused is how an AudioSignaler reports that the media process
+// declined to start a listening session, carrying the refusal's CLASS (one of
+// ipc.Reason*). The class travels; the wording does not. §7.2's patron copy is
+// composed here, in the one place that owns what a patron is shown, so a helper
+// process can never put its own diagnostic sentence on a phone.
+type ErrPlaybackRefused struct{ Class string }
+
+func (e ErrPlaybackRefused) Error() string { return "playback refused: " + e.Class }
+
+// refusalCopy turns a refusal class into calm patron copy (§7.2).
+func refusalCopy(class string, label string) string {
+	switch class {
+	case ipc.ReasonAtCapacity:
+		// The one refusal a patron can act on: it is temporary and not their
+		// device's fault.
+		return "Too many phones are listening in this auditorium right now. Please try again in a moment, or contact theater staff."
+	case ipc.ReasonNoEncoder, ipc.ReasonUnknownStream:
+		return unavailableCopy(label)
+	default:
+		return "Listening could not be started. Please contact theater staff."
+	}
 }
 
 // audioPollInterval is how often a connected patron's availability view refreshes.
@@ -209,6 +289,13 @@ func (s *Server) handleAudioWS(w http.ResponseWriter, r *http.Request) {
 	showEnded := s.sessions.ShowEnded()
 	s.sessions.addAudioClient(1)
 	defer s.sessions.addAudioClient(-1)
+
+	// One peer per control socket, released when the socket goes (§6.7 "peers
+	// joining and leaving mid-show"). Without this a patron who locks their
+	// phone and walks out leaves a peer connection, an SRTP session and a track
+	// binding behind for the rest of the show.
+	peerID := newPeerID()
+	defer s.releasePeer(peerID)
 
 	send := func(v any) error {
 		b, merr := json.Marshal(v)
@@ -267,7 +354,7 @@ func (s *Server) handleAudioWS(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			for _, out := range s.handleSignalFrame(ctx, sess, f) {
+			for _, out := range s.handleSignalFrame(ctx, peerID, sess, f) {
 				if err := send(out); err != nil {
 					return
 				}
@@ -276,9 +363,25 @@ func (s *Server) handleAudioWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// releasePeer tells the media process this patron's peer is finished. It runs on
+// a context of its own because the request context is already cancelled by the
+// time a socket closes, and a cancelled relay would leave the peer alive.
+func (s *Server) releasePeer(peerID string) {
+	if s.deps.Signaler == nil || peerID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), peerReleaseTimeout)
+	defer cancel()
+	_, _ = s.deps.Signaler.Signal(ctx, peerID, SignalFrame{Type: "close"})
+}
+
+// peerReleaseTimeout bounds the teardown relay. It is short: a media process
+// that is not answering has already lost the peer we are trying to release.
+const peerReleaseTimeout = 3 * time.Second
+
 // handleSignalFrame runs the picker/signaling state machine for one inbound frame.
 // Every refusal carries calm patron copy; none carries a diagnostic.
-func (s *Server) handleSignalFrame(ctx context.Context, sess *model.PatronSession, f SignalFrame) []SignalFrame {
+func (s *Server) handleSignalFrame(ctx context.Context, peerID string, sess *model.PatronSession, f SignalFrame) []SignalFrame {
 	switch f.Type {
 	case "select", "offer":
 		snap := s.audioSnapshot(sess)
@@ -307,20 +410,34 @@ func (s *Server) handleSignalFrame(ctx context.Context, sess *model.PatronSessio
 		return nil
 	}
 
-	out, err := s.deps.Signaler.Signal(ctx, f)
+	out, err := s.deps.Signaler.Signal(ctx, peerID, f)
 	if err != nil {
 		// No silent degradation: a relay failure is a loud (but calm-worded)
 		// patron state, and the event is logged WITHOUT the SDP body (§9.4).
-		s.deps.Log.Warn(logging.EvWebRTCPeerClosed, logging.Field("stream", string(f.Stream)))
+		var refused ErrPlaybackRefused
+		class := "relay_failed"
+		if errors.As(err, &refused) {
+			class = refused.Class
+		}
+		s.deps.Log.Warn(logging.EvWebRTCPeerClosed,
+			logging.Field("stream", string(f.Stream)),
+			logging.Field("reason", class))
 		return []SignalFrame{{
 			Type:   "unavailable",
 			Stream: f.Stream,
-			Reason: "Listening could not be started. Please contact theater staff.",
+			Reason: refusalCopy(class, streamLabel(f.Stream)),
 		}}
 	}
 	for _, o := range out {
 		if o.Type == "answer" {
-			s.deps.Log.Info(logging.EvWebRTCPeerConnected, logging.Field("stream", string(o.Stream)))
+			// An answer was RELAYED. Whether a peer then connected is something
+			// only the media process observes, and it logs
+			// webrtc.peer.connected from the peer's own state change — this
+			// relay must not claim a connection it cannot see (guardrail: never
+			// report what was not measured).
+			s.deps.Log.Info(logging.EvStateTransition,
+				logging.Field("phase", "webrtc_answer_relayed"),
+				logging.Field("stream", string(o.Stream)))
 		}
 	}
 	return out

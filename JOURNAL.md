@@ -290,3 +290,86 @@ zero and resets if stale.
 Where it landed: 31 packages, 472 tests, ~82% coverage, 32 scenarios, green
 under `-race`, three processes verified running with the dashboard and the
 wizard both exercised live.
+
+## §6.7: the audio actually reaches a listener
+
+Everything before this session ended at the encode seam. `internal/audio/encode`
+could prove an Opus pipeline existed by running a 200 ms smoke test into
+`fakesink` — audio encoded and thrown away — and `Deps.Signaler` was nil, so the
+patron page correctly told everyone that listening was unavailable. The halves
+were real and each had tests. Nothing connected them.
+
+**What the shape had to be.** §6.7 states the topology as a requirement: one
+capture/analysis/Opus source per NAMED STREAM, fanned out to one peer connection
+per subscriber, and "the design must avoid re-running capture/analysis per
+client". So: `pipeline.Stream` starts exactly one `encode.RTPStream` and
+publishes it to a `DeliverySink`; `webrtcpeer.Hub` holds one
+`TrackLocalStaticRTP` per stream keyed in a map, and every `Answer` binds
+another peer to that same track. Adding the tenth subscriber adds an SRTP
+session and nothing else. The test that defends it measures encoder reads and
+delivered packets over the same window: with one source they match, and a
+per-subscriber source would read the encoder about twice per delivered packet.
+
+**How PCM reaches the encoder, and why.** The §6.7 spike ran `audiotestsrc`
+inside GStreamer, but the real source is the MAPPED output of the pipeline —
+capture, then the channel mapper that §6.5 makes the single place deciding which
+captured channel feeds which named stream. Letting GStreamer reopen the device
+and split channels again would put a second, untested mapping in the path, and
+the qualifier's verdict would then describe a different lane from the one a
+patron hears. So the source element is `fdsrc` on stdin and the appliance writes
+the mapped lane in as S16LE, with `rawaudioparse` stating the caps explicitly
+rather than letting a byte stream be guessed at.
+
+Two things that cost real time and are worth remembering:
+
+- **`perfect-timestamp=true` on `opusenc`.** Without it the RTP clock advanced in
+  irregular steps (360 ticks, then 480, then 360) because `rtpopuspay` derives
+  the RTP timestamp from the buffer PTS and a short read on the stdin pipe made
+  those PTS ragged. With it, timestamps come from the sample count: exactly 480
+  ticks per 10 ms frame, forever. Ragged RTP timestamps are precisely the jitter
+  §6.7's dominant phone-side term has to absorb.
+- **The synthetic tone had to be paced.** `capture.SyntheticTone` generated
+  frames as fast as the consumer read them, which was harmless while nothing
+  consumed them but a live encoder. Feeding an unpaced generator into Opus would
+  have handed a phone hours of audio in minutes — and every wall-clock figure
+  measured around it (capture gaps, dropouts, throughput) would have described
+  the generator instead of a booth feed. `Realtime` paces against a running
+  deadline, and resets rather than sprinting to catch up after a long stall.
+
+**Honesty, which is the part that matters.** `encoder_state:"streaming"` is set
+only after RTP packets have been READ OUT of the encoder and counted. An encoder
+that spawns and emits nothing is reported `unavailable` after a one-second
+deadline, its source unpublished and its subscribers dropped — because "the
+process started" is not "audio is being encoded", and that distinction is the
+whole difference between the five fabrications this codebase has produced and an
+honest state. Patron availability then follows that measured state: a perfect
+input with a dead encoder is offered to nobody.
+
+The other honesty line is louder now than it was. The stand-in tone used to be a
+number on a dashboard; it is now something a person hears. So it is declared on
+the PATRON surface too — "You are hearing a test tone, not this auditorium's
+audio" — and `ontrack` deliberately does not clear that message when audio
+starts flowing, since clearing it is exactly how a generated tone would quietly
+become "the auditorium's HI feed".
+
+One claim got demoted along the way: core used to log `webrtc.peer.connected`
+when it relayed an answer. It cannot see whether ICE completed. It now logs a
+state transition for the relay, and `webrtc.peer.connected` is emitted only by
+the process that owns the peer, from the peer's own state change.
+
+**Measured on this host** (`internal/audio/encode`, real gst-launch): RTP
+timestamps step exactly 480 ticks per packet; the encoder path holds ~0 frames
+of backlog in steady state; the wall delay from writing a 10 ms block to reading
+the packet carrying it is ~0.4 ms mean / ~0.5 ms max. That covers ONE row of
+§6.7's latency table. The dominant row — the phone-side jitter buffer, 40–300+ ms
+— cannot be measured without a phone (B2), so the dashboard still says "not
+measured" for glass-to-ear and prints the encode-path estimate under its own name.
+
+**Proven end to end**, because two halves that each pass their own tests is the
+failure this codebase has produced repeatedly:
+`cmd/captionbridge-core/audio_e2e_test.go` builds and runs all three binaries,
+then joins as a patron would — the same protocol `assets/patron.js` speaks, a
+receive-only Pion peer with `iceServers: []`, an offer over `/api/audio/ws`, the
+answer applied — and asserts Opus RTP arrives, that the answer carries `typ host`
+candidates and no `srflx`/`relay`/`stun:`/`turn:`, and that the surface declares
+the source a test tone.

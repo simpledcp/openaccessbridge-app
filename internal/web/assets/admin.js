@@ -351,9 +351,11 @@
       dl(facts, [
         deviceRow(sum),
         triRow("Input present", sum.input_present, true),
-        // §8.2 "HI stream active / VI stream active". With no WebRTC subscriber
-        // transport (BLOCKERS B2/B4) a proven encoder still reaches nobody, so
-        // the honest answer is "no" with the reason attached.
+        // §8.2 "HI stream active / VI stream active", which follows the encoder
+        // state and nothing else: "streaming" means a live encode is producing
+        // RTP the fan-out is carrying, an encoder that only smoke-tested reaches
+        // nobody, and a state this build does not recognise is "not measured"
+        // rather than a green tick. The reason is always attached.
         triRow("Stream active", sum.stream_active, true, encoderNote(sum.encoder_state)),
         row("Connected audio clients", String(sum.connected_clients || 0), null),
         levelRow(sum, raw),
@@ -419,6 +421,8 @@
 
   function encoderNote(state) {
     switch (state) {
+      case "streaming":
+        return "a live Opus encode is producing RTP and the WebRTC fan-out is carrying it";
       case "ready_no_transport":
         return "a real encode runs locally, but there is no subscriber transport to carry it";
       case "unavailable":

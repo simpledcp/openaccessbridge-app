@@ -27,6 +27,15 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
 - **Seam in code:** WebRTC signaling/transport is behind the media encode seam;
   secure-context strategy is configurable (D12). Patron page handles tap-to-start.
 - **Clears:** primary audio path proof, secure-context decision (Phase 7), G3.
+- **What the §6.7 build DID prove here (2026-08-20):** the appliance now really
+  serves Opus over WebRTC. A Go subscriber speaking the same protocol as
+  `assets/patron.js` joins the running three-process appliance, offers, applies
+  the answer, and receives Opus RTP
+  (`cmd/captionbridge-core/audio_e2e_test.go`). What it does NOT prove is
+  anything phone-shaped: no iOS/Android browser, no venue AP, no mDNS candidate
+  from a real browser, no autoplay-gesture behaviour, and — decisively — **no
+  measurement of the phone-side jitter buffer**, which §6.7 names as the
+  dominant term in the latency budget. Every one of those still needs B2.
 
 ### B3. Phase 0C — audio hardware + HI glass-to-ear latency (real ADCs/jacks/phones) [§13 Phase 0C, OPEN #7–10]
 - **Needed:** mini-PC mic jacks, USB dongles/interfaces, TRS/TRRS adapters,
@@ -37,6 +46,15 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   is asserted.
 - **Clears:** known-good hardware kit (§6.2), compatibility matrix (§11.3),
   gates G2a/G2b.
+- **Now audible, which raises the stakes (2026-08-20):** the §6.7 path delivers
+  this stand-in tone to a real subscriber, so the tone is no longer only a
+  number on a dashboard — it is what a listener hears. The stand-in is therefore
+  declared on the PATRON surface as well as the admin one
+  (`PatronStream.test_tone` → "You are hearing a test tone, not this
+  auditorium's audio"), and the synthetic source is paced at 1x
+  (`capture.SyntheticTone.Realtime`) so what is delivered is 10 ms of audio per
+  10 ms of clock rather than a generator running at whatever speed the CPU
+  allows.
 
 ### B4. GStreamer dev libs + `webrtcbin` not installable (no passwordless apt) — **CLEARED IN SOFTWARE (D20)**
 > **Status:** no longer blocking. The appliance-side WebRTC peer is now Pion
@@ -50,8 +68,11 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   `webrtcbin` element (gst-plugins-bad / gst-plugins-rs).
 - **Needed to clear:** `sudo apt install libgstreamer1.0-dev
   gstreamer1.0-plugins-bad gstreamer1.0-nice` (or the Rust webrtc plugin).
-- **Workaround in place:** media encode via `gst-launch-1.0` subprocess for the
-  synthetic-tone smoke test (D5); real WebRTC peer deferred to B2.
+- **Workaround in place → now the shipped design:** the Opus encoder is a
+  `gst-launch-1.0` subprocess per named stream, fed the mapped lane on stdin and
+  emitting RTP on loopback UDP, which Pion fans out to the subscribers
+  (`internal/audio/encode/stream.go`, `internal/audio/webrtcpeer`). No
+  `webrtcbin`, no dev headers, no cgo.
 
 ### B5. nftables apply + sysctl forwarding toggle need root at runtime
 - **Needed to clear:** the `captionbridge-firewall` helper runs as root (systemd

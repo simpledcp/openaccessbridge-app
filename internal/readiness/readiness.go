@@ -263,17 +263,23 @@ func summarizeAudio(audio []model.AudioStreamState) []model.AudioStreamSummary {
 // streamActive derives §8.2's "HI stream active / VI stream active".
 //
 // A stream is active only when something is genuinely encoding AND there is a
-// transport to carry it. Neither of the two states this build can reach is that,
-// so today the honest answers are "no" and "not measured" — and an encoder state
-// this build does not recognise is NOT evidence of a live stream (guardrail #7).
+// transport to carry it — and the encoder state that says so is set from a
+// measured RTP packet count, not from an encoder having been launched. An
+// encoder state this build does not recognise is NOT evidence of a live stream
+// (guardrail #7).
 func streamActive(a model.AudioStreamState) model.Tri {
 	switch a.EncoderState {
+	case model.EncoderStateStreaming:
+		// A live Opus encode is producing RTP and the WebRTC fan-out is carrying
+		// it, so this stream can be served to a subscriber. Whether anyone is
+		// listening is the separate connected-client count.
+		return model.TriYes
 	case model.EncoderStateUnavailable:
 		// No encoder ran: nothing can reach a patron however clean the input is.
 		return model.TriNo
 	case model.EncoderStateReadyNoTransport:
-		// A real encode was proven locally, but there is no WebRTC subscriber
-		// transport (BLOCKERS B2/B4), so no patron is receiving this stream.
+		// A real encode was proven locally, but this stream has no subscriber
+		// transport attached, so no patron is receiving it.
 		return model.TriNo
 	default:
 		// "unknown" (the encode path has not been exercised) and anything a later

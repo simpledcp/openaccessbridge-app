@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 )
 
 // Frame is a block of interleaved float64 samples in [-1, 1].
@@ -42,6 +43,14 @@ type SyntheticTone struct {
 	SampleRate int
 	Channels   int
 	FrameSize  int // samples per channel per frame
+	// Realtime paces frame delivery at the frame's own duration instead of
+	// generating as fast as the consumer reads. A stand-in that feeds the
+	// §6.7 encoder MUST be paced: an unpaced tone delivers an hour of audio in
+	// seconds, so the Opus stream a patron receives would play at many times
+	// speed and every wall-clock measurement taken around it (capture gaps,
+	// dropouts, encoder throughput) would describe the generator's speed rather
+	// than a booth feed. Tests that only want N blocks leave it off.
+	Realtime bool
 
 	phase float64
 
@@ -59,8 +68,9 @@ func (s *SyntheticTone) Describe() string {
 	return fmt.Sprintf("synthetic-tone %gHz amp=%g %dch@%dHz", s.FreqHz, s.Amplitude, s.Channels, s.SampleRate)
 }
 
-// Start begins generating frames. It produces frames as fast as the consumer
-// reads; for tests, read a bounded number then cancel.
+// Start begins generating frames. Without Realtime it produces frames as fast as
+// the consumer reads (for tests: read a bounded number then cancel); with
+// Realtime it delivers one frame per frame-duration of wall clock.
 func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	if s.SampleRate <= 0 {
 		s.SampleRate = 48000
@@ -77,8 +87,10 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 	s.healthMu.Unlock()
 	out := make(chan Frame)
 	step := 2 * math.Pi * s.FreqHz / float64(s.SampleRate)
+	period := time.Duration(s.FrameSize) * time.Second / time.Duration(s.SampleRate)
 	go func() {
 		defer close(out)
+		next := time.Now()
 		for {
 			buf := make([]float64, s.FrameSize*s.Channels)
 			for i := 0; i < s.FrameSize; i++ {
@@ -94,6 +106,30 @@ func (s *SyntheticTone) Start(ctx context.Context) (<-chan Frame, error) {
 			select {
 			case out <- Frame{Samples: buf, SampleRate: s.SampleRate, Channels: s.Channels}:
 			case <-ctx.Done():
+				return
+			}
+			if !s.Realtime || period <= 0 {
+				continue
+			}
+			// Pace against a running deadline rather than sleeping a period per
+			// frame, so scheduling jitter does not accumulate into drift. A stall
+			// long enough to fall a whole second behind resets the deadline
+			// instead of sprinting to catch up: catching up would hand the
+			// encoder a burst of audio that never existed in real time.
+			next = next.Add(period)
+			d := time.Until(next)
+			if d < -time.Second {
+				next = time.Now()
+				continue
+			}
+			if d <= 0 {
+				continue
+			}
+			t := time.NewTimer(d)
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				t.Stop()
 				return
 			}
 		}

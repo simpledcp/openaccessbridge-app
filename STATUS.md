@@ -46,7 +46,11 @@ make soak         # §11.6 long soak (default 2000 show cycles)
 **Verified live (all three processes):** captions `PLAYING` (lease active, RPL
 loaded, languages en + es-419) AND audio HI/VI-N `excellent` over loopback IPC
 AND per-process liveness for all three AND the D11 client cap in force (0/25 on
-Booth Diagnostic) — each computed **independently**. On this dev host the
+Booth Diagnostic) — each computed **independently**. Audio delivery is verified
+the same way: with the three processes running,
+`curl /api/audio/streams` reports `playback_available:true`, and
+`TestAudioPathEndToEndAcrossTheThreeProcesses` joins as a patron would and
+receives real Opus RTP (see §6.7 note below). On this dev host the
 firewall row reads `INACTIVE / introspected=false` with "nft list failed:
 Operation not permitted", which is the CORRECT loud answer: reading the ruleset
 needs root (B5), so the posture is reported as unverified rather than assumed
@@ -75,6 +79,31 @@ green.
 | 17 | Patron surface (§7): the three routes differ, HI/VI-N picker + volume + the §6.7 "add a little buffer" control, per-show sessions and join codes (§10.4), browser-language matching, reachable SSE fallback, show-ended state | `internal/web` |
 | 18 | §6.4 audio calibration engine: feasibility, verdict, plain-language summary, concrete tier-aware fixes, saved auditorium profile | `internal/audio/calibration` |
 | 19 | §11.6 soak/reliability layer: retention must be FLAT across many shows | `internal/soak` |
+| 20 | §6.7 audio delivery, end to end: streaming Opus/RTP encode per named stream, a Pion peer hub that fans ONE encoder out to N subscribers, the SDP/ICE relay across all three processes, and patron availability driven by a measured encoder state (D20) | `internal/audio/{encode,webrtcpeer,pipeline}`, `internal/web/audio.go`, `cmd/*` |
+
+## §6.7 audio delivery — what is real, and what a patron would actually get
+
+A patron on a phone can now **really receive audio**. The path is: capture →
+channel mapper → one `gst-launch-1.0` Opus encoder per named stream (mapped PCM
+in on stdin, RTP out on loopback UDP) → one Pion `TrackLocalStaticRTP` per named
+stream → one peer connection per subscriber, negotiated over the patron page's
+own WebSocket and relayed to `captionbridge-media` over the loopback socket.
+Host ICE candidates only; no STUN, no TURN.
+
+**What they would hear on this host is a 440 Hz (HI) / 660 Hz (VI-N) test tone**,
+because there is no capture hardware (B3). That is stated on the patron surface
+(`test_tone` → "You are hearing a test tone, not this auditorium's audio") as
+well as on the dashboard. Availability is measured, not assumed: a stream is
+offered only while the media process reports `encoder_state:"streaming"`, which
+is itself set from a counted RTP packet — not from "the encoder was launched".
+
+**Measured here:** Opus RTP arrives at a subscriber over the real three-process
+path; RTP timestamps advance exactly 480 ticks per packet (the §6.7 10 ms
+frame); the encode path holds ~0 frames of backlog in steady state and adds
+~0.4 ms of wall transit beyond the frame itself. **Not measured here:** anything
+glass-to-ear. No phone, no venue AP, no jitter buffer (B2). The dashboard still
+renders audio latency as "not measured" with the encode-path estimate beside it
+under its own name.
 
 ## Invariants (asserted in CI — `internal/invariants`)
 
@@ -105,10 +134,15 @@ the audit lanes' own reports.
 - **§11.5 pre-show QA checklist** is not codified as a staff-facing procedure.
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
-- **Patron audio availability does not distinguish synthetic from real.** With
-  no hardware the media helper reports HI/VI-N as available; nothing can be
-  started today (`playback_available:false`), but the distinction should be
-  explicit before a real device is ever attached.
+- **WebRTC ICE gathers on every interface this host has.** Pion enumerates all
+  non-loopback interfaces, so on a multi-homed box the answer's host candidates
+  include docker/VPN/overlay addresses as well as the patron LAN's. It is not a
+  local-only violation (no STUN, no TURN, nothing leaves the LAN) and it is
+  harmless on an appliance with one patron NIC, but scoping gathering to the
+  configured patron interface is the right thing before a field pilot.
+- **§6.7's latency table is still one measured row.** The appliance-side encode
+  path is measured; the phone-side jitter buffer that dominates the budget needs
+  B2, and the §11.4 loopback rig needs B3.
 
 ## What is NOT done (hardware/external-gated — see BLOCKERS.md)
 

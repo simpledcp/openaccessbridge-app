@@ -3,11 +3,13 @@
 // channel mapper (pure Go) stay testable without GStreamer, and so the media
 // backend can be swapped (e.g. aiortc) without touching the caption core (§3.5).
 //
-// On this dev host the GStreamer RUNTIME (opusenc, audiotestsrc, level) is present
-// but webrtcbin and the dev headers are NOT (DECISIONS D5, BLOCKERS B2/B4). So the
-// GStreamer backend here drives a `gst-launch-1.0` Opus pipeline as a real local
-// SMOKE TEST (synthetic tone → Opus), while the WebRTC peer is a documented seam
-// to be completed when webrtcbin / a real phone fleet is available.
+// The GStreamer RUNTIME (opusenc, audiotestsrc, level) is present on this host;
+// the dev headers and `webrtcbin` are not (DECISIONS D5, BLOCKER B4). So the
+// GStreamer backend drives `gst-launch-1.0` as a subprocess in two shapes:
+// SmokeTest, which proves the encode chain exists on a host (synthetic tone →
+// Opus → fakesink), and StartRTP (stream.go), which is the LIVE per-stream
+// encode a patron listens to. The WebRTC peer itself is Pion, not webrtcbin
+// (DECISIONS D20) — see internal/audio/webrtcpeer.
 package encode
 
 import (

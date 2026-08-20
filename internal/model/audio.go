@@ -103,6 +103,10 @@ const (
 	// this stream however clean the input measures.
 	EncoderStateUnavailable = "unavailable"
 	// EncoderStateReadyNoTransport: a real encode was proven locally but there is
-	// no subscriber transport yet (B2/B4).
+	// no subscriber transport attached to this stream.
 	EncoderStateReadyNoTransport = "ready_no_transport"
+	// EncoderStateStreaming: a live Opus encode is running for this stream and
+	// its RTP is reaching the WebRTC fan-out, so a subscriber can be served.
+	// Set from a measured packet count, never from "the encoder was launched".
+	EncoderStateStreaming = "streaming"
 )

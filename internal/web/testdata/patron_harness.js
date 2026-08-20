@@ -5,7 +5,10 @@
  * patron client's own logic (transport fallback, show-end, language substitution,
  * the audio picker state machine and the buffer control). It simulates NOTHING
  * about a real phone, a real network or real media — those stay under BLOCKERS
- * B2/B4 — and no assertion built on it claims otherwise.
+ * B2 — and no assertion built on it claims otherwise. The RTCPeerConnection
+ * stand-in below simulates the API shape the page drives, never real media: the
+ * real peer is proven against a real appliance in
+ * cmd/captionbridge-core/audio_e2e_test.go.
  */
 
 const path = require("path");
@@ -73,6 +76,39 @@ function makeSocketClass(registry) {
   };
 }
 
+/* A stand-in for the browser's RTCPeerConnection. It simulates the API SHAPE the
+ * patron client drives — offer/answer, trickled candidates, receivers for the
+ * §6.7 buffer control, and an ontrack the test fires — and nothing about real
+ * media, real ICE or a real phone (BLOCKER B2). What it makes testable is the
+ * page's own behaviour once audio arrives. */
+function makePeerClass(registry) {
+  return class FakePeerConnection {
+    constructor(config) {
+      this.config = config;
+      this.transceivers = [];
+      this.receivers = [];
+      this.candidates = [];
+      this.localDescription = null;
+      this.remoteDescription = null;
+      this.closed = false;
+      registry.push(this);
+    }
+    addTransceiver(kind, init) {
+      this.transceivers.push({ kind: kind, init: init });
+      this.receivers.push({});
+    }
+    getReceivers() { return this.receivers; }
+    createOffer() { return Promise.resolve({ type: "offer", sdp: "v=0\r\nfake-offer\r\n" }); }
+    setLocalDescription(d) { this.localDescription = d; return Promise.resolve(); }
+    setRemoteDescription(d) { this.remoteDescription = d; return Promise.resolve(); }
+    addIceCandidate(c) { this.candidates.push(c); return Promise.resolve(); }
+    close() { this.closed = true; }
+    // --- test drivers ---
+    fireTrack(ev) { if (this.ontrack) this.ontrack(ev || { streams: [{}] }); }
+    fireCandidate(c) { if (this.onicecandidate) this.onicecandidate({ candidate: c }); }
+  };
+}
+
 /* load() builds the environment, requires a fresh copy of patron.js, and returns
  * the client's test surface together with the stubs that drive it. */
 function load(opts) {
@@ -98,6 +134,7 @@ function load(opts) {
   const sockets = [];
   const sources = [];
   const fetches = [];
+  const peers = [];
 
   const env = {
     body,
@@ -115,6 +152,7 @@ function load(opts) {
     // captionSockets/audioSockets split the two control channels by URL.
     captionSockets() { return sockets.filter(function (s) { return s.url.indexOf("/api/caption/ws") >= 0; }); },
     audioSockets() { return sockets.filter(function (s) { return s.url.indexOf("/api/audio/ws") >= 0; }); },
+    peers() { return peers; },
   };
 
   const sandbox = {
@@ -130,6 +168,8 @@ function load(opts) {
     navigator: {},
     WebSocket: makeSocketClass(sockets),
     EventSource: makeSocketClass(sources),
+    RTCPeerConnection: makePeerClass(peers),
+    MediaStream: function MediaStream(tracks) { this.tracks = tracks || []; },
     fetch(url) {
       fetches.push(url);
       const body = (opts.fetchResponses || {})[url];

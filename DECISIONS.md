@@ -214,3 +214,53 @@ and the track never starts. This cost a spike iteration and is worth remembering
 untested, and the phone-side jitter buffer — §6.7's dominant, least-controllable
 latency term — cannot be measured here at all.
 
+### D25. Mapped PCM reaches the encoder on stdin; RTP comes back on loopback UDP [§6.7, §6.5]
+The §6.7 spike drove `audiotestsrc` inside GStreamer, but the real source is the
+MAPPED output of `internal/audio/pipeline`. The shipped encoder is therefore
+`gst-launch-1.0 fdsrc fd=0 ! rawaudioparse … ! opusenc … ! rtpopuspay ! udpsink
+host=127.0.0.1`, one per NAMED STREAM, with the appliance writing the mapped
+lane in as S16LE and reading RTP back off a loopback socket it bound first.
+
+Why not let GStreamer open the device: §6.5 makes the channel mapper the single
+place that decides which captured channel feeds which named stream. A second
+mapping inside the pipeline would mean the qualifier's verdict describes a
+different lane from the one a patron hears. It also keeps the capture device
+behind the pure-Go `capture.Source` seam, where the real ALSA source lands (B3).
+
+Why `rawaudioparse` and `perfect-timestamp=true`: `fdsrc` is a byte stream with
+no format, so the caps are stated rather than guessed, and the Opus frames are
+timestamped from the SAMPLE COUNT. Without the latter, a short read on the pipe
+makes the RTP clock advance unevenly — measured at 360/480/360 ticks before the
+fix, exactly 480 after — and an uneven RTP clock is jitter the phone-side buffer
+(§6.7's dominant term) has to absorb.
+
+Why loopback UDP rather than a pipe: RTP is a datagram format, the §6.7 spike
+proved `pion/rtp` parses what `rtpopuspay` emits over it, and the socket is
+bound on 127.0.0.1 before the port is handed to `udpsink` — so the port cannot be
+raced, and nothing off this appliance can reach the pre-SRTP media (§9.4). The
+reader latches the encoder's source address from the first packet and drops
+anything else.
+
+### D26. `encoder_state:"streaming"` is set from counted RTP packets, never from a launched process [§6.6, §6.7]
+The state that flips patron availability to available is the one most worth
+faking, so it is measured: `pipeline.Stream` reports `streaming` only once
+`encode.StreamStats.PacketsOut > 0`. An encoder that starts and emits nothing is
+reported `unavailable` after one second (two orders of magnitude of slack on a
+10 ms frame), its source unpublished and its subscribers dropped. PCM the encoder
+cannot take is counted as dropped frames and logged as a count, never silently
+discarded. §8.2's "stream active" reads `yes` only from this measured state.
+
+### D27. The appliance answers with ICE gathering COMPLETE; only the browser trickles [§6.7]
+With no STUN and no TURN, the appliance's gathering is an enumeration of its own
+interfaces and finishes in milliseconds, so the answer carries every host
+candidate and the core→media signaling seam stays a request/response socket with
+no push channel. The browser still trickles its candidates in and `AddCandidate`
+takes them; pion's default mDNS mode (query-only) is set EXPLICITLY so §6.7's
+`*.local` gotcha is a decision rather than an inherited default — the appliance
+resolves the browser's mDNS candidates and advertises none of its own.
+
+**Known limit:** pion gathers on every non-loopback interface. On a multi-homed
+box that includes docker/VPN addresses. It is not a local-only violation (no
+STUN, no TURN, nothing leaves the LAN), but scoping gathering to the configured
+patron interface belongs on the pre-pilot list (STATUS "Known remaining work").
+

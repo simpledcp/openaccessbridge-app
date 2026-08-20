@@ -111,10 +111,12 @@ func main() {
 		// The patron audio surface projects this down to availability only; no
 		// device name, level or reason string reaches a patron (§7.2).
 		Audio: sup.media.audio,
-		// Deps.Signaler stays nil: there is no webrtcbin peer to relay to
-		// (BLOCKERS B4/B2), and the patron page reports listening as unavailable
-		// rather than drawing a player that cannot play.
-		Status: sup.status,
+		// §6.7 signaling rides this process's own patron WebSocket and is
+		// relayed to captionbridge-media, which holds the peers (D20). The
+		// deployment profile's client cap travels with each offer so peer
+		// admission enforces the same number the caption fan-out does (D11).
+		Signaler: &mediaSignaler{media: sup.media, log: log, maxPeers: deployed.MaxConcurrentClients},
+		Status:   sup.status,
 		// The §6.4 calibration wizard reaches captionbridge-media over the SAME
 		// loopback socket dir this process was given. Without it the wizard falls
 		// back to the default location and reports "the media process is not

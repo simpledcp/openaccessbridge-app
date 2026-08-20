@@ -28,6 +28,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/audio/mapper"
 	"github.com/simpledcp/captionbridge/internal/audio/pipeline"
 	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
+	"github.com/simpledcp/captionbridge/internal/audio/webrtcpeer"
 	"github.com/simpledcp/captionbridge/internal/buildinfo"
 	"github.com/simpledcp/captionbridge/internal/ipc"
 	"github.com/simpledcp/captionbridge/internal/logging"
@@ -117,17 +118,44 @@ type manager struct {
 	order    []model.StreamType // stable report order
 	slots    map[model.StreamType]*slot
 
+	// peers is the §6.7 WebRTC fan-out: one peer connection per browser
+	// subscriber, all fed from the one encoder each named stream publishes to
+	// it. Nil when this process could not build a peer (then an offer is
+	// refused rather than answered by something that cannot carry audio).
+	peers *webrtcpeer.Hub
+
 	// cal is the §6.4 calibration wizard's live measurement run (calibration.go).
 	// It is a SEPARATE set of streams from slots: calibrating an input must never
 	// take down the audio a room is already serving.
 	cal *calibrator
 }
 
-// newManager builds the stream manager and its calibration run.
+// newManager builds the stream manager, its WebRTC fan-out and its calibration
+// run. A hub that cannot be built is a loud startup warning and a nil hub: the
+// streams still qualify and the dashboard still reports them, but every patron
+// offer is refused rather than answered by a peer that does not exist.
 func newManagerFor(ctx context.Context, log *logging.Logger, backend encode.Backend, tier qualifier.Tier, synthetic bool) *manager {
 	m := &manager{log: log, backend: backend, tier: tier, synthetic: synthetic, parent: ctx}
+	hub, err := webrtcpeer.New(webrtcpeer.Options{Log: log})
+	if err != nil {
+		log.Error(logging.EvProcessUnhealthy,
+			logging.Field("phase", "webrtc_hub_unavailable"),
+			logging.Field("error", err.Error()))
+	} else {
+		m.peers = hub
+	}
 	m.cal = &calibrator{log: log, parent: ctx, backend: backend, synthetic: synthetic}
 	return m
+}
+
+// delivery is the fan-out a started stream publishes its encoder to, or nil
+// when there is no hub — pipeline.StreamConfig.Delivery being nil is what makes
+// a stream report "no subscriber transport" instead of inventing one.
+func (m *manager) delivery() pipeline.DeliverySink {
+	if m.peers == nil {
+		return nil
+	}
+	return m.peers
 }
 
 func (m *manager) handle(msg ipc.Message) *ipc.Message {
@@ -155,6 +183,10 @@ func (m *manager) handle(msg ipc.Message) *ipc.Message {
 			return result(msg, model.MediaCommandResult{Error: err.Error()})
 		}
 		return result(msg, m.stop(stream))
+	case ipc.TypeMediaSignal:
+		// §6.7 signaling: core relays the patron's offer/ICE here, where the
+		// encoders and the peers live (signal.go).
+		return m.handleSignal(msg)
 	case ipc.TypeMediaDevices, ipc.TypeMediaCalibrate, ipc.TypeMediaCalibrateStop:
 		// §6.4 calibration wizard (calibration.go).
 		return m.handleCalibration(msg)
@@ -236,6 +268,7 @@ func (m *manager) configure(prof model.AuditoriumProfile) model.MediaCommandResu
 			cfg: pipeline.StreamConfig{
 				DeviceID: deviceID, Stream: sm.Stream, Source: sm.Source,
 				RequiredChannels: channels, Tier: m.tier, Logger: m.log,
+				Delivery: m.delivery(),
 			},
 			channels: channels, freqHz: tone[0], amp: tone[1],
 		}
@@ -267,6 +300,7 @@ func (m *manager) applyDefaultSynthetic() {
 			cfg: pipeline.StreamConfig{
 				DeviceID: syntheticDevicePrefix + string(s.stream), Stream: s.stream,
 				Source: model.ChannelMono, Tier: m.tier, Logger: m.log,
+				Delivery: m.delivery(),
 			},
 			channels: 1, freqHz: s.freq, amp: s.amp,
 		}
@@ -312,9 +346,15 @@ func (m *manager) startLocked(stream model.StreamType) {
 	// The synthetic tone stands in for the booth's feed on a host with no audio
 	// hardware; a real ALSA source plugs in behind the same capture.Source seam
 	// (B3/B4). It is never presented as a measurement of real hardware.
+	//
+	// Realtime: this tone now feeds a live Opus encode a patron listens to, so it
+	// must run at 1x. An unpaced generator would hand the encoder audio far
+	// faster than real time and the phone would play a chipmunk tone — and every
+	// wall-clock figure measured around it (capture gaps, dropouts) would
+	// describe the generator instead of a booth feed.
 	src := &capture.SyntheticTone{
 		FreqHz: s.freqHz, Amplitude: s.amp, SampleRate: pipeline.DefaultSampleRate,
-		Channels: s.channels, FrameSize: 480,
+		Channels: s.channels, FrameSize: 480, Realtime: true,
 	}
 	ctx, cancel := context.WithCancel(m.parent)
 	st := pipeline.NewStream(src, m.backend, s.cfg)
@@ -344,6 +384,12 @@ func (m *manager) stopAllLocked() {
 }
 
 func (m *manager) stopAll() {
+	if m.peers != nil {
+		// Drop every subscriber and every published source before the streams go:
+		// a peer left holding a track whose encoder has exited is exactly the
+		// dangling state §7.2's show-end behaviour forbids.
+		m.peers.Close()
+	}
 	if m.cal != nil {
 		// The calibration run holds its own input; shutting the process down must
 		// release it too (§6.1 hot-plug/device hygiene).

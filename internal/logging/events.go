@@ -35,6 +35,12 @@ const (
 	EvAudioLevelClipping     Event = "audio.level.clipping"
 	EvAudioSilenceSustained  Event = "audio.silence.sustained"
 	EvAudioQualifierVerdict  Event = "audio.qualifier.verdict"
+	// EvAudioEncoderStopped records that a stream's live Opus encode ended, with
+	// the error CLASS that ended it — never a command line or an SDP body.
+	EvAudioEncoderStopped Event = "audio.encoder.stopped"
+	// EvAudioEncoderDropped counts mapped audio blocks the encoder could not
+	// take. It is a count of a patron-audible gap, not any audio content.
+	EvAudioEncoderDropped Event = "audio.encoder.frames_dropped"
 
 	// WebRTC.
 	EvWebRTCPeerConnected Event = "webrtc.peer.connected"

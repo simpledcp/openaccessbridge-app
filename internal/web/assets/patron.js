@@ -11,11 +11,20 @@
  * states. It never shows a diagnostic: no address, interface, device, log line or
  * asset path ever reaches this page (§7.2).
  *
- * The WebRTC PEER is a SEAM, not a fake. There is no webrtcbin on the appliance
- * (BLOCKER B4) and no real phone fleet to negotiate with (B2), so the server
- * reports playback as unavailable and this page says so plainly rather than
- * drawing a player that cannot play. The signaling protocol, the availability
- * model and the picker state machine below are real and are exercised by tests.
+ * The WebRTC peer on the appliance is REAL (pion — DECISIONS D20): this page
+ * offers, the appliance answers, and Opus arrives. Two things are still not
+ * real, and this page must keep saying so rather than letting the working
+ * player imply otherwise:
+ *
+ *  - with no capture hardware attached (BLOCKER B3) the audio is a generated
+ *    test tone, which the server marks `test_tone` and sourceNote() states
+ *    plainly while it plays;
+ *  - no phone has ever run this page (BLOCKER B2), so autoplay policy, mDNS
+ *    candidates, Wake Lock and the jitter buffer that dominates §6.7's latency
+ *    budget are all unexercised. Nothing here claims otherwise.
+ *
+ * When the appliance cannot serve audio at all, the server says so and this page
+ * shows that sentence rather than drawing a player that cannot play.
  */
 (function () {
   "use strict";
@@ -358,6 +367,9 @@
       setAudioStatus(audioDoc.playback_reason || "Listening is not available right now.", "waiting");
     } else if (!selected) {
       setAudioStatus("Choose a feed, then tap to start.", "");
+    } else if (sourceNote()) {
+      // A selected feed that is playing still says what it is playing.
+      setAudioStatus(sourceNote(), "waiting");
     }
   }
 
@@ -366,6 +378,28 @@
       if (audioDoc.streams[i].stream === name) return audioDoc.streams[i];
     }
     return null;
+  }
+
+  /* What the selected feed IS, in a patron's words. Two things can be true of a
+   * feed that is playing perfectly well, and a listener has to be told both:
+   *
+   *  - test_tone: the appliance has no capture hardware attached, so this
+   *    stream carries a generated tone rather than the auditorium's audio
+   *    (BLOCKER B3). Someone handed a sine wave with no explanation would
+   *    reasonably decide the accessibility service is broken and give up;
+   *  - caution: the input qualified only Marginal, which §6.3 says to offer
+   *    WITH the warning rather than silently.
+   *
+   * Neither sentence names a device, a level or a reason string (§7.2). */
+  function sourceNote() {
+    var s = streamByName(selected);
+    if (!s) return "";
+    var parts = [];
+    if (s.test_tone) {
+      parts.push("You are hearing a test tone, not this auditorium's audio.");
+    }
+    if (s.caution && s.reason) parts.push(s.reason);
+    return parts.join(" ");
   }
 
   function chooseStream(name) {
@@ -420,7 +454,9 @@
         ensureSink().srcObject = ev.streams && ev.streams[0] ? ev.streams[0] : new MediaStream([ev.track]);
         applyVolume();
         applyBuffer();
-        setAudioStatus("", "");
+        // Audio is flowing: clear the connecting state, but never clear the
+        // statement of what this feed actually is.
+        setAudioStatus(sourceNote(), sourceNote() ? "waiting" : "");
       };
       pc.onicecandidate = function (ev) {
         if (!ev.candidate) return;
