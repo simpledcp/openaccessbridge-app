@@ -1,11 +1,23 @@
-# STATUS — final handoff
+# STATUS — handoff
 
-CaptionBridge is built as far as it can go in software on this dev machine. All
-in-scope backlog items from `kickoff.md` are **done, integrated, and green**;
-everything hardware-gated is stubbed behind a seam and recorded in `BLOCKERS.md`.
+CaptionBridge is built as far as it can go in software on this dev machine.
+Everything hardware-gated is behind a seam and recorded in `BLOCKERS.md`.
 
-- **28 packages · 119 tests · race-clean · ~71% coverage · ~11.8K LOC of Go.**
+- **31 packages · 374 tests · race-clean · ~82% coverage · ~31K LOC of Go.**
+- **30 ACSP scenarios** (`./bin/acsp-simulator`) as the caption-path regression backbone.
+- A **soak layer** (§11.6): 1500 show cycles with reconnects and language
+  switches, retention flat, content purged at every show boundary.
 - The full three-process system runs end-to-end and was verified live (below).
+
+## Where the work stands
+
+An earlier session declared the in-scope backlog complete. A later spec-vs-code
+audit of every `buildplan.md` section against the shipped code found **78
+confirmed gaps**, several reproduced by RUNNING the code — captions went blank
+after reel 1, and a second `Set RPL Location` rendered the feature during the
+trailer. Those are fixed, along with the wiring that left the new capability
+with no production caller. See JOURNAL.md for the narrative and
+`## Known remaining work` below for what is still open.
 
 ## How to build, test, and run
 
@@ -27,15 +39,20 @@ RT=/tmp/cb; mkdir -p $RT
 # Admin board:  http://127.0.0.1:8090/admin   (first boot: create credentials)
 # Run the ACSP simulator scenario suite standalone:
 ./bin/acsp-simulator --list ; ./bin/acsp-simulator
+
+make soak         # §11.6 long soak (default 2000 show cycles)
 ```
 
-**Verified live (all three processes):** the dashboard reports captions
-`PLAYING` (lease active, RPL loaded, languages en + es-419) AND audio HI/VI-N
-`excellent` (via the media helper over loopback IPC) AND
-forwarding-disabled / firewall-active / admin-isolated (via self-introspection)
-— each computed **independently**.
+**Verified live (all three processes):** captions `PLAYING` (lease active, RPL
+loaded, languages en + es-419) AND audio HI/VI-N `excellent` over loopback IPC
+AND per-process liveness for all three AND the D11 client cap in force (0/25 on
+Booth Diagnostic) — each computed **independently**. On this dev host the
+firewall row reads `INACTIVE / introspected=false` with "nft list failed:
+Operation not permitted", which is the CORRECT loud answer: reading the ruleset
+needs root (B5), so the posture is reported as unverified rather than assumed
+green.
 
-## Done (all in-scope backlog)
+## Done
 
 | # | Item | Where |
 |---|---|---|
@@ -51,6 +68,13 @@ forwarding-disabled / firewall-active / admin-isolated (via self-introspection)
 | 10 | Admin dashboard (separate caption/audio readiness + loud warnings) + first-boot setup wizard + admin auth (§8) | `internal/web`, `internal/readiness` |
 | 11 | Four deployment profiles + Loaner overlay + systemd units (§12, §3.5, §9.4) | `internal/deploy`, `deploy/` |
 | 12 | Three-process integration + cross-cutting invariant tests + this handoff | `cmd/*`, `internal/invariants` |
+| 13 | Caption path made correct: timeline-driven reel window, RPL keyed by timeline SEGMENT, reel-level durations, `<StartTime>`/EntryPoint cue origin, output-mode suppression, bounded fetch with a lease-clamped timeout, content purge at reel + show boundaries (§5.2–§5.5) | `internal/caption/*` |
+| 14 | Audio made honest: stereo mappings qualify (the pipeline hard-coded 1 channel), sustained-silence hysteresis, device enumeration with stable by-id/by-path identity, dead-device reporting, no fabricated latency (§6.1–§6.6) | `internal/audio/*` |
+| 15 | Security posture MEASURED, not asserted: the loaded nftables ruleset is read, route/DNS-leak and allowlist-scope introspection, profile-aware SSH, multi-IP allowlist, debug-capture controls (§9.1, §9.3, §9.4) | `internal/security/*` |
+| 16 | Backend wiring: caption warnings reach the dashboard, D11 client caps enforced, firewall applied+verified through the privileged helper, per-process liveness, §10.5/§10.8 written from checks that actually ran (§3.5, §8.3, §10.8) | `cmd/*`, `internal/readiness` |
+| 17 | Patron surface (§7): the three routes differ, HI/VI-N picker + volume + the §6.7 "add a little buffer" control, per-show sessions and join codes (§10.4), browser-language matching, reachable SSE fallback, show-ended state | `internal/web` |
+| 18 | §6.4 audio calibration engine: feasibility, verdict, plain-language summary, concrete tier-aware fixes, saved auditorium profile | `internal/audio/calibration` |
+| 19 | §11.6 soak/reliability layer: retention must be FLAT across many shows | `internal/soak` |
 
 ## Invariants (asserted in CI — `internal/invariants`)
 
@@ -59,6 +83,30 @@ No caption/audio persistence (config has no content columns; units use tmpfs +
 forward-accepts; three-process privilege separation (only firewall is root; core
 *Wants* media); independent caption/audio readiness; no-silent-degradation (a
 failed feed raises a critical warning); nothing sensitive in logs (redaction).
+
+## Known remaining work (software, not hardware-gated)
+
+Recorded honestly rather than closed off. Fullest detail is in JOURNAL.md and in
+the audit lanes' own reports.
+
+- **Admin UI has not caught up with the backend.** The dashboard renders the
+  original rows; the facts added since (process liveness, client counts vs the
+  cap, `firewall_introspected`, connected-vs-pinned server identity, the §10.8
+  record) are in `/api/admin/status` but not on the page. The §6.4 calibration
+  ENGINE exists with no admin screen driving it, and the §10.4 join code has no
+  QR bitmap rendered for it.
+- **§8.5 screen-name guard.** The pinned server FINGERPRINT is checked;
+  `expected_screen_name` still has no guard.
+- **Support mode (§9.4)** — off by default, outbound-only, time-limited,
+  audited — is still only a config key.
+- **Signed offline updates + A/B rollback (§9.4)** are not built.
+- **§11.5 pre-show QA checklist** is not codified as a staff-facing procedure.
+- **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
+  still runs the self-advancing demo, because the real transport is B1-gated.
+- **Patron audio availability does not distinguish synthetic from real.** With
+  no hardware the media helper reports HI/VI-N as available; nothing can be
+  started today (`playback_available:false`), but the distinction should be
+  explicit before a real device is ever attached.
 
 ## What is NOT done (hardware/external-gated — see BLOCKERS.md)
 
@@ -76,3 +124,10 @@ caption path is validated against the simulator scenario suite instead.
 - Read `buildplan.md` sections on demand; do not rely on memory for protocol detail.
 - DECISIONS.md records every OPEN-item default (configurable); BLOCKERS.md records
   what hardware/artifact clears each gate.
+- **Do not trust a "done" claim without the test that fails without it.** Two
+  fabrications were caught by adversarial review, not by the test suite: a
+  synthetic tone reported under the booth's real hardware identity and persisted
+  as §10.5 `last_qualification`, and a §10.8 readiness stamp written by pressing
+  Complete rather than by a check that ran. Both looked green.
+- The three processes are named longer than 15 characters, so `pkill -x
+  captionbridge-core` silently matches nothing. Kill them by PID.

@@ -144,3 +144,86 @@ not permitted", i.e. loud rather than green (B5); §10.8 records a code-only
 failure reason from a pass that really ran. The firewall APPLY path was skipped
 on this run — the store has no interfaces or allowlist — which is the documented
 "awaiting setup" branch, not a confirmation that apply works end to end.
+
+## Audit-driven correctness pass (picking the project back up)
+
+The previous entry closed with "all in-scope backlog done." That claim did not
+survive contact with the spec. A section-by-section audit of `buildplan.md`
+against the shipped code — every section, with an adversarial verifier trying to
+refute each finding by locating the code that already implemented it — confirmed
+**78 gaps**. The verifiers did not merely read; several REPRODUCED the failure by
+running the code. Two were showstoppers in the heart of the product:
+
+- `loadReels(0)` was hard-coded, so the fetch-ahead window never followed the
+  timeline: captions went blank after reel 1, and a mid-show reconnect fetched
+  reels the show had already played.
+- RPLs were "latest wins" rather than keyed by timeline segment, so a second
+  `Set RPL Location` made the FEATURE's captions render during the trailer.
+
+Neither was visible in the 17-scenario suite, because every existing scenario
+sent exactly one RPL and one reel's worth of timeline.
+
+**How the work was run.** Four disjoint package lanes in isolated git worktrees,
+each followed by an adversarial review-and-repair pass whose job was to disbelieve
+the fixer. That structure paid for itself immediately: the repair pass on the
+caption lane found that the fix for "periodic status ignores its timeline state"
+had introduced a live silent-wrong-content bug — a status carrying only
+"playing" with no position re-anchored the show at 0, jumping every timing engine
+to the head mid-show. It reproduced it (timeline 20500 → 0, caption "Late" → "")
+before fixing it. Servers push play state more often than position, so that
+would have been a field failure.
+
+Then a second wave wired the new capability into the running processes, because
+all four lanes independently reported the same thing: their work had no
+production caller. Its review pass caught two more:
+
+- **A fabrication.** The media helper gated its B3/B4 hardware refusal on the
+  `--synthetic` FLAG rather than on the profile's device id, so with the flag at
+  its default — what the systemd unit actually runs — a stored `input_device_id`
+  produced a synthetic tone reported AS that device, and core persisted the
+  resulting verdict as §10.5 `last_qualification`. A measurement of hardware
+  nothing had opened. A test had actively locked the behavior in.
+- **A warning nobody could ever see.** Caption content warnings were raised
+  during the window load (which happens while handling Set RPL, before the first
+  Update Timeline), so they were filed under the previous playout and cleared by
+  the very next observation. Clearing is now a measurement, not an inference.
+
+**Fixed directly, in packages no lane owned:**
+
+- The privileged helper's loopback socket was unreachable as deployed: the
+  firewall runs as root, core as `captionbridge`, and `ipc.Listen` created an
+  owner-only 0600 socket — so core's dial always got EACCES and the dashboard
+  would have shown a permanent "Firewall INACTIVE". Privilege separation
+  silently disabling the security surface it exists to prove. Socket ownership is
+  now explicit, with an SO_PEERCRED admission policy that fails closed.
+- Setup mode never closed. `requireAdmin` opened the ENTIRE admin mux whenever no
+  credential existed, with no reference to the window, so an appliance that
+  booted and was never finished served `/admin` and `/api/admin/status`
+  unauthenticated forever (§8.1 step 14).
+- Two fail-open defaults: an un-provisioned appliance came up as *Lab*, the most
+  permissive profile, and `Production()` returned false for an unrecognized
+  profile name, which made `validateBindSeparation` skip the §8.4 check entirely.
+- Setup completion stamped §10.8's `LastReadinessCheckOK` without running any
+  check. It now gates on the readiness the supervisor measured, and leaves the
+  stamp to whoever actually ran a pass.
+
+**Built new:** the §6.4 calibration engine (verdict, plain-language summary,
+concrete tier-aware fixes) and the §11.6 soak layer. Writing the calibration
+engine produced a bug of exactly the kind the audit kept finding: comparing the
+estimated noise floor to a threshold directly meant a QUIET TEST TONE — precisely
+what §6.4 step 4 asks the installer to play, and which has no quiet windows for
+the percentile estimator to see — was blamed on background noise and told every
+such installer to fit a ground-loop isolator. It now requires a real
+dynamic-range gap before attributing a floor to noise.
+
+The soak's first two "leaks" were the harness, not the appliance: an accumulating
+fixture map and unbounded per-locator fetch counters. Both were fixed rather than
+tolerated — a soak that reports its own bookkeeping as a product leak is worse
+than no soak. With them gone: 1500 show cycles, heap 399 KiB → 473 KiB,
+goroutines flat, 1500/1500 verified content purges.
+
+**Where it landed:** 31 packages, 374 tests, ~82% coverage, 30 ACSP scenarios,
+green under `-race -count=2`, three processes verified running end to end.
+Remaining software work is listed in STATUS.md under "Known remaining work" —
+chiefly that the admin UI has not caught up with the backend facts now available
+to it, and the §6.4 wizard has an engine but no screen.
