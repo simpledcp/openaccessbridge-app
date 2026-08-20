@@ -20,6 +20,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
 	"github.com/simpledcp/captionbridge/internal/caption/resolver"
 	"github.com/simpledcp/captionbridge/internal/config"
+	"github.com/simpledcp/captionbridge/internal/deploy"
 	"github.com/simpledcp/captionbridge/internal/ipc"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
@@ -54,7 +55,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
-	profile := activeProfile(store)
+	profile := activeProfile(store, log)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -277,11 +278,25 @@ func preferredLanguages(store *config.SQLiteStore) []string {
 	return nil
 }
 
-func activeProfile(store *config.SQLiteStore) model.FirewallProfile {
-	if v, ok, _ := store.GetSetting(config.SettingActiveProfile); ok && v != "" {
-		return model.FirewallProfile(v)
+// activeProfile reads the configured deployment posture. An un-provisioned or
+// unrecognized value resolves to the safe default (Booth Diagnostic, D13) rather
+// than Lab — a fresh appliance must not come up in the most permissive posture
+// of the four (§9.2, §12.2).
+func activeProfile(store *config.SQLiteStore, log *logging.Logger) model.FirewallProfile {
+	v, ok, _ := store.GetSetting(config.SettingActiveProfile)
+	if !ok || v == "" {
+		return deploy.DefaultProfile
 	}
-	return model.ProfileLab
+	p, known := deploy.Resolve(model.FirewallProfile(v))
+	if !known {
+		// A stored profile we do not recognize is a misconfiguration, not a
+		// reason to guess: fall back to the safe default and say so loudly
+		// (guardrail #7 — never degrade silently).
+		log.Warn(logging.EvStateTransition,
+			logging.Field("configured_profile", "unrecognized"),
+			logging.Field("resolved_profile", string(p.Name)))
+	}
+	return p.Name
 }
 
 func settingOr(store *config.SQLiteStore, key, def string) string {

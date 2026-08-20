@@ -60,17 +60,19 @@ func Builtin() map[model.FirewallProfile]Profile {
 			RequireClearErrorStates: false,
 		},
 		model.ProfileBoothDiagnostic: {
-			Name:                    model.ProfileBoothDiagnostic,
-			Title:                   "Booth Diagnostic",
-			Description:             "For booth techs/festival staff. Allowlisted server IPs; admin on the configured admin subnet/setup net; no forwarding; SSH disabled by default. The lowest-risk first shippable product (no access-equivalence claim).",
-			TheaterAllowlistOnly:    true,
-			AdminHiddenFromPatron:   false, // admin allowed on configured admin subnet/setup net
-			SSHDisabled:             true,
-			PerShowToken:            false,
-			PurgeAtShowEnd:          true,
-			NoInternetRebroadcast:   true,
-			MaxConcurrentClients:    25,
-			WarningBanner:           false,
+			Name:                  model.ProfileBoothDiagnostic,
+			Title:                 "Booth Diagnostic",
+			Description:           "For booth techs/festival staff. Allowlisted server IPs; admin on the configured admin subnet/setup net; no forwarding; SSH disabled by default. The lowest-risk first shippable product (no access-equivalence claim).",
+			TheaterAllowlistOnly:  true,
+			AdminHiddenFromPatron: false, // admin allowed on configured admin subnet/setup net
+			SSHDisabled:           true,
+			PerShowToken:          false,
+			PurgeAtShowEnd:        true,
+			NoInternetRebroadcast: true,
+			MaxConcurrentClients:  25,
+			// §8.4: admin may be reachable from the patron side ONLY in Lab and
+			// Booth Diagnostic, and only behind a prominent warning banner.
+			WarningBanner:           true,
 			AllowPacketCapture:      false,
 			AllowLocalSSH:           false,
 			RequireClearErrorStates: true,
@@ -117,6 +119,26 @@ func Builtin() map[model.FirewallProfile]Profile {
 func Get(name model.FirewallProfile) (Profile, bool) {
 	p, ok := Builtin()[name]
 	return p, ok
+}
+
+// DefaultProfile is the posture an un-provisioned appliance runs under before
+// setup assigns one: Booth Diagnostic, the lowest-risk shipping profile and the
+// first-shippable target (DECISIONS D13, §12.2/§16). It is deliberately NOT Lab
+// — Lab permits admin on the patron network, local SSH, and packet capture, so
+// defaulting to it would give a fresh or misconfigured appliance the weakest
+// posture of the four (§9.2).
+const DefaultProfile = model.ProfileBoothDiagnostic
+
+// Resolve maps a stored profile name to a known profile, falling back to
+// DefaultProfile for an empty or unrecognized value. An unknown name must never
+// resolve to a more permissive posture than the operator asked for, so the
+// fallback is the safe default rather than the stored string taken on trust.
+func Resolve(name model.FirewallProfile) (Profile, bool) {
+	if p, ok := Get(name); ok {
+		return p, true
+	}
+	p, _ := Get(DefaultProfile)
+	return p, false
 }
 
 // LoanerOverlay is the Loaner Device provisioning posture (§12.5): a device-

@@ -66,3 +66,57 @@ func TestLoanerOverlay(t *testing.T) {
 		t.Errorf("disabled overlay should be a no-op")
 	}
 }
+
+// An un-provisioned or unrecognized profile must resolve to the safe default
+// (Booth Diagnostic, D13 / §12.2) — never to Lab, which is the most permissive
+// of the four and would give a fresh appliance admin-on-patron-net, local SSH,
+// and packet capture (§9.2).
+func TestResolveFallsBackToSafeDefault(t *testing.T) {
+	if DefaultProfile == model.ProfileLab {
+		t.Fatal("the default posture must not be Lab")
+	}
+	if DefaultProfile != model.ProfileBoothDiagnostic {
+		t.Errorf("DefaultProfile = %q, want booth_diagnostic (D13)", DefaultProfile)
+	}
+
+	for _, name := range []model.FirewallProfile{"", "lab_but_typoed", "LAB", "patron facing"} {
+		got, known := Resolve(name)
+		if known {
+			t.Errorf("Resolve(%q) reported the name as known", name)
+		}
+		if got.Name != DefaultProfile {
+			t.Errorf("Resolve(%q) = %q, want the safe default %q", name, got.Name, DefaultProfile)
+		}
+		if !got.AdminHiddenFromPatron && !got.WarningBanner {
+			t.Errorf("Resolve(%q) fell back to a posture that neither hides admin nor warns", name)
+		}
+	}
+
+	// A recognized name still resolves to itself, including Lab when it is the
+	// operator's explicit choice.
+	for _, name := range []model.FirewallProfile{
+		model.ProfileLab, model.ProfileBoothDiagnostic,
+		model.ProfilePatronFacing, model.ProfileLowCostReplacement,
+	} {
+		got, known := Resolve(name)
+		if !known || got.Name != name {
+			t.Errorf("Resolve(%q) = (%q, %v), want the profile itself", name, got.Name, known)
+		}
+	}
+}
+
+// §8.4: a profile that leaves the admin surface reachable from the patron side
+// must carry the prominent warning banner. The patron network is untrusted BYOD;
+// an un-flagged admin surface on it is exactly the configuration the banner
+// exists to make impossible to miss.
+func TestAdminOnPatronNetAlwaysWarns(t *testing.T) {
+	for name, p := range Builtin() {
+		if !p.AdminHiddenFromPatron && !p.WarningBanner {
+			t.Errorf("profile %q exposes admin to the patron side with no warning banner (§8.4)", name)
+		}
+		// The converse: production profiles must hide admin outright, banner or not.
+		if name.Production() && !p.AdminHiddenFromPatron {
+			t.Errorf("production profile %q must hide admin from the patron network (§8.4)", name)
+		}
+	}
+}
