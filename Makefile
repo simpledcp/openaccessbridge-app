@@ -11,7 +11,7 @@ BIN := bin
 BINARIES := captionbridge-core captionbridge-media captionbridge-firewall acsp-simulator
 LDFLAGS := -X github.com/simpledcp/captionbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
 
-.PHONY: all build test vet race cover sim clean tidy fmt check
+.PHONY: all build test vet race cover sim soak clean tidy fmt check
 
 all: check build
 
@@ -47,6 +47,14 @@ tidy:
 # check is what CI gates on: gofmt + vet + the full test suite (incl. the ACSP
 # simulator scenario suite, the caption-path regression backbone — §11.1).
 check: fmt-check vet test
+
+# Long soak (§11.6): many show cycles with reconnects, language switches, and
+# output-mode toggles, asserting that retention is FLAT and that caption content
+# purges at every show boundary. `make check` already runs the short soak as part
+# of the suite; this is the pre-pilot run.
+SOAK_CYCLES ?= 2000
+soak:
+	CAPTIONBRIDGE_SOAK_CYCLES=$(SOAK_CYCLES) $(GO) test ./internal/soak/ -run Soak -v -timeout 30m
 
 # Run the ACSP simulator standalone (dev convenience).
 sim: acsp-simulator
