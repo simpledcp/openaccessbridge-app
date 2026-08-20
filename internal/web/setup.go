@@ -25,6 +25,8 @@ type SetupManager struct {
 	mu       sync.Mutex
 	openedAt time.Time
 	window   time.Duration
+	closed   bool // latched once the window elapses or setup completes
+	now      func() time.Time
 }
 
 // NewSetupManager builds a SetupManager. The setup window starts now.
@@ -35,7 +37,54 @@ func NewSetupManager(store config.Store, log *logging.Logger, profile model.Fire
 	if window <= 0 {
 		window = DefaultSetupWindow
 	}
-	return &SetupManager{store: store, log: log, profile: profile, openedAt: time.Now(), window: window}
+	return &SetupManager{
+		store: store, log: log, profile: profile,
+		openedAt: time.Now(), window: window, now: time.Now,
+	}
+}
+
+// SetClock injects a clock for tests. The setup window is a security boundary,
+// so it must be testable without sleeping for the real 30 minutes.
+func (s *SetupManager) SetClock(now func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.now = now
+	s.openedAt = now()
+}
+
+// Open reports whether setup mode is still accepting an unauthenticated
+// operator, and latches it closed the first time it is not (§8.1 step 14: exit
+// setup mode automatically on completion OR timeout — no lingering open setup
+// network). Once closed it stays closed for the life of the process: reopening
+// requires a restart, which on the appliance means physical or console access.
+func (s *SetupManager) Open() bool {
+	complete := false
+	if v, _, _ := s.store.GetSetting(config.SettingSetupComplete); v == "true" {
+		complete = true
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	reason := ""
+	switch {
+	case complete:
+		reason = "completed"
+	case s.now().Sub(s.openedAt) >= s.window:
+		reason = "timeout"
+	}
+	if reason == "" {
+		return true
+	}
+	s.closed = true
+	// Log the close exactly once — it is the moment the admin surface stops
+	// being reachable without credentials.
+	s.log.Info(logging.EvStateTransition,
+		logging.Field("phase", "setup_mode_closed"),
+		logging.Field("reason", reason))
+	return false
 }
 
 // SetupState is the wizard's progress, rendered by the setup page.
@@ -76,11 +125,12 @@ func (s *SetupManager) State() SetupState {
 		st.ProfileSelected = true
 	}
 
-	s.mu.Lock()
-	remaining := s.window - time.Since(s.openedAt)
-	s.mu.Unlock()
-	if !st.Complete && remaining > 0 {
-		st.SetupModeActive = true
+	// Ask Open() rather than recomputing the deadline, so the countdown the page
+	// renders and the boundary requireAdmin enforces can never disagree.
+	if st.SetupModeActive = s.Open(); st.SetupModeActive {
+		s.mu.Lock()
+		remaining := s.window - s.now().Sub(s.openedAt)
+		s.mu.Unlock()
 		st.ExpiresInSec = int(remaining.Seconds())
 	}
 	return st
@@ -211,8 +261,12 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 }
 
 // requireAdmin authenticates admin requests (§8.4). On first boot (no credential
-// yet) it permits access so the operator can create one; once a credential
-// exists, HTTP Basic Auth against the stored PBKDF2 hash is required.
+// yet) it permits access so the operator can create one — but ONLY while setup
+// mode is open. Past the window the surface fails CLOSED: an appliance that
+// booted and was never finished must not go on serving the admin dashboard and
+// its diagnostics (server IPs, interface assignment, firewall state) to anyone
+// who can reach the port, which in the Lab and Booth Diagnostic profiles can be
+// the patron network itself (§8.1 step 14, §8.4).
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Store == nil {
@@ -221,7 +275,14 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 		}
 		hasCred, _ := s.deps.Store.HasAnyAdminCredential()
 		if !hasCred {
-			next(w, r) // first boot: allow until a credential is created
+			if s.setup == nil || s.setup.Open() {
+				next(w, r) // first boot: allow until a credential is created
+				return
+			}
+			// No credential and setup is over: there is nothing to authenticate
+			// against, so say so plainly instead of pretending a login exists.
+			http.Error(w, "setup mode has closed and no administrator credential was created — "+
+				"restart the appliance to reopen setup", http.StatusServiceUnavailable)
 			return
 		}
 		user, pass, ok := r.BasicAuth()

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
 	"github.com/simpledcp/captionbridge/internal/config"
@@ -129,4 +130,81 @@ func TestAdminAuthRequiredAfterCredential(t *testing.T) {
 		t.Fatalf("expected 200 with valid auth, got %d", r.StatusCode)
 	}
 	r.Body.Close()
+}
+
+// §8.1 step 14: setup mode exits automatically on timeout. Before this was
+// enforced, an appliance that booted and was never finished served the whole
+// admin surface — dashboard and diagnostics JSON — unauthenticated forever,
+// which in the Lab/Booth profiles can mean on the patron network (§8.4).
+func TestSetupModeClosesOnTimeout(t *testing.T) {
+	s, _ := newSetupServer(t)
+	clock := time.Now()
+	s.setup.SetClock(func() time.Time { return clock })
+	ts := httptest.NewServer(s.AdminHandler())
+	defer ts.Close()
+
+	get := func(path string) int {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Inside the window, with no credential yet, the operator can reach setup.
+	if code := get("/admin/setup"); code != http.StatusOK {
+		t.Fatalf("during setup window: /admin/setup = %d, want 200", code)
+	}
+	if !s.setup.State().SetupModeActive {
+		t.Fatal("setup should report active inside the window")
+	}
+
+	// Past the window, an unauthenticated caller gets nothing — not the setup
+	// page, and above all not the dashboard or its diagnostics.
+	clock = clock.Add(DefaultSetupWindow + time.Second)
+	for _, path := range []string{"/admin", "/admin/setup", "/api/admin/status", "/api/admin/setup/state"} {
+		if code := get(path); code != http.StatusServiceUnavailable {
+			t.Errorf("after the setup window: %s = %d, want 503 (fail closed)", path, code)
+		}
+	}
+	if s.setup.State().SetupModeActive {
+		t.Error("setup should not report active past the window")
+	}
+
+	// The close is latched: winding the clock back must not reopen it.
+	clock = clock.Add(-2 * DefaultSetupWindow)
+	if s.setup.Open() {
+		t.Error("setup reopened after the window closed; it must require a restart")
+	}
+	if code := get("/admin"); code != http.StatusServiceUnavailable {
+		t.Errorf("/admin = %d after clock rewind, want 503", code)
+	}
+}
+
+// Completing setup also closes the window (§8.1 step 14, the other half), so a
+// credential-less caller cannot slip in afterwards.
+func TestSetupModeClosesOnCompletion(t *testing.T) {
+	s, store := newSetupServer(t)
+	ts := httptest.NewServer(s.AdminHandler())
+	defer ts.Close()
+
+	if !s.setup.Open() {
+		t.Fatal("setup should start open")
+	}
+	if err := store.PutSetting(config.SettingSetupComplete, "true"); err != nil {
+		t.Fatalf("PutSetting: %v", err)
+	}
+	if s.setup.Open() {
+		t.Error("setup must close once complete")
+	}
+
+	resp, err := http.Get(ts.URL + "/api/admin/status")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("unauthenticated status after completion = %d, want 503", resp.StatusCode)
+	}
 }
