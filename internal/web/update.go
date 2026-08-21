@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/simpledcp/captionbridge/internal/update"
+	"github.com/simpledcp/openaccessbridge/internal/update"
 )
 
 func (s *Server) handleAdminUpdate(w http.ResponseWriter, r *http.Request) {

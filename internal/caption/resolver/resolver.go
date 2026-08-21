@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Resolver fetches the raw bytes for a locator. The bytes may be plain timed-text

@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/audio/pipeline"
-	"github.com/simpledcp/captionbridge/internal/audio/webrtcpeer"
-	"github.com/simpledcp/captionbridge/internal/caption/acsp"
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/readiness"
-	"github.com/simpledcp/captionbridge/internal/security/firewall"
-	"github.com/simpledcp/captionbridge/internal/security/verify"
+	"github.com/simpledcp/openaccessbridge/internal/audio/pipeline"
+	"github.com/simpledcp/openaccessbridge/internal/audio/webrtcpeer"
+	"github.com/simpledcp/openaccessbridge/internal/caption/acsp"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/readiness"
+	"github.com/simpledcp/openaccessbridge/internal/security/firewall"
+	"github.com/simpledcp/openaccessbridge/internal/security/verify"
 )
 
 // The invariants in this file are about WIRING: a capability that exists but has
@@ -28,8 +28,8 @@ import (
 func TestInvariant_FirewallPostureIsIntrospectedInBothBinaries(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range []string{
-		filepath.Join("cmd", "captionbridge-core", "firewall.go"),
-		filepath.Join("cmd", "captionbridge-firewall", "main.go"),
+		filepath.Join("cmd", "openaccessbridge-core", "firewall.go"),
+		filepath.Join("cmd", "openaccessbridge-firewall", "main.go"),
 	} {
 		src := readFile(t, filepath.Join(root, rel))
 		if !strings.Contains(src, "verify.NFTRulesetReader()") {
@@ -46,7 +46,7 @@ func TestInvariant_FirewallPostureIsIntrospectedInBothBinaries(t *testing.T) {
 // reach the fan-out. The mechanism existing in internal/caption/fanout is not the
 // same as it being in force.
 func TestInvariant_ClientCapIsWiredIntoTheFanout(t *testing.T) {
-	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "openaccessbridge-core", "main.go"))
 	if !strings.Contains(src, "MaxClients: deployed.MaxConcurrentClients") {
 		t.Errorf("the deployment profile's client cap must reach fanout.NewHub (D11, §12)")
 	}
@@ -115,17 +115,17 @@ func TestInvariant_ProcessLivenessIsReported(t *testing.T) {
 
 // TestInvariant_PatronScopeReachesTheMediaPeer: the ICE gathering scope is only
 // worth having if core actually pushes it. internal/audio/webrtcpeer can confine
-// gathering and cmd/captionbridge-media can apply what it is told, but neither
-// knows which interface is the patron's — that lives in the config store, which
-// only core reads. Without the push, an appliance ships with the mechanism
-// present, the dashboard row rendering, and every patron still being offered the
-// venue's docker bridges (§9.1, §6.7, DECISIONS D28).
+// gathering and cmd/openaccessbridge-media can apply what it is told, but
+// neither knows which interface is the patron's — that lives in the config
+// store, which only core reads. Without the push, an appliance ships with the
+// mechanism present, the dashboard row rendering, and every patron still being
+// offered the venue's docker bridges (§9.1, §6.7, DECISIONS D28).
 //
 // The two literals below are LOAD-BEARING: they are what makes this assertion
 // mean anything, so a refactor that renames them must update this test rather
 // than delete it.
 func TestInvariant_PatronScopeReachesTheMediaPeer(t *testing.T) {
-	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "status.go"))
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "openaccessbridge-core", "status.go"))
 	if !strings.Contains(src, "s.media.applyPatronScope(client)") {
 		t.Errorf("core never pushes the configured client interface to the media peer: " +
 			"ICE gathering stays unconfined however complete internal/audio/webrtcpeer is (D28)")
@@ -193,7 +193,7 @@ func TestInvariant_TheSupportWindowIsOutboundOnlyAndReachesTheRuleset(t *testing
 	// 1. The window is wired into the ruleset the supervisor derives. A session
 	//    that opens a state variable and no rule permits nothing; one whose rule
 	//    is never removed is a permanent egress hole opened by a support switch.
-	status := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "status.go"))
+	status := readFile(t, filepath.Join(repoRoot(t), "cmd", "openaccessbridge-core", "status.go"))
 	if !strings.Contains(status, "SupportEgress: s.supportEgress()") {
 		t.Errorf("the support window never reaches the firewall config: the session would permit nothing")
 	}
@@ -212,7 +212,7 @@ func TestInvariant_TheSupportWindowIsOutboundOnlyAndReachesTheRuleset(t *testing
 	// 3. The ruleset REPLACES the table. Without the delete, applying appends and
 	//    a closed support window's rule outlives the session that justified it —
 	//    as does every other rule any configuration change was meant to remove.
-	if !strings.Contains(fw, "delete table inet captionbridge") {
+	if !strings.Contains(fw, "delete table inet openaccessbridge") {
 		t.Errorf("the generated ruleset does not clear the table it replaces: old rules would survive")
 	}
 }
@@ -231,7 +231,7 @@ func TestInvariant_TheApplianceCanNeverSignItsOwnUpdates(t *testing.T) {
 		filepath.Join("internal", "update", "bundle.go"),
 		filepath.Join("internal", "update", "service.go"),
 		filepath.Join("internal", "update", "slots.go"),
-		filepath.Join("cmd", "captionbridge-core", "update.go"),
+		filepath.Join("cmd", "openaccessbridge-core", "update.go"),
 	} {
 		src := readFile(t, filepath.Join(root, rel))
 		for _, forbidden := range []string{"ed25519.Sign(", "ed25519.PrivateKey", "ed25519.GenerateKey"} {
@@ -253,7 +253,7 @@ func TestInvariant_TheApplianceCanNeverSignItsOwnUpdates(t *testing.T) {
 // protects nobody. §9.4's bundle path exists so a booth can tell a good stick
 // from a bad one BEFORE a show, which requires it to be reachable.
 func TestInvariant_TheUpdateServiceHasAProductionCaller(t *testing.T) {
-	main := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	main := readFile(t, filepath.Join(repoRoot(t), "cmd", "openaccessbridge-core", "main.go"))
 	if !strings.Contains(main, "Update: newUpdateService(") {
 		t.Error("core never builds an update service: the verifier is unreachable from the operator surface")
 	}
@@ -339,7 +339,7 @@ func TestInvariant_MediaPortsMatchTheFirewallRange(t *testing.T) {
 //
 // The literal is LOAD-BEARING.
 func TestInvariant_BothPinnedIdentityHalvesReachTheGuard(t *testing.T) {
-	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "openaccessbridge-core", "main.go"))
 	for _, half := range []string{
 		"ExpectedFingerprint: aud.ExpectedServerFingerprint",
 		"ExpectedScreenName:  aud.ExpectedScreenName",
@@ -367,14 +367,14 @@ func TestInvariant_DebugCaptureHasADoorAndAnAlert(t *testing.T) {
 	if !strings.Contains(admin, `"/api/admin/debug-capture"`) {
 		t.Error("§9.4's sanctioned capture has no route: the unsanctioned ways are the only ways")
 	}
-	main := readFile(t, filepath.Join(root, "cmd", "captionbridge-core", "main.go"))
+	main := readFile(t, filepath.Join(root, "cmd", "openaccessbridge-core", "main.go"))
 	if !strings.Contains(main, "debugcapture.New(") {
 		t.Error("core builds no capture sink, so the admin route has nothing to reach")
 	}
 	if !strings.Contains(main, "RequireTmpfs: true") {
 		t.Error("the capture sink does not require tmpfs: content could reach the persistent filesystem")
 	}
-	status := readFile(t, filepath.Join(root, "cmd", "captionbridge-core", "status.go"))
+	status := readFile(t, filepath.Join(root, "cmd", "openaccessbridge-core", "status.go"))
 	if !strings.Contains(status, "s.debugCaptureWarnings()") {
 		t.Error("§8.3's capture alert has no consumer, so a running capture cannot be visibly indicated")
 	}
@@ -391,7 +391,7 @@ func TestInvariant_DebugCaptureHasADoorAndAnAlert(t *testing.T) {
 //
 // The literal is LOAD-BEARING.
 func TestInvariant_TheCueVisibilityEventHasAProducer(t *testing.T) {
-	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "openaccessbridge-core", "main.go"))
 	if !strings.Contains(src, "OnCueVisibility: cueVisibility.Observe") {
 		t.Error("§9.4's caption.cue.visible_no_text has no producer: a 'captions look wrong' " +
 			"report can only be investigated by capturing the text")
@@ -402,7 +402,7 @@ func TestInvariant_TheCueVisibilityEventHasAProducer(t *testing.T) {
 // requirements on the Low-Cost Replacement profile — mandatory calibration,
 // mandatory signal health, a Phase 9 review before it ships — and they were
 // FLAGS ON THE PROFILE THAT NOTHING READ. An operator could select the profile
-// for venues running CaptionBridge in lieu of a professional receiver system
+// for venues running OpenAccessBridge in lieu of a professional receiver system
 // with none of them met.
 //
 // This asserts the derivation exists, is wired, and that the Phase 9 record has
@@ -414,7 +414,7 @@ func TestInvariant_TheProfileRequirementsAreEnforced(t *testing.T) {
 	if !strings.Contains(rd, "profileRequirementWarnings(in.Deploy, in.Audio)") {
 		t.Error("§12.4's profile requirements are not evaluated: they are decoration on the profile")
 	}
-	status := readFile(t, filepath.Join(root, "cmd", "captionbridge-core", "status.go"))
+	status := readFile(t, filepath.Join(root, "cmd", "openaccessbridge-core", "status.go"))
 	for _, field := range []string{"RequireCalibration:", "RequiresPhase9Review:", "CalibrationRecorded:"} {
 		if !strings.Contains(status, field) {
 			t.Errorf("core does not supply %s, so the requirement cannot be evaluated", field)

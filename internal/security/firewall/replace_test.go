@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func replaceCfg() Config {
@@ -35,13 +35,13 @@ func TestTheRulesetReplacesTheTableRatherThanAppendingToIt(t *testing.T) {
 	}
 	// The bare table line must come first so the delete cannot fail on a fresh
 	// boot, and the delete must precede the definition.
-	if strings.TrimSpace(lines[0]) != "table inet captionbridge" {
+	if strings.TrimSpace(lines[0]) != "table inet openaccessbridge" {
 		t.Fatalf("first line is %q; it must create the table so the delete is safe", lines[0])
 	}
-	if strings.TrimSpace(lines[1]) != "delete table inet captionbridge" {
+	if strings.TrimSpace(lines[1]) != "delete table inet openaccessbridge" {
 		t.Fatalf("second line is %q; without a delete, applying appends to whatever is loaded", lines[1])
 	}
-	if !strings.Contains(lines[2], "table inet captionbridge {") {
+	if !strings.Contains(lines[2], "table inet openaccessbridge {") {
 		t.Fatalf("third line is %q; the definition must follow the delete", lines[2])
 	}
 	// Exactly one delete: a second one would fail the transaction.
@@ -97,7 +97,7 @@ func TestSwitchingToAStricterProfileDoesNotLeaveTheOldRuleLive(t *testing.T) {
 	}
 	// And applying the strict script must remove what the loose one installed,
 	// which is exactly what the delete line is for.
-	if !strings.Contains(strictScript, "delete table inet captionbridge") {
+	if !strings.Contains(strictScript, "delete table inet openaccessbridge") {
 		t.Fatal("the stricter ruleset does not clear the table it is replacing: the admin rule would survive")
 	}
 }

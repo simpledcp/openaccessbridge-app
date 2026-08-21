@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestPipelineSilenceCountsRealAudioTime pins the §6.3 duration rule to the

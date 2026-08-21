@@ -1,6 +1,6 @@
-# CaptionBridge — autonomous build kickoff
+# OpenAccessBridge — autonomous build kickoff
 
-You are building **CaptionBridge** from the specification in `./buildplan.md`. Read that
+You are building **OpenAccessBridge** from the specification in `./buildplan.md`. Read that
 file in full before doing anything; it is the authoritative source for the architecture,
 the three-process model, the protocol/state-machine design, the data models, the security
 invariants, the phased plan, and the deployment profiles. Re-read individual sections as
@@ -13,8 +13,8 @@ leave a clean handoff for everything hardware-gated. Work continuously; do NOT s
 me questions — make reasonable decisions, record them, and keep going.
 
 ## In scope (build and test these now), following the plan's ordering
-1. **Foundation:** repo scaffold; the three supervised processes (`captionbridge-core`,
-   `captionbridge-media`, `captionbridge-firewall`) with loopback IPC per §3.5; build
+1. **Foundation:** repo scaffold; the three supervised processes (`openaccessbridge-core`,
+   `openaccessbridge-media`, `openaccessbridge-firewall`) with loopback IPC per §3.5; build
    system; CI; the SQLite config store and versioning record (§10, §10.8); structured
    logging with the observability event taxonomy and the *no caption text / audio / SDP /
    client-IDs in logs* rule (§9.4); the data models (§10).
@@ -33,7 +33,7 @@ me questions — make reasonable decisions, record them, and keep going.
    (public ISDCF notes), clearly marked **PROVISIONAL** with a seam to swap in the real
    Phase 0A wire contract later.
 3. **Audio pipeline code (Phases 5–6):** capture → four-state qualifier → channel mapper →
-   Opus encode → WebRTC, as `captionbridge-media`. Unit-test the qualifier classification
+   Opus encode → WebRTC, as `openaccessbridge-media`. Unit-test the qualifier classification
    and the mapper against synthetic/recorded fixtures; add a synthetic-tone source so the
    pipeline smoke-tests end-to-end locally. (Real-device latency, real cinema outputs, and
    real phones are out of scope — see below.)

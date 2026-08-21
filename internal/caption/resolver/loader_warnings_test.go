@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/rpl"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/rpl"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // ttDocStartTime builds a doc whose <StartTime> origin falls after every cue, so

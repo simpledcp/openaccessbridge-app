@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/caption/acsp"
+	"github.com/simpledcp/openaccessbridge/internal/caption/acsp"
 )
 
 // CueSpec is a synthetic cue (reel-relative ms).

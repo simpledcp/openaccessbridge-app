@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/update"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/update"
 )
 
 // stubUpdate stands in for internal/update so this package's tests are about the
@@ -46,7 +46,7 @@ func updateServer(t *testing.T, svc UpdateService) *Server {
 func TestTheSurfaceSeparatesVerifiedFromInstallable(t *testing.T) {
 	stub := &stubUpdate{
 		report: update.Report{TrustedKeys: 1, ABSupported: false, ABNote: "no A/B slots (BLOCKERS B8)"},
-		result: update.VerifyResult{Name: "cb.cbupd", OK: true, KeyID: "vendor", Installable: false},
+		result: update.VerifyResult{Name: "cb.oabupd", OK: true, KeyID: "vendor", Installable: false},
 	}
 	s := updateServer(t, stub)
 
@@ -64,7 +64,7 @@ func TestTheSurfaceSeparatesVerifiedFromInstallable(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/update/verify", strings.NewReader(`{"name":"cb.cbupd"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/update/verify", strings.NewReader(`{"name":"cb.oabupd"}`))
 	s.AdminHandler().ServeHTTP(rec, req)
 	var res update.VerifyResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
@@ -83,12 +83,12 @@ func TestTheSurfaceSeparatesVerifiedFromInstallable(t *testing.T) {
 // an error status.
 func TestARefusedBundleIsAnAnswerNotAnError(t *testing.T) {
 	stub := &stubUpdate{result: update.VerifyResult{
-		Name: "hostile.cbupd", OK: false, Reason: "signed by a key this appliance does not trust",
+		Name: "hostile.oabupd", OK: false, Reason: "signed by a key this appliance does not trust",
 	}}
 	s := updateServer(t, stub)
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/admin/update/verify",
-		strings.NewReader(`{"name":"hostile.cbupd"}`)))
+		strings.NewReader(`{"name":"hostile.oabupd"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a refused bundle returned %d; the verification itself succeeded", rec.Code)
 	}

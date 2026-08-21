@@ -20,9 +20,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/config"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/qr"
+	"github.com/simpledcp/openaccessbridge/internal/config"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/qr"
 )
 
 // WiFiResponse describes the configured patron network for the operator.

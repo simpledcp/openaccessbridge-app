@@ -1,7 +1,7 @@
 package ipc
 
 // Additive message types for the §6.4 audio calibration wizard. Core owns the
-// screen; captionbridge-media owns every device, so the wizard's device list and
+// screen; openaccessbridge-media owns every device, so the wizard's device list and
 // its live input meter both have to cross this loopback seam (§3.5).
 //
 // The payload shapes live in internal/audio/calibration (calibration.Request,

@@ -18,12 +18,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/config"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/logging/debugcapture"
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/security/support"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/config"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/logging/debugcapture"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/security/support"
 )
 
 // LangOption is a selectable caption language for the patron UI.
@@ -61,20 +61,21 @@ type Deps struct {
 	// availability model by internal/web/audio.go (§6.6 → §7.2). Nil means no
 	// audio is configured, which the patron page reports honestly.
 	Audio func() []model.AudioStreamState
-	// Signaler relays WebRTC SDP/ICE to captionbridge-media, which owns the peers
-	// and the encoders (§6.7, D20). cmd/captionbridge-core supplies the
+	// Signaler relays WebRTC SDP/ICE to openaccessbridge-media, which owns the
+	// peers and the encoders (§6.7, D20). cmd/openaccessbridge-core supplies the
 	// production one; nil means this build cannot serve audio at all, which the
 	// patron page reports in plain language rather than drawing a dead player.
 	Signaler AudioSignaler
 	// Calibration drives the §6.4 audio calibration wizard: the device list and
-	// the live input meter both come from captionbridge-media, which owns every
+	// the live input meter both come from openaccessbridge-media, which owns every
 	// capture device. Nil builds the loopback driver for MediaSocketDir, so the
 	// wizard works on a default deployment with no wiring; injecting one is how
 	// tests (and any non-default transport) substitute for it.
 	Calibration CalibrationDriver
-	// MediaSocketDir is the loopback socket directory captionbridge-media listens
-	// in (§3.5). Empty uses ipc.DefaultSocketDir(); the core process should pass
-	// the --socket-dir it actually supervises so the two cannot drift apart.
+	// MediaSocketDir is the loopback socket directory openaccessbridge-media
+	// listens in (§3.5). Empty uses ipc.DefaultSocketDir(); the core process
+	// should pass the --socket-dir it actually supervises so the two cannot drift
+	// apart.
 	MediaSocketDir string
 	// SetupWindow is how long first-boot setup mode stays open before auto-expiry
 	// (§8.1 step 14). Zero uses a default.
@@ -228,10 +229,10 @@ func (s *Server) Sessions() *SessionStore { return s.sessions }
 // revoked and live caption/audio connections receive the polite "this show has
 // ended" state instead of dangling (§7.2, §9.4).
 //
-// SEAM: nothing in cmd/captionbridge-core calls this yet. The automatic trigger
-// (ACSP Terminate Lease / end of the final reel) lives in the caption controller,
-// which this lane does not own; the admin endpoint POST /api/admin/session/end is
-// the operator path that exists today.
+// SEAM: nothing in cmd/openaccessbridge-core calls this yet. The automatic
+// trigger (ACSP Terminate Lease / end of the final reel) lives in the caption
+// controller, which this lane does not own; the admin endpoint POST
+// /api/admin/session/end is the operator path that exists today.
 func (s *Server) EndShow() { s.sessions.EndShow() }
 
 // validateBindSeparation enforces §8.4: in production profiles, the admin surface

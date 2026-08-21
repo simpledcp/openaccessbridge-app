@@ -1,7 +1,7 @@
 // Package verify performs install-time and runtime SELF-INTROSPECTION
 // verification of the appliance's network posture (buildplan.md §9.3).
 //
-// It asserts that CaptionBridge behaves as an application-layer bridge and never
+// It asserts that OpenAccessBridge behaves as an application-layer bridge and never
 // an IP-layer device: IPv4 and IPv6 forwarding disabled (globally AND per
 // interface), no bridge netdevs, a default-deny nftables ruleset loaded with no
 // forward-chain accepts, a theater-side reachable scope no wider than the
@@ -28,8 +28,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/deploy"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/deploy"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Paths locates the kernel introspection trees. They are injectable so tests can

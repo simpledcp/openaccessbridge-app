@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
 )
 

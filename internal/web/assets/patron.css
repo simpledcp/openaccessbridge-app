@@ -1,4 +1,4 @@
-/* CaptionBridge patron page — accessibility-first, dark by default, high contrast,
+/* OpenAccessBridge patron page — accessibility-first, dark by default, high contrast,
    large text, comfortable line length, calm for auditorium use (§7.2). */
 :root {
   --fs: 6vmin;            /* adjustable caption font size */

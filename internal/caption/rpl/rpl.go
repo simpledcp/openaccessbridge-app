@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/caption/timedtext"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/timedtext"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // RPL is a parsed Auxiliary Resource Presentation List, keyed (by the caller) by
@@ -77,7 +77,7 @@ func unitsToMS(units int64, er timedtext.EditRate) int64 {
 }
 
 // IsTimedText reports whether the resource is a caption/subtitle timed-text track
-// (the kind CaptionBridge consumes), as opposed to other auxiliary resource types.
+// (the kind OpenAccessBridge consumes), as opposed to other auxiliary resource types.
 func (r Resource) IsTimedText() bool {
 	switch r.Kind {
 	case model.TrackClosedCaption, model.TrackClosedSubtitle, model.TrackMainSubtitle, model.TrackMainCaption:

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/caption/resolver"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/caption/resolver"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // fakeConnector hands out in-process links in place of the Phase 0A TCP codec

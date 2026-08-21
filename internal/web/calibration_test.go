@@ -15,14 +15,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/audio/calibration"
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/config"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/calibration"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/config"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
-// fakeCalDriver stands in for captionbridge-media so the wizard's contract can be
+// fakeCalDriver stands in for openaccessbridge-media so the wizard's contract can be
 // exercised without a media process. It reports exactly what it is told to, which
 // is what lets a test hand the web layer the WORST case (a synthetic measurement
 // wearing a real device's id) and check the layer refuses it anyway.
@@ -759,6 +759,6 @@ func TestMeterStreamStopsPollingWhenTheBrowserDisconnects(t *testing.T) {
 	time.Sleep(4 * meterInterval)
 	if grew := drv.count() - settled; grew != 0 {
 		t.Errorf("the meter kept measuring %d more times after the client disconnected; "+
-			"every reload would leave a goroutine polling captionbridge-media forever", grew)
+			"every reload would leave a goroutine polling openaccessbridge-media forever", grew)
 	}
 }

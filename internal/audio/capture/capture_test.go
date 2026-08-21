@@ -87,7 +87,7 @@ func TestSyntheticToneHealth(t *testing.T) {
 // TestSyntheticToneStartCloseAreRaceFree pins the concurrency contract the
 // pipeline actually relies on: Stream.Run calls Start on its own goroutine while
 // Stream.Stop calls Close from whoever is shutting the appliance down (see
-// cmd/captionbridge-media, which cancels and stops from the signal handler). The
+// cmd/openaccessbridge-media, which cancels and stops from the signal handler). The
 // cancel func is therefore shared state and must be guarded — it previously was
 // not, and `go test -race` reported a write/read race between the two.
 func TestSyntheticToneStartCloseAreRaceFree(t *testing.T) {

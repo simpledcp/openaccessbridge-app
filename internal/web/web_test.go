@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func newTestServer(t *testing.T, profile model.FirewallProfile, hub *fanout.Hub) *Server {

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Connector opens ONE ACSP link and returns the transport for it. Variant A (the
@@ -53,7 +53,7 @@ type SupervisorOptions struct {
 }
 
 // Supervisor keeps the ACSP link up. It owns exactly the behavior the state
-// machine cannot own by itself: opening the connection (§5.1 "CaptionBridge (the
+// machine cannot own by itself: opening the connection (§5.1 "OpenAccessBridge (the
 // ACS) opens the TCP connection"), re-opening it with capped backoff when it drops,
 // and re-running the whole connection sequence after a lease expiry instead of
 // leaving the ACS in a dead state (§5.2 item 6).

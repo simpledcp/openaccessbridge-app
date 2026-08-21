@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // fixture builds a fake /proc/sys/net + /sys/class/net tree under a temp root and

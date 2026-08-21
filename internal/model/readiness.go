@@ -60,8 +60,8 @@ const (
 
 	// WarnCalibrationRequired: this deployment profile makes the §6.4 audio
 	// calibration MANDATORY (§12.4) and no calibration has ever been recorded for
-	// this auditorium. It is the profile for venues running CaptionBridge in lieu
-	// of a professional receiver system, so an uncalibrated input is not a
+	// this auditorium. It is the profile for venues running OpenAccessBridge in
+	// lieu of a professional receiver system, so an uncalibrated input is not a
 	// configuration detail — it is the thing the venue replaced a working system
 	// with.
 	WarnCalibrationRequired = "audio_calibration_required_by_profile"
@@ -192,7 +192,7 @@ type AudioStreamSummary struct {
 	// process generated rather than a real capture device (BLOCKERS B3/B4).
 	//
 	// They are on the summary because §8.2's audio rows are read as "how the
-	// AUDITORIUM's feed measured". captionbridge-media refuses to report a
+	// AUDITORIUM's feed measured". openaccessbridge-media refuses to report a
 	// synthetic tone under a real device's id — that refusal is the fix for this
 	// codebase's first fabrication — but the refusal is worth nothing if the
 	// surface that shows "excellent" drops the identity on the way out. A
@@ -225,16 +225,16 @@ type AudioStreamSummary struct {
 	EncoderState         string `json:"encoder_state,omitempty"`
 }
 
-// SyntheticDevicePrefix marks the stand-in input identities captionbridge-media
-// generates when it has no capture backend for a real device (BLOCKERS B3/B4).
-// That process refuses to report a synthetic tone under a real device's id, so
-// the prefix is the ONLY signal that a green "excellent" describes a generated
-// tone rather than the auditorium.
+// SyntheticDevicePrefix marks the stand-in input identities
+// openaccessbridge-media generates when it has no capture backend for a real
+// device (BLOCKERS B3/B4). That process refuses to report a synthetic tone
+// under a real device's id, so the prefix is the ONLY signal that a green
+// "excellent" describes a generated tone rather than the auditorium.
 //
-// SEAM: captionbridge-media declares the same literal privately. The two must
-// not drift; the constant lives here so every reader derives the fact once, and
-// wiring the media process to this one is a one-line change in a package this
-// lane does not own.
+// SEAM: openaccessbridge-media declares the same literal privately. The two
+// must not drift; the constant lives here so every reader derives the fact
+// once, and wiring the media process to this one is a one-line change in a
+// package this lane does not own.
 const SyntheticDevicePrefix = "synthetic-"
 
 // SyntheticDevice reports whether an input identity is a generated stand-in.
@@ -244,9 +244,9 @@ func SyntheticDevice(deviceID string) bool {
 
 // Process names used for per-process liveness reporting (§3.5).
 const (
-	ProcessCore     = "captionbridge-core"
-	ProcessMedia    = "captionbridge-media"
-	ProcessFirewall = "captionbridge-firewall"
+	ProcessCore     = "openaccessbridge-core"
+	ProcessMedia    = "openaccessbridge-media"
+	ProcessFirewall = "openaccessbridge-firewall"
 )
 
 // ProcessLiveness is one supervised process as core observes it (§3.5: core

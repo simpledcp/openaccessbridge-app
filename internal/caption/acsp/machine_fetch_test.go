@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/caption/resolver"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/caption/resolver"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // hangingFetcher models an unresponsive media block: it never answers, it just

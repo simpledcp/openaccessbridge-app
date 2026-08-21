@@ -2,8 +2,8 @@ package ipc
 
 // The WebRTC signaling relay's payloads (buildplan.md §6.7). §6.7 puts SDP
 // offer/answer and ICE on "the existing local web server's WebSocket — no
-// third-party signaling", which makes captionbridge-core the relay and
-// captionbridge-media the peer. These are the two shapes that cross the loopback
+// third-party signaling", which makes openaccessbridge-core the relay and
+// openaccessbridge-media the peer. These are the two shapes that cross the loopback
 // socket between them (TypeMediaSignal).
 //
 // WHAT MUST NEVER HAPPEN TO THESE FIELDS. SDP and Candidate are opaque bodies;
@@ -11,7 +11,7 @@ package ipc
 // neither process logs them — the relay logs the frame TYPE, the named stream
 // and error classes. They are carried, not observed.
 
-import "github.com/simpledcp/captionbridge/internal/model"
+import "github.com/simpledcp/openaccessbridge/internal/model"
 
 // Signal frame types, matching the vocabulary the patron page already speaks
 // (internal/web/assets/patron.js).

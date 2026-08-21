@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/mapper"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/mapper"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // stereo builds an interleaved two-channel block with independent per-channel

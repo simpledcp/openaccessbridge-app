@@ -8,7 +8,7 @@
  * B2 — and no assertion built on it claims otherwise. The RTCPeerConnection
  * stand-in below simulates the API shape the page drives, never real media: the
  * real peer is proven against a real appliance in
- * cmd/captionbridge-core/audio_e2e_test.go.
+ * cmd/openaccessbridge-core/audio_e2e_test.go.
  */
 
 const path = require("path");

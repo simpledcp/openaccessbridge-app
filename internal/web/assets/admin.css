@@ -1,4 +1,4 @@
-/* CaptionBridge admin styling (§8.2 dashboard, §8.3 loud warnings).
+/* OpenAccessBridge admin styling (§8.2 dashboard, §8.3 loud warnings).
  *
  * Vanilla CSS, embedded via go:embed, no framework and no build step (D4). The
  * palette is dark on purpose: this page is read on a laptop in a booth during a

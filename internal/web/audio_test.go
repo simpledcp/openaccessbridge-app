@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
-// loopbackSignaler stands in for captionbridge-media's peer process. It exercises
+// loopbackSignaler stands in for openaccessbridge-media's peer process. It exercises
 // the relay, the peer-identity plumbing and the picker state machine; it claims
 // NOTHING about real media, and no test here asserts that audio was heard. The
-// real path is proven across the three processes in cmd/captionbridge-core.
+// real path is proven across the three processes in cmd/openaccessbridge-core.
 type loopbackSignaler struct {
 	mu      sync.Mutex
 	seen    []SignalFrame

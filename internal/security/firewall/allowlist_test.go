@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestAllowlist_MultipleIPsOneFamily covers the booth where the ACSP endpoint and

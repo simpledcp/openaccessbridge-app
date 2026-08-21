@@ -1,0 +1,9 @@
+# openaccessbridge.target groups the three supervised processes (buildplan §3.5) so
+# the appliance starts/stops them as a unit. Each process still restarts and
+# health-checks independently.
+[Unit]
+Description=OpenAccessBridge accessibility appliance
+Wants=openaccessbridge-firewall.service openaccessbridge-media.service openaccessbridge-core.service
+
+[Install]
+WantedBy=multi-user.target

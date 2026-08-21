@@ -9,15 +9,15 @@ import (
 // TestSoakShort is the §11.6 soak layer as CI runs it: enough show cycles to
 // expose per-cycle retention, fast enough to sit in the normal suite.
 //
-// For a long run before a pilot, set CAPTIONBRIDGE_SOAK_CYCLES:
+// For a long run before a pilot, set OPENACCESSBRIDGE_SOAK_CYCLES:
 //
-//	CAPTIONBRIDGE_SOAK_CYCLES=2000 go test ./internal/soak/ -run Soak -v -timeout 30m
+//	OPENACCESSBRIDGE_SOAK_CYCLES=2000 go test ./internal/soak/ -run Soak -v -timeout 30m
 func TestSoakShort(t *testing.T) {
 	cfg := DefaultConfig()
-	if v := os.Getenv("CAPTIONBRIDGE_SOAK_CYCLES"); v != "" {
+	if v := os.Getenv("OPENACCESSBRIDGE_SOAK_CYCLES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
-			t.Fatalf("CAPTIONBRIDGE_SOAK_CYCLES=%q is not a positive integer", v)
+			t.Fatalf("OPENACCESSBRIDGE_SOAK_CYCLES=%q is not a positive integer", v)
 		}
 		cfg.Cycles = n
 	}

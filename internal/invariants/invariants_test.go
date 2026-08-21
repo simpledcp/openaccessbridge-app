@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/readiness"
-	"github.com/simpledcp/captionbridge/internal/security/firewall"
-	"github.com/simpledcp/captionbridge/internal/security/verify"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/readiness"
+	"github.com/simpledcp/openaccessbridge/internal/security/firewall"
+	"github.com/simpledcp/openaccessbridge/internal/security/verify"
 )
 
 // repoRoot resolves the repository root relative to this test's package dir.
@@ -178,7 +178,7 @@ func TestInvariant_FanoutMinimalCue(t *testing.T) {
 // core Wants (not Requires) media so a media crash never drops captions.
 func TestInvariant_ThreeProcessSeparation(t *testing.T) {
 	root := repoRoot(t)
-	for _, bin := range []string{"captionbridge-core", "captionbridge-media", "captionbridge-firewall"} {
+	for _, bin := range []string{"openaccessbridge-core", "openaccessbridge-media", "openaccessbridge-firewall"} {
 		if _, err := os.Stat(filepath.Join(root, "cmd", bin, "main.go")); err != nil {
 			t.Errorf("missing process %s: %v", bin, err)
 		}
@@ -186,16 +186,16 @@ func TestInvariant_ThreeProcessSeparation(t *testing.T) {
 			t.Errorf("missing systemd unit for %s: %v", bin, err)
 		}
 	}
-	core := readFile(t, filepath.Join(root, "deploy", "systemd", "captionbridge-core.service"))
-	if !strings.Contains(core, "Wants=captionbridge-media.service") {
+	core := readFile(t, filepath.Join(root, "deploy", "systemd", "openaccessbridge-core.service"))
+	if !strings.Contains(core, "Wants=openaccessbridge-media.service") {
 		t.Errorf("core must Want (not Require) media so a media crash can't drop captions")
 	}
-	fw := readFile(t, filepath.Join(root, "deploy", "systemd", "captionbridge-firewall.service"))
+	fw := readFile(t, filepath.Join(root, "deploy", "systemd", "openaccessbridge-firewall.service"))
 	if !strings.Contains(fw, "CAP_NET_ADMIN") {
 		t.Errorf("firewall helper must hold CAP_NET_ADMIN (the only privileged component)")
 	}
 	// Core dumps disabled everywhere (a crash dump is how content leaks, §9.4).
-	for _, unit := range []string{"captionbridge-core.service", "captionbridge-media.service"} {
+	for _, unit := range []string{"openaccessbridge-core.service", "openaccessbridge-media.service"} {
 		u := readFile(t, filepath.Join(root, "deploy", "systemd", unit))
 		if !strings.Contains(u, "LimitCORE=0") {
 			t.Errorf("%s must set LimitCORE=0 (no content-leaking core dumps)", unit)
@@ -205,20 +205,20 @@ func TestInvariant_ThreeProcessSeparation(t *testing.T) {
 
 // §3.5: privilege separation is only real if the loopback channel between the
 // privileged helper and the unprivileged core actually WORKS as deployed. The
-// firewall helper runs as root and core as the captionbridge user, so an
+// firewall helper runs as root and core as the openaccessbridge user, so an
 // owner-only socket would be unreachable and the dashboard would report a
 // permanent "Firewall INACTIVE" — a separation that silently disables the
 // security surface it exists to prove.
 func TestInvariant_LoopbackSocketReachableAcrossPrivilege(t *testing.T) {
 	root := repoRoot(t)
-	units := []string{"captionbridge-core.service", "captionbridge-media.service", "captionbridge-firewall.service"}
+	units := []string{"openaccessbridge-core.service", "openaccessbridge-media.service", "openaccessbridge-firewall.service"}
 
 	// All three share one tmpfs runtime dir, so it must survive any single unit
 	// stopping and be group-traversable.
 	for _, unit := range units {
 		u := readFile(t, filepath.Join(root, "deploy", "systemd", unit))
-		if !strings.Contains(u, "Group=captionbridge") {
-			t.Errorf("%s must run with the shared Group=captionbridge so the loopback sockets are mutually reachable", unit)
+		if !strings.Contains(u, "Group=openaccessbridge") {
+			t.Errorf("%s must run with the shared Group=openaccessbridge so the loopback sockets are mutually reachable", unit)
 		}
 		if !strings.Contains(u, "RuntimeDirectoryPreserve=yes") {
 			t.Errorf("%s must set RuntimeDirectoryPreserve=yes; otherwise stopping it deletes the runtime dir the other two are using", unit)
@@ -231,18 +231,18 @@ func TestInvariant_LoopbackSocketReachableAcrossPrivilege(t *testing.T) {
 	// The firewall helper is the one that runs as root; it must NOT declare a
 	// User= (that would drop the privileges it exists to hold) but must hand its
 	// socket to the shared group.
-	fw := readFile(t, filepath.Join(root, "deploy", "systemd", "captionbridge-firewall.service"))
+	fw := readFile(t, filepath.Join(root, "deploy", "systemd", "openaccessbridge-firewall.service"))
 	if strings.Contains(fw, "User=") {
 		t.Error("firewall helper must run as root (no User=) — it is the only privileged component")
 	}
-	core := readFile(t, filepath.Join(root, "deploy", "systemd", "captionbridge-core.service"))
-	if !strings.Contains(core, "User=captionbridge") {
-		t.Error("core must run unprivileged (User=captionbridge)")
+	core := readFile(t, filepath.Join(root, "deploy", "systemd", "openaccessbridge-core.service"))
+	if !strings.Contains(core, "User=openaccessbridge") {
+		t.Error("core must run unprivileged (User=openaccessbridge)")
 	}
 
 	// And the helper must actually widen the socket rather than relying on the
 	// owner-only default, while still attributing its callers.
-	main := readFile(t, filepath.Join(root, "cmd", "captionbridge-firewall", "main.go"))
+	main := readFile(t, filepath.Join(root, "cmd", "openaccessbridge-firewall", "main.go"))
 	if !strings.Contains(main, "ipc.ListenWithOptions") {
 		t.Error("firewall helper must bind its socket with explicit group ownership (ipc.ListenWithOptions)")
 	}
@@ -255,9 +255,9 @@ func TestInvariant_LoopbackSocketReachableAcrossPrivilege(t *testing.T) {
 // object, and the runtime dir is tmpfs in the unit files.
 func TestInvariant_NoContentPersistence(t *testing.T) {
 	root := repoRoot(t)
-	for _, unit := range []string{"captionbridge-core.service", "captionbridge-media.service", "captionbridge-firewall.service"} {
+	for _, unit := range []string{"openaccessbridge-core.service", "openaccessbridge-media.service", "openaccessbridge-firewall.service"} {
 		u := readFile(t, filepath.Join(root, "deploy", "systemd", unit))
-		if !strings.Contains(u, "RuntimeDirectory=captionbridge") {
+		if !strings.Contains(u, "RuntimeDirectory=openaccessbridge") {
 			t.Errorf("%s must use a tmpfs RuntimeDirectory for transient state", unit)
 		}
 	}

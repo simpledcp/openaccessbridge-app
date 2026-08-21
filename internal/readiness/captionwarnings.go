@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // DefaultLeaseWarnFraction mirrors acsp.Options.WarnFraction's default: the

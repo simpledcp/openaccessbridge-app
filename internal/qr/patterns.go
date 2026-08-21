@@ -3,7 +3,7 @@ package qr
 // The function patterns, format/version information, and the penalty rules that
 // choose a mask (ISO/IEC 18004 §6.3, §6.8, §6.9).
 //
-// Everything here is fixed by the standard; none of it is a CaptionBridge
+// Everything here is fixed by the standard; none of it is an OpenAccessBridge
 // decision. It is separated from qr.go so the encoding pipeline reads as a
 // pipeline and the geometry reads as geometry.
 

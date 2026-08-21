@@ -1,4 +1,4 @@
-/* CaptionBridge first-boot setup wizard (§8.1). Talks to /api/admin/setup/*. */
+/* OpenAccessBridge first-boot setup wizard (§8.1). Talks to /api/admin/setup/*. */
 (function () {
   "use strict";
   function post(path, body) {

@@ -1,4 +1,4 @@
-# CaptionBridge
+# OpenAccessBridge
 
 A locked-down, dual-interface cinema **accessibility appliance**: it consumes a
 cinema server's standardized off-screen timed-text feed (SMPTE ST 430-10 sync +
@@ -19,9 +19,9 @@ See [`kickoff.md`](./kickoff.md) for the autonomous-build brief.
 
 | Process | Role |
 |---|---|
-| `captionbridge-core` | Go: ACSP state machine, RPL/timed-text parsing, timing engine, caption fan-out, web/admin server. Supervises the others. |
-| `captionbridge-media` | Audio pipeline: capture → four-state qualifier → channel mapper → Opus → WebRTC. Isolated so a media crash can't drop the caption lease. |
-| `captionbridge-firewall` | Privileged helper: nftables apply + forwarding/isolation verification. The only component that needs root. |
+| `openaccessbridge-core` | Go: ACSP state machine, RPL/timed-text parsing, timing engine, caption fan-out, web/admin server. Supervises the others. |
+| `openaccessbridge-media` | Audio pipeline: capture → four-state qualifier → channel mapper → Opus → WebRTC. Isolated so a media crash can't drop the caption lease. |
+| `openaccessbridge-firewall` | Privileged helper: nftables apply + forwarding/isolation verification. The only component that needs root. |
 
 The processes talk only over local loopback Unix sockets (`internal/ipc`). No
 plane forwards packets between the theater (`eth0`) and patron (`wlan0`/`eth1`)

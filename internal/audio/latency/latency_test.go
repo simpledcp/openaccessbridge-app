@@ -18,13 +18,13 @@ import (
 //
 // For a long run (the `make latency` target):
 //
-//	CAPTIONBRIDGE_LATENCY_SECONDS=60 go test ./internal/audio/latency/ -run Latency -v -timeout 20m
+//	OPENACCESSBRIDGE_LATENCY_SECONDS=60 go test ./internal/audio/latency/ -run Latency -v -timeout 20m
 func TestLatencyApplianceFloor(t *testing.T) {
 	cfg := DefaultConfig()
-	if v := os.Getenv("CAPTIONBRIDGE_LATENCY_SECONDS"); v != "" {
+	if v := os.Getenv("OPENACCESSBRIDGE_LATENCY_SECONDS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
-			t.Fatalf("CAPTIONBRIDGE_LATENCY_SECONDS=%q is not a positive number of seconds", v)
+			t.Fatalf("OPENACCESSBRIDGE_LATENCY_SECONDS=%q is not a positive number of seconds", v)
 		}
 		cfg.Duration = time.Duration(n) * time.Second
 	}

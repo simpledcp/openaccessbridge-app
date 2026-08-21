@@ -1,4 +1,4 @@
-/* CaptionBridge admin dashboard (§8.2 rows, §8.3 loud warnings, §8.4 banner,
+/* OpenAccessBridge admin dashboard (§8.2 rows, §8.3 loud warnings, §8.4 banner,
  * §10.6 two independent verdicts). Vanilla JS, embedded, no framework, no build
  * step, and no network fetch beyond this appliance's own /api/admin/status and
  * /api/admin/session (D4). The second endpoint is the §10.4 per-show session:
@@ -364,7 +364,7 @@
       q.textContent = sum.quality || "not judged";
       head.appendChild(name);
       head.appendChild(q);
-      // THE ATTRIBUTION. captionbridge-media refuses to report a generated tone
+      // THE ATTRIBUTION. openaccessbridge-media refuses to report a generated tone
       // under a real device's identity — that refusal is this codebase's first
       // fabrication fix — and it buys nothing if the surface showing "excellent"
       // drops the identity. A synthetic stand-in says so beside its verdict.
@@ -513,7 +513,7 @@
       // on/off rather than run through the yes/no helper — flipping the WORD to
       // suit the colour would print "yes" for a service that is switched off.
       offOnRow("Discovery mode", s.discovery_mode,
-        "no discovery/advertisement responder runs in any CaptionBridge process"),
+        "no discovery/advertisement responder runs in any OpenAccessBridge process"),
       offOnRow("Support session", s.support_session,
         s.support_session === "yes"
           ? "outbound-only, time-limited and audited (§9.4) — close it before the show"
@@ -639,7 +639,7 @@
 
   /* §10.8's audio_device_compat_profile is the persisted identity of the input
    * in play. It is a bare string with no summary beside it, so the synthetic
-   * marker has to be recognised here — it is captionbridge-media's prefix for a
+   * marker has to be recognised here — it is openaccessbridge-media's prefix for a
    * stand-in it generated, and model.SyntheticDevicePrefix is its canonical
    * home. Recorded as a device profile with no caveat, it reads as hardware. */
   function audioDeviceRow(id) {
@@ -891,7 +891,7 @@
       })
       .catch(function () {
         dl(el("support-detail"), [row("Support session", "not answering", STATE_BAD,
-          "check captionbridge-core")]);
+          "check openaccessbridge-core")]);
       });
   }
 
@@ -904,7 +904,7 @@
       .then(renderChecklist)
       .catch(function () {
         el("checklist-summary").textContent =
-          "The pre-show checklist is not answering; check captionbridge-core.";
+          "The pre-show checklist is not answering; check openaccessbridge-core.";
         dl(el("checklist-detail"), []);
       });
   }
@@ -919,7 +919,7 @@
       .catch(function () {
         dl(el("session-detail"), [
           row("Show session", "not answering", STATE_BAD,
-            "this panel is stale; check captionbridge-core")
+            "this panel is stale; check openaccessbridge-core")
         ]);
       });
   }
@@ -959,7 +959,7 @@
     var banner = el("warning-banner");
     banner.hidden = false;
     banner.innerHTML = '<div class="warn-critical">⚠ The admin API is not answering — ' +
-      "every figure below is stale. Check captionbridge-core.</div>";
+      "every figure below is stale. Check openaccessbridge-core.</div>";
   }
 
   function refresh() {

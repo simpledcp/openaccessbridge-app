@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // ChecklistFacts are the few things the checklist needs that the dashboard
@@ -94,8 +94,8 @@ func securityChecks(st model.SystemReadiness) []model.PreShowCheck {
 	firewall := model.PreShowCheck{
 		ID: "firewall_active", Title: "Firewall active and verified", Section: "§9.1, §9.3",
 		Source: model.SourceMeasured, Blocking: true,
-		Remedy: "Do not open the house on an unprotected appliance. Check that captionbridge-firewall " +
-			"is running as root (systemctl status captionbridge-firewall); if it is running and the " +
+		Remedy: "Do not open the house on an unprotected appliance. Check that openaccessbridge-firewall " +
+			"is running as root (systemctl status openaccessbridge-firewall); if it is running and the " +
 			"ruleset still cannot be read, escalate — the posture is unknown, not safe.",
 	}
 	switch {

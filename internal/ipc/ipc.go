@@ -1,9 +1,9 @@
 // Package ipc defines the loopback IPC seam between the three supervised
-// processes (buildplan.md §3.5). captionbridge-core supervises captionbridge-media
-// and captionbridge-firewall and talks to them only over local loopback (Unix
-// domain socket), never shared memory or a shared address space — so a media
-// crash cannot drop the caption lease, and the privileged firewall helper stays a
-// small, auditable, separate component.
+// processes (buildplan.md §3.5). openaccessbridge-core supervises openaccessbridge-media
+// and openaccessbridge-firewall and talks to them only over local loopback
+// (Unix domain socket), never shared memory or a shared address space — so a
+// media crash cannot drop the caption lease, and the privileged firewall helper
+// stays a small, auditable, separate component.
 //
 // The wire format is newline-delimited JSON over a Unix domain socket: simple,
 // debuggable, and dependency-free. Messages carry STATE and COMMANDS only; no
@@ -25,13 +25,13 @@ import (
 // DefaultSocketDir is where the loopback sockets live. On the appliance this is a
 // tmpfs runtime dir; in dev it falls back to the OS temp dir.
 func DefaultSocketDir() string {
-	if d := os.Getenv("CAPTIONBRIDGE_RUNTIME_DIR"); d != "" {
+	if d := os.Getenv("OPENACCESSBRIDGE_RUNTIME_DIR"); d != "" {
 		return d
 	}
 	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-		return filepath.Join(d, "captionbridge")
+		return filepath.Join(d, "openaccessbridge")
 	}
-	return filepath.Join(os.TempDir(), "captionbridge")
+	return filepath.Join(os.TempDir(), "openaccessbridge")
 }
 
 // Socket names for each helper process.
@@ -56,14 +56,14 @@ const (
 	TypePing = "ping"
 	TypePong = "pong"
 
-	// Media process (captionbridge-media).
+	// Media process (openaccessbridge-media).
 	TypeMediaStatus    = "media.status"    // helper → core: per-stream AudioStreamState
 	TypeMediaConfigure = "media.configure" // core → helper: device + mapping
 	TypeMediaStart     = "media.start"     // core → helper: start a named stream
 	TypeMediaStop      = "media.stop"      // core → helper: stop a named stream
 	TypeMediaSignal    = "media.signal"    // WebRTC SDP/ICE signaling relay (opaque)
 
-	// Firewall process (captionbridge-firewall).
+	// Firewall process (openaccessbridge-firewall).
 	TypeFirewallApply  = "firewall.apply"  // core → helper: apply a profile's ruleset
 	TypeFirewallVerify = "firewall.verify" // core → helper: run verification pass
 	TypeFirewallResult = "firewall.result" // helper → core: VerificationReport
@@ -100,7 +100,7 @@ func AllowOwner() func(Peer) bool {
 
 // AllowOwnerOrGroup authorizes the listener's own uid, or any process whose
 // PRIMARY gid is gid. This is what lets the unprivileged core talk to the root
-// firewall helper: they run as different users but share the captionbridge
+// firewall helper: they run as different users but share the openaccessbridge
 // group (§3.5). A gid of 0 authorizes nobody by group.
 func AllowOwnerOrGroup(gid int) func(Peer) bool {
 	self := os.Getuid()

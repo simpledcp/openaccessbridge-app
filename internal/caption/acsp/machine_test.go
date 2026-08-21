@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/caption/resolver"
+	"github.com/simpledcp/openaccessbridge/internal/caption"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/caption/resolver"
 )
 
 // rplDoc/ttDoc build minimal RPL + timed-text with ms editable units (rate 1000).

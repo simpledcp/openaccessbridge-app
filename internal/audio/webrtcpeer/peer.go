@@ -1,5 +1,5 @@
-// Package webrtcpeer is the appliance-side WebRTC peer for captionbridge-media
-// (buildplan.md §6.7, DECISIONS D20).
+// Package webrtcpeer is the appliance-side WebRTC peer for
+// openaccessbridge-media (buildplan.md §6.7, DECISIONS D20).
 //
 // TOPOLOGY, which §6.7 states as a requirement rather than an optimization:
 // "One capture/analysis/Opus source per named stream (HI, VI-N), distributed to
@@ -35,9 +35,9 @@ import (
 	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
-	"github.com/simpledcp/captionbridge/internal/audio/encode"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/encode"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Errors a caller turns into calm patron copy. They are error CLASSES, never
@@ -325,7 +325,7 @@ func (h *Hub) Publish(stream model.StreamType, rtp encode.RTPStream) error {
 		ClockRate:   48000,
 		Channels:    2,
 		SDPFmtpLine: "minptime=10;useinbandfec=1",
-	}, "audio", "captionbridge-"+string(stream))
+	}, "audio", "openaccessbridge-"+string(stream))
 	if err != nil {
 		return fmt.Errorf("webrtcpeer: track for %s: %w", stream, err)
 	}

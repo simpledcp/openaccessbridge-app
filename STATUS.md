@@ -1,6 +1,6 @@
 # STATUS — handoff
 
-CaptionBridge is built as far as it can go in software on this dev machine.
+OpenAccessBridge is built as far as it can go in software on this dev machine.
 Everything hardware-gated is behind a seam and recorded in `BLOCKERS.md`.
 
 - **36 packages · 639 tests · race-clean · ~82% coverage · ~49K LOC of Go.**
@@ -30,10 +30,10 @@ make build        # all four binaries → ./bin
 make cover        # coverage summary
 
 # Run the whole appliance locally (three processes + self-advancing ACSP demo):
-RT=/tmp/cb; mkdir -p $RT
-./bin/captionbridge-firewall --socket-dir=$RT &      # dry-run unless root + --allow-apply
-./bin/captionbridge-media    --socket-dir=$RT &      # synthetic HI/VI-N streams
-./bin/captionbridge-core --config $RT/config.db \
+RT=/tmp/oab; mkdir -p $RT
+./bin/openaccessbridge-firewall --socket-dir=$RT &      # dry-run unless root + --allow-apply
+./bin/openaccessbridge-media    --socket-dir=$RT &      # synthetic HI/VI-N streams
+./bin/openaccessbridge-core --config $RT/config.db \
     --patron-bind 127.0.0.1:8080 --admin-bind 127.0.0.1:8090 --socket-dir=$RT &
 # Patron page:  http://127.0.0.1:8080/accessibility
 # Admin board:  http://127.0.0.1:8090/admin   (first boot: create credentials)
@@ -81,8 +81,8 @@ green.
 | 5 | ST 430-10 state machine + WS/SSE caption fan-out (§5.2, §5.6) | `internal/caption/{acsp,fanout}` |
 | 6 | ST 430-10 simulator + 17-scenario quirk suite (CI regression backbone, §11.1) | `internal/sim` |
 | 7 | Web server + patron page + route/bind separation (§7, §8.4) | `internal/web` |
-| 8 | Audio: 4-state qualifier + channel mapper (pure-Go, tested) + capture/encode seam + synthetic-tone GStreamer Opus smoke (§6) | `internal/audio/*`, `captionbridge-media` |
-| 9 | Firewall nftables Variant A/B rule-gen + self-introspection verify + security/invariant tests in CI (§9) | `internal/security/*`, `captionbridge-firewall` |
+| 8 | Audio: 4-state qualifier + channel mapper (pure-Go, tested) + capture/encode seam + synthetic-tone GStreamer Opus smoke (§6) | `internal/audio/*`, `openaccessbridge-media` |
+| 9 | Firewall nftables Variant A/B rule-gen + self-introspection verify + security/invariant tests in CI (§9) | `internal/security/*`, `openaccessbridge-firewall` |
 | 10 | Admin dashboard (separate caption/audio readiness + loud warnings) + first-boot setup wizard + admin auth (§8) | `internal/web`, `internal/readiness` |
 | 11 | Four deployment profiles + Loaner overlay + systemd units (§12, §3.5, §9.4) | `internal/deploy`, `deploy/` |
 | 12 | Three-process integration + cross-cutting invariant tests + this handoff | `cmd/*`, `internal/invariants` |
@@ -97,13 +97,14 @@ green.
 | 21 | ICE gathering confined to the configured patron interface, refused by name when that interface is absent, and the networks a patron was really offered MEASURED off the emitted SDP and shown on the dashboard (§6.7, §9.1, §8.2, D28) | `internal/audio/webrtcpeer`, `internal/ipc/network.go`, `cmd/*` |
 | 22 | §10.4 QR onboarding: an in-tree pure-Go QR encoder verified module-for-module against independent implementations across all 160 version/level combinations and decoded by zxing-cpp, served per-show on the admin surface with a computed minimum print size (D29) | `internal/qr`, `internal/web/session_admin.go` |
 | 23 | §11.5 pre-show QA checklist codified as a staff procedure: explicit three-state pass/fail per item, a remedy on every item, staff steps printed but never recorded, and a printable booth sheet (D30) | `internal/model/checklist.go`, `internal/readiness/checklist.go`, `internal/web/checklist.go` |
-| 24 | §9.4 support mode: a bounded, audited, outbound-only WINDOW with an absolute deadline that does not survive a restart, one scoped egress rule, an audit trail beside the switch — plus the fix for an nftables ruleset that could never remove a rule (D31, D31a) | `internal/security/support`, `internal/security/firewall`, `internal/config/support.go`, `cmd/captionbridge-core` |
-| 25 | §9.4 signed offline updates: a bundle format whose signature covers the bytes that arrived, a trust store the bundle cannot add to, refusal to downgrade or replay, and the full A/B rollback state machine in which the NEW image confirms its own health — verify-only on this image, and it says so (D32, B8) | `internal/update`, `internal/web/update.go`, `cmd/captionbridge-core/update.go` |
-| 26 | §6.5 multi-device rooms: a per-stream device assignment the profile can hold, validated against the three ways it can be recorded wrongly, built one device at a time through the wizard, and honoured per stream by the media process (D34) | `internal/model/profile.go`, `internal/web/calibration.go`, `cmd/captionbridge-media` |
+| 24 | §9.4 support mode: a bounded, audited, outbound-only WINDOW with an absolute deadline that does not survive a restart, one scoped egress rule, an audit trail beside the switch — plus the fix for an nftables ruleset that could never remove a rule (D31, D31a) | `internal/security/support`, `internal/security/firewall`, `internal/config/support.go`, `cmd/openaccessbridge-core` |
+| 25 | §9.4 signed offline updates: a bundle format whose signature covers the bytes that arrived, a trust store the bundle cannot add to, refusal to downgrade or replay, and the full A/B rollback state machine in which the NEW image confirms its own health — verify-only on this image, and it says so (D32, B8) | `internal/update`, `internal/web/update.go`, `cmd/openaccessbridge-core/update.go` |
+| 26 | §6.5 multi-device rooms: a per-stream device assignment the profile can hold, validated against the three ways it can be recorded wrongly, built one device at a time through the wizard, and honoured per stream by the media process (D34) | `internal/model/profile.go`, `internal/web/calibration.go`, `cmd/openaccessbridge-media` |
 | 27 | §6.7 encode-path latency corrected to ONE accumulation: the smallest whole number of capture periods that holds an Opus frame, which at the shipped settings is 10 ms rather than the 20 ms the estimate used to claim (D33) | `internal/audio/pipeline` |
 | 28 | §9.5 Wi-Fi onboarding: a `WIFI:` code beside the show's, the patron network stored as the shared credential it is — never logged, never in a status document, cleared with the network — and the format's ambiguities cross-checked or flagged rather than guessed (D35) | `internal/qr/wifi.go`, `internal/web/wifi.go` |
 | 29 | §5.4 D8 steps (3)/(4) on BOTH sides of the seam: a closed-caption track outranks a subtitle track for the default and the fetch order, and the offer list reaches `internal/web` in that order — so a patron with no stated preference is served the track that carries the sound cues (D43) | `internal/caption/rpl`, `internal/caption/acsp`, `internal/web/patron.go` |
-| 30 | §5.3 unresolved locators classified BY SERVER FAMILY, with the announced family plumbed from a wire field nothing read, the tally surfaced on the §8.2 caption panel, and the five caption dependencies rebuilt as one constructor both `main()` and the tests use (D43) | `internal/caption/resolver`, `internal/caption/acsp`, `cmd/captionbridge-core/status.go` |
+| 30 | §5.3 unresolved locators classified BY SERVER FAMILY, with the announced family plumbed from a wire field nothing read, the tally surfaced on the §8.2 caption panel, and the five caption dependencies rebuilt as one constructor both `main()` and the tests use (D43) | `internal/caption/resolver`, `internal/caption/acsp`, `cmd/openaccessbridge-core/status.go` |
+| 31 | Project-wide rename to **OpenAccessBridge**: module path, three binaries, systemd units, nftables table, state/runtime paths, env prefix, update-bundle magic, patron cookie and every brand string; GitHub repo now `simpledcp/openaccessbridge-app`. Verified by six adversarial lenses, which found the sweep had rewritten the build host's real directories (D44) | tree-wide, `go.mod`, `cmd/`, `deploy/systemd/` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -111,7 +112,7 @@ A patron on a phone can now **really receive audio**. The path is: capture →
 channel mapper → one `gst-launch-1.0` Opus encoder per named stream (mapped PCM
 in on stdin, RTP out on loopback UDP) → one Pion `TrackLocalStaticRTP` per named
 stream → one peer connection per subscriber, negotiated over the patron page's
-own WebSocket and relayed to `captionbridge-media` over the loopback socket.
+own WebSocket and relayed to `openaccessbridge-media` over the loopback socket.
 Host ICE candidates only; no STUN, no TURN.
 
 **What they would hear on this host is a 440 Hz (HI) / 660 Hz (VI-N) test tone**,
@@ -281,7 +282,7 @@ writer, and that the build number is stamped.
   implementation; the all-hex question cannot be settled here at all, so the
   appliance flags it rather than guessing. Confirming either needs a phone fleet
   (B2).
-- **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
+- **The ACSP supervisor has no production caller**: `cmd/openaccessbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
 - **The ICE scope row is as fresh as the last posture reconcile** (15 s), not as
   fresh as the last patron's answer. That matches every other posture row on the
@@ -310,7 +311,10 @@ caption path is validated against the simulator scenario suite instead.
 
 - Project is at `/home/libserv-2/captionbridge-app` (the intended
   `…/captionbridge` is root-owned/unwritable — DECISIONS D0). Go at
-  `/home/libserv-2/go-sdk`. No passwordless sudo.
+  `/home/libserv-2/go-sdk`. No passwordless sudo. **The directory keeps the old
+  product name on purpose** — the application, module and repo are
+  OpenAccessBridge (D44), but these two paths are build-host facts, and one of
+  them is root-owned and cannot be renamed.
 - Read `buildplan.md` sections on demand; do not rely on memory for protocol detail.
 - DECISIONS.md records every OPEN-item default (configurable); BLOCKERS.md records
   what hardware/artifact clears each gate.
@@ -323,4 +327,4 @@ caption path is validated against the simulator scenario suite instead.
   as §10.5 `last_qualification`, and a §10.8 readiness stamp written by pressing
   Complete rather than by a check that ran. Both looked green.
 - The three processes are named longer than 15 characters, so `pkill -x
-  captionbridge-core` silently matches nothing. Kill them by PID.
+  openaccessbridge-core` silently matches nothing. Kill them by PID.

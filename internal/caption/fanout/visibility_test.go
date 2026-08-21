@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestCueVisibilityIsUnansweredWithNoLanguageLoaded: §8.2's "Current cue:
@@ -28,7 +28,7 @@ func TestCueVisibilityFollowsThePublishedCue(t *testing.T) {
 		t.Errorf("a loaded language with no cue is a measured 'none', got visible=%v known=%v", visible, known)
 	}
 
-	h.PublishCue("en", true, model.Cue{ResourceID: "res-en", StartMS: 1000, Text: "Welcome to CaptionBridge."})
+	h.PublishCue("en", true, model.Cue{ResourceID: "res-en", StartMS: 1000, Text: "Welcome to OpenAccessBridge."})
 	if visible, known := h.CueVisible(); !known || !visible {
 		t.Errorf("a published cue must read as visible, got visible=%v known=%v", visible, known)
 	}

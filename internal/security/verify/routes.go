@@ -252,7 +252,7 @@ type routeFindings struct {
 // checkRoutes performs the route and DNS half of §9.3 by introspection only:
 //
 //	§9.3: "theater-side reachable scope == allowlist only — verified primarily by
-//	introspecting CaptionBridge's own routes and firewall permissions (the
+//	introspecting OpenAccessBridge's own routes and firewall permissions (the
 //	appliance has no configured route or rule beyond the allowlist), *not* by
 //	scanning the theater network"
 //	§9.3: "no DNS/route leak across interfaces (the patron side cannot reach the

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // gatherableIfaces returns the interfaces pion would gather host candidates on:

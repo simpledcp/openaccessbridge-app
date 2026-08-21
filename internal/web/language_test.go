@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // D8's priority order, plus the BCP-47 fallback the patron path never had.
@@ -80,8 +80,8 @@ func TestPhoneReportingEnUSReceivesTheEnglishCues(t *testing.T) {
 	defer resp.Body.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	hub.PublishCue("en", true, model.Cue{Text: "Welcome to CaptionBridge.", ResourceID: "r1", StartMS: 1000})
-	if !scanFor(resp.Body, "Welcome to CaptionBridge.", 2*time.Second) {
+	hub.PublishCue("en", true, model.Cue{Text: "Welcome to OpenAccessBridge.", ResourceID: "r1", StartMS: 1000})
+	if !scanFor(resp.Body, "Welcome to OpenAccessBridge.", 2*time.Second) {
 		t.Fatalf("en-US subscriber never received the en cues")
 	}
 }

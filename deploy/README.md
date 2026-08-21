@@ -1,6 +1,6 @@
-# CaptionBridge deployment
+# OpenAccessBridge deployment
 
-CaptionBridge ships as **three supervised processes** on a **two-NIC** appliance
+OpenAccessBridge ships as **three supervised processes** on a **two-NIC** appliance
 (buildplan §3.5, §4). This directory holds the systemd units and the
 deployment-profile descriptors (`internal/deploy`).
 
@@ -8,10 +8,10 @@ deployment-profile descriptors (`internal/deploy`).
 
 | Unit | User | Role |
 |---|---|---|
-| `captionbridge-firewall.service` | root (CAP_NET_ADMIN) | nftables apply + forwarding/isolation verification — the only privileged component |
-| `captionbridge-media.service` | `captionbridge` (+audio) | audio capture → qualifier → mapper → Opus → WebRTC |
-| `captionbridge-core.service` | `captionbridge` (CAP_NET_BIND_SERVICE) | ACSP state machine, captions, web/admin, supervision |
-| `captionbridge.target` | — | groups the three |
+| `openaccessbridge-firewall.service` | root (CAP_NET_ADMIN) | nftables apply + forwarding/isolation verification — the only privileged component |
+| `openaccessbridge-media.service` | `openaccessbridge` (+audio) | audio capture → qualifier → mapper → Opus → WebRTC |
+| `openaccessbridge-core.service` | `openaccessbridge` (CAP_NET_BIND_SERVICE) | ACSP state machine, captions, web/admin, supervision |
+| `openaccessbridge.target` | — | groups the three |
 
 `core` **Wants** (not Requires) `media`, so a media crash never drops captions —
 captions and audio are independent (§2). `core` **Requires** `firewall`, so the
@@ -20,11 +20,11 @@ network posture is verified before patrons are served.
 ### Install (low-cost/hardened tiers)
 
 ```sh
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin captionbridge
-sudo install -m0755 bin/captionbridge-core bin/captionbridge-media bin/captionbridge-firewall /usr/local/bin/
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin openaccessbridge
+sudo install -m0755 bin/openaccessbridge-core bin/openaccessbridge-media bin/openaccessbridge-firewall /usr/local/bin/
 sudo install -m0644 deploy/systemd/*.service deploy/systemd/*.target /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now captionbridge.target
+sudo systemctl enable --now openaccessbridge.target
 ```
 
 First boot serves the setup wizard (§8.1): force admin-credential creation,
@@ -50,7 +50,7 @@ kiosk lock — a stronger access claim, but does not remove the Phase 9 review.
 
 - **No content persistence (guardrail #5):** runtime state is on `tmpfs`
   (`RuntimeDirectory`); only the SQLite *config* store is writable
-  (`/var/lib/captionbridge`, config only). **Core dumps are disabled**
+  (`/var/lib/openaccessbridge`, config only). **Core dumps are disabled**
   (`LimitCORE=0`) so a crash cannot leak caption text or audio to disk (§9.4).
 - **No IP forwarding / default-deny (guardrails #2, #6):** the firewall helper
   sets `net.ipv4.ip_forward=0` + `net.ipv6.conf.all.forwarding=0` and applies a

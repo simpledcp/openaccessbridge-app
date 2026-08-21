@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// The nftables table CaptionBridge owns (§9.1). Verification asserts the posture
+// The nftables table OpenAccessBridge owns (§9.1). Verification asserts the posture
 // of THIS table; anything else on the box is not ours to claim.
 const (
 	TableFamily = "inet"
-	TableName   = "captionbridge"
+	TableName   = "openaccessbridge"
 )
 
 // The three base chains §9.1 defines. All three must be policy drop, and the
@@ -84,7 +84,7 @@ func StaticRulesetReader(s RulesetStatus, err error) RulesetReader {
 const nftTimeout = 5 * time.Second
 
 // NFTRulesetReader returns a RulesetReader that introspects the live ruleset with
-// `nft -j list table inet captionbridge`. Listing needs no ruleset change and no
+// `nft -j list table inet openaccessbridge`. Listing needs no ruleset change and no
 // --allow-apply gate: BLOCKER B5 gates APPLYING rules, not reading them. On a dev
 // host without root, nft reports "Operation not permitted" and the reader returns
 // an error — "cannot confirm", which must fail loud (D17 stance), never pass.
@@ -166,10 +166,10 @@ type nftRule struct {
 	Expr   []json.RawMessage `json:"expr"`
 }
 
-// ParseNFTRuleset parses `nft -j list table inet captionbridge` output into an
-// observation: which chains exist, whether each is policy drop, and how many
-// rules in each chain end in an accept verdict. It ignores elements belonging to
-// other tables so a shared box cannot make our table look compliant.
+// ParseNFTRuleset parses `nft -j list table inet openaccessbridge` output into
+// an observation: which chains exist, whether each is policy drop, and how many
+// rules in each chain end in an accept verdict. It ignores elements belonging
+// to other tables so a shared box cannot make our table look compliant.
 func ParseNFTRuleset(data []byte) (RulesetStatus, error) {
 	var doc nftDoc
 	if err := json.Unmarshal(data, &doc); err != nil {

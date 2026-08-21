@@ -7,7 +7,7 @@
 package config
 
 import (
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // AdminCredential is a stored admin login. The password is never stored in the

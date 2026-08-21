@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/resolver"
+	"github.com/simpledcp/openaccessbridge/internal/caption/resolver"
 )
 
 // TestTheAnnouncedServerFamilyReachesTheResolver closes the gap between a field

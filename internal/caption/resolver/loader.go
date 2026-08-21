@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/caption/rpl"
-	"github.com/simpledcp/captionbridge/internal/caption/timedtext"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/rpl"
+	"github.com/simpledcp/openaccessbridge/internal/caption/timedtext"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Pipeline runs resolve → unwrap → (cache) → parse for one resource.

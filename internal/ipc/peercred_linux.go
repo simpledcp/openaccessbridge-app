@@ -18,7 +18,7 @@ const peerCredSupported = true
 //
 // Note SO_PEERCRED reports the peer's PRIMARY gid only — supplementary groups
 // are not visible here. A peer authorized by group must therefore run with the
-// shared group as its primary group (the systemd units set Group=captionbridge).
+// shared group as its primary group (the systemd units set Group=openaccessbridge).
 func peerOf(conn net.Conn) (Peer, error) {
 	uc, ok := conn.(*net.UnixConn)
 	if !ok {

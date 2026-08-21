@@ -22,9 +22,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption/acsp"
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/sim"
+	"github.com/simpledcp/openaccessbridge/internal/caption/acsp"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/sim"
 )
 
 // Config parameterizes a soak run.

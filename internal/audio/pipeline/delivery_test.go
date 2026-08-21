@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/encode"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/encode"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // --- delivery test doubles ------------------------------------------------

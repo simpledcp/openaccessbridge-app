@@ -1,4 +1,4 @@
-# CaptionBridge build system.
+# OpenAccessBridge build system.
 # Local Go toolchain is installed at /home/libserv-2/go-sdk on this dev machine;
 # CI uses actions/setup-go. GOTOOLCHAIN=local avoids surprise network toolchain
 # downloads on an offline appliance build host.
@@ -8,14 +8,14 @@ GOTOOLCHAIN ?= local
 export GOTOOLCHAIN
 
 BIN := bin
-BINARIES := captionbridge-core captionbridge-media captionbridge-firewall acsp-simulator
+BINARIES := openaccessbridge-core openaccessbridge-media openaccessbridge-firewall acsp-simulator
 # BUILD_NUMBER is the monotonic ordering the §9.4 update path compares (D32). The
 # commit count is monotonic on this repo's linear history; a release process with
 # its own numbering overrides it. A binary built WITHOUT it refuses to judge an
 # update rather than guessing — see buildinfo.BuildNumber.
 BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
-LDFLAGS := -X github.com/simpledcp/captionbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev) \
-           -X github.com/simpledcp/captionbridge/internal/buildinfo.Build=$(BUILD_NUMBER)
+LDFLAGS := -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev) \
+           -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Build=$(BUILD_NUMBER)
 
 .PHONY: all build test vet race cover sim soak latency qr-verify clean tidy fmt check
 
@@ -60,7 +60,7 @@ check: fmt-check vet test
 # of the suite; this is the pre-pilot run.
 SOAK_CYCLES ?= 2000
 soak:
-	CAPTIONBRIDGE_SOAK_CYCLES=$(SOAK_CYCLES) $(GO) test ./internal/soak/ -run Soak -v -timeout 30m
+	OPENACCESSBRIDGE_SOAK_CYCLES=$(SOAK_CYCLES) $(GO) test ./internal/soak/ -run Soak -v -timeout 30m
 
 # §11.4 latency pass. Reports the APPLIANCE-SIDE contributors separately —
 # channel map, level analysis, Opus encode transit, WebRTC fan-out transit — as
@@ -74,7 +74,7 @@ soak:
 # runs a short version of this as a regression guard.
 LATENCY_SECONDS ?= 60
 latency:
-	CAPTIONBRIDGE_LATENCY_SECONDS=$(LATENCY_SECONDS) $(GO) test ./internal/audio/latency/ -run Latency -v -count=1 -timeout 20m
+	OPENACCESSBRIDGE_LATENCY_SECONDS=$(LATENCY_SECONDS) $(GO) test ./internal/audio/latency/ -run Latency -v -count=1 -timeout 20m
 
 # §10.4: decode the QR images this appliance really serves, with an INDEPENDENT
 # decoder (zxing-cpp, the engine behind many phone scanner apps).

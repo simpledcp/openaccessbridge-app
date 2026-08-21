@@ -3,7 +3,7 @@ package encode
 // Streaming Opus/RTP encode (buildplan.md §6.7). SmokeTest proves the encode
 // chain exists; this is the chain a patron actually listens to: one live
 // encoder per NAMED STREAM whose RTP is fanned out to N browser peers by
-// captionbridge-media (§6.7 topology, "the design must avoid re-running
+// openaccessbridge-media (§6.7 topology, "the design must avoid re-running
 // capture/analysis per client").
 //
 // HOW PCM REACHES THE ENCODER. The §6.7 spike ran `audiotestsrc` inside the

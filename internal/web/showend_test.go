@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // §7.2 show-end behavior: "streams terminate and the session expires at show end;

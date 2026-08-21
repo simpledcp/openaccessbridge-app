@@ -1,4 +1,4 @@
-/* CaptionBridge patron client (§7).
+/* OpenAccessBridge patron client (§7).
  *
  * One script serves all three §7.1 routes; the server decides which controls
  * exist in the document, and this file drives whichever are present:

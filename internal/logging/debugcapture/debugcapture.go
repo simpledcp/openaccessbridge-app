@@ -42,8 +42,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Kind is what a capture records. They are separate grants: an admin enabling

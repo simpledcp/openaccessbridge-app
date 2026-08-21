@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"math"
 
-	"github.com/simpledcp/captionbridge/internal/caption/rpl"
+	"github.com/simpledcp/openaccessbridge/internal/caption/rpl"
 )
 
 // Timeline-segment keying for RPLs — §5.3 ("maintain a map from timeline segments

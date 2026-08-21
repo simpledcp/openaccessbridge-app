@@ -6,7 +6,7 @@
 // rules; this package captures the operational policy each profile implies.
 package deploy
 
-import "github.com/simpledcp/captionbridge/internal/model"
+import "github.com/simpledcp/openaccessbridge/internal/model"
 
 // Profile is a deployment posture (§12 / §9.2).
 type Profile struct {

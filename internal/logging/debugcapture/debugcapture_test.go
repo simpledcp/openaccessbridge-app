@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // harness builds a Manager over a temp sink with a controllable clock. tmpfs is
@@ -375,7 +375,7 @@ func TestIsTmpfs_RealMountTable(t *testing.T) {
 		t.Skip("no /proc/mounts on this host")
 	}
 	if _, err := os.Stat("/dev/shm"); err == nil {
-		ok, err := IsTmpfs("/dev/shm/captionbridge-does-not-exist-yet", DefaultProcMounts)
+		ok, err := IsTmpfs("/dev/shm/openaccessbridge-does-not-exist-yet", DefaultProcMounts)
 		if err != nil {
 			t.Fatalf("IsTmpfs(/dev/shm): %v", err)
 		}

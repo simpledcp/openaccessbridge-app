@@ -1,4 +1,4 @@
-/* CaptionBridge audio calibration wizard (§6.4). Vanilla, offline, no build step
+/* OpenAccessBridge audio calibration wizard (§6.4). Vanilla, offline, no build step
  * (DECISIONS D4). Talks to /api/admin/calibration/*.
  *
  * The one rule this file exists to keep: nothing it renders may look like a

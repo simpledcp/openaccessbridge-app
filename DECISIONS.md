@@ -17,6 +17,15 @@ without blocking, the buildable repo is a self-contained git repo at
 `sudo chown -R libserv-2:libserv-2 /home/libserv-2/captionbridge && \
  cp -a /home/libserv-2/captionbridge-app/. /home/libserv-2/captionbridge/`.
 
+**These two directory names predate the OpenAccessBridge rename and are
+deliberately NOT renamed** (D44). They are facts about a build host this project
+does not own, not brand strings: `/home/libserv-2/captionbridge` is root-owned
+and cannot be renamed without the sudo D0 says is unavailable, and
+`/home/libserv-2/captionbridge-app` is where the working tree actually is. A
+rename sweep rewrote both of them once, which turned this record — and the
+relocation command above — into instructions naming directories that do not
+exist. Anything here that is a PATH stays as it is on disk.
+
 ### D1. Local Go toolchain at `/home/libserv-2/go-sdk` (Go 1.26.4)
 Go was not installed and there's no passwordless apt. Installed Go 1.26.4 to a
 home-dir path and added it to `~/.bashrc`/`~/.profile`. `GOTOOLCHAIN=local` is set
@@ -43,7 +52,7 @@ network), the SPA is plain HTML/CSS/vanilla-JS embedded into the Go binary with
 ### D5. GStreamer media path via `gst-launch-1.0` subprocess behind a seam
 The GStreamer **runtime** (1.24.2) + `opusenc`/`audiotestsrc`/`alsasrc`/`level`
 plugins are present, but **dev headers (`gstreamer-1.0.pc`) and `webrtcbin` are
-not**, and there's no passwordless apt to install them. So `captionbridge-media`'s
+not**, and there's no passwordless apt to install them. So `openaccessbridge-media`'s
 encoder/transport is an interface (`internal/audio/encode`) with: (a) a pure-Go
 synthetic backend for tests, and (b) a GStreamer backend that drives a pipeline
 via `gst-launch-1.0` for the synthetic-tone smoke test. The real `webrtcbin` peer
@@ -53,7 +62,7 @@ and fully unit-tested independent of GStreamer. (§3.5, §6.7.)
 ## OPEN-item defaults (configurable, from buildplan §14)
 
 ### D6. ACSP connection-initiation direction → default **Variant A (ACS-initiated)** [OPEN #2, §5.1/§9.1]
-CaptionBridge opens the outbound TCP connection to the server's ACSP port; return
+OpenAccessBridge opens the outbound TCP connection to the server's ACSP port; return
 traffic is admitted by conntrack. This is the plan's "current working assumption."
 Encoded as `model.ACSInitiated`, stored per-auditorium (`ACSPInitiation`), and the
 firewall manager generates the matching variant. Phase 0A confirms the real
@@ -95,7 +104,7 @@ Per §12.2/§16, Booth Diagnostic is the lowest-risk first product (no
 access-equivalence claim). The default profile for a fresh setup is
 `booth_diagnostic`; production profiles require completing the setup wizard.
 
-### D14. Module path `github.com/simpledcp/captionbridge`
+### D14. Module path `github.com/simpledcp/openaccessbridge`
 Matches the `simpledcp` git identity on this machine. No repo is pushed yet.
 
 ### D15. MXF/track-file unwrap is a PROVISIONAL heuristic; asdcplib is the real path [§5.3]
@@ -131,7 +140,7 @@ locator forms by FORM CLASS (never the raw path, which can embed a title) so
 coverage grows from real Phase 0A observations.
 
 ### D20. Core reconciles the stored configuration into the running system [§3.5, §9.1, §10.5]
-Configuration that nothing consumes is not configuration. `captionbridge-core`
+Configuration that nothing consumes is not configuration. `openaccessbridge-core`
 runs a reconcile pass at startup and every 15 s: it derives the firewall ruleset
 from the stored profile + interfaces + allowlist and has the privileged helper
 install it, runs the §9.3 verification pass **through that helper** (which can
@@ -493,8 +502,8 @@ switch from Booth Diagnostic to a production profile. The stricter posture would
 be applied, the looser one would still be accepting packets, and introspection
 would find the expected rules present and report the posture verified.
 
-Generate now emits `table inet captionbridge` (creating it if absent, so the
-delete cannot fail on a fresh boot) followed by `delete table inet captionbridge`
+Generate now emits `table inet openaccessbridge` (creating it if absent, so the
+delete cannot fail on a fresh boot) followed by `delete table inet openaccessbridge`
 before the definition. Both land inside the same `nft -f` transaction, so there
 is no instant in which the appliance has no table and therefore no default-deny.
 
@@ -744,7 +753,7 @@ where an unmeasured state is most dangerous; there is now a test for that case.
 expected screen name — and warns loudly when the connected server matches
 neither. The setup wizard collected the screen name. The §10.5 record stored it.
 `internal/caption/acsp` implemented the comparison. The simulator exercised it.
-And `cmd/captionbridge-core` passed only the fingerprint, so on a real install
+And `cmd/openaccessbridge-core` passed only the fingerprint, so on a real install
 the guard an installer had just configured did nothing with the field they
 filled in.
 
@@ -845,7 +854,7 @@ was simply never recorded.
 The Low-Cost Accessibility Replacement profile carries the strongest operational
 requirements in the plan — mandatory audio calibration, mandatory signal-health
 monitoring, and shipping only after the Phase 9 operational/legal review —
-because it is the profile for venues running CaptionBridge **in lieu of** a
+because it is the profile for venues running OpenAccessBridge **in lieu of** a
 professional receiver system. `RequireCalibration`, `RequireSignalHealth`,
 `RequireClearErrorStates` and `RequiresPhase9Review` were all set on the profile
 and read by nothing except the profile's own test. An operator could select it
@@ -1005,3 +1014,61 @@ fan-out's per-language "loading" state does not exist yet — `kindByLang` prese
 currently means "loaded", so a carried-but-unfetched language would render as
 "this show has no captions in your language", which is fail-wrong. That is the
 work the cap requires, and it is recorded rather than half-done.
+
+## D44 — The application is OpenAccessBridge (project-wide rename)
+
+**What changed.** `CaptionBridge` → `OpenAccessBridge` everywhere: the Go module
+path (`github.com/simpledcp/openaccessbridge`), all three binaries
+(`openaccessbridge-{core,media,firewall}`), the systemd units, the nftables table
+`inet openaccessbridge`, the on-disk paths `/var/lib/openaccessbridge` and
+`/run/openaccessbridge`, the `OPENACCESSBRIDGE_*` environment prefix, the update
+bundle magic (`CBUPD1` → `OABUPD1`) and its `.cbupd` → `.oabupd` extension, the
+patron session cookie (`cb_session` → `oab_session`), and every user-visible
+brand string. The GitHub repository is now `simpledcp/openaccessbridge-app`.
+
+**Clean break on runtime identifiers, and no migration code.** Renaming the
+nftables table, the state and runtime directories and the bundle magic would
+strand an appliance upgrading in place — the old `table inet captionbridge` would
+keep enforcing while verification looked for a table that was not there, which is
+a security row stating the opposite of the truth (guardrail #4, the D17/D37
+defect class). No migration was written because there is nothing to migrate:
+BLOCKER B6 means no appliance has ever been deployed to a lab or a venue. If that
+ever stops being true, a migration is required BEFORE the first install, not
+after.
+
+**Two things deliberately keep the old name, because they are not ours to
+rename.** The build host's directories — `/home/libserv-2/captionbridge` (root
+owned, no passwordless sudo per D0) and `/home/libserv-2/captionbridge-app` — are
+facts about a machine, not brand strings. The first sweep rewrote them anyway,
+which turned D0, STATUS.md's post-compaction orientation block and a copy-pasteable
+build recipe into instructions naming directories that do not exist. Reverted, and
+both records now say WHY the old name is still there.
+
+**The sweep's own failure mode is the lesson.** A global substitution is fast and
+uniform, and both properties are the problem: it cannot distinguish a product name
+from an external identifier, and it applies its mistake everywhere at once. Three
+classes came out of it, none of which a compiler or a test suite can see:
+
+1. *Real-world identifiers rewritten as if they were brand* — the host paths
+   above. Caught only by executing the documented commands.
+2. *Grammar broken by a vowel* — "a CaptionBridge" is correct and
+   "a OpenAccessBridge" is not, in an operator-facing refusal message and two doc
+   comments. The Spanish demo caption `"Bienvenido a OpenAccessBridge."` is
+   correct as it stands and must NOT be "fixed": there "a" is a preposition.
+3. *Layout broken by three characters* — `OpenAccessBridge` is three wider than
+   `CaptionBridge`, which pushed a §3.1 box-drawing border out of true, misaligned
+   a §3.5 hanging indent, and carried 22 comment lines over the wrap width. Every
+   affected line is now back to exactly its pre-rename column.
+
+**One orphaned abbreviation was found and fixed.** The patron session cookie was
+`cb_session`, and after the rename "cb" expanded to nothing anywhere in the tree.
+It is the product's only cookie; renaming it costs nothing because nothing outside
+the constant referenced the literal. `internal/qr`'s test payload `"CB"` was left
+alone on purpose — it is an arbitrary two-byte QR payload, and a three-byte one
+could change the symbol version the test's geometry asserts.
+
+**Unverifiable, and flagged rather than guessed.** `buildplan.md`'s
+`Source: OpenAccessBridge_Project_Concept.md` cites a concept document that lives
+outside this repo. It was renamed with everything else; if the actual file is
+still named for the old brand, that citation now points at a name that does not
+exist.

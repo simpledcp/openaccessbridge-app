@@ -40,7 +40,7 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   serves Opus over WebRTC. A Go subscriber speaking the same protocol as
   `assets/patron.js` joins the running three-process appliance, offers, applies
   the answer, and receives Opus RTP
-  (`cmd/captionbridge-core/audio_e2e_test.go`). What it does NOT prove is
+  (`cmd/openaccessbridge-core/audio_e2e_test.go`). What it does NOT prove is
   anything phone-shaped: no iOS/Android browser, no venue AP, no mDNS candidate
   from a real browser, no autoplay-gesture behaviour, and — decisively — **no
   measurement of the phone-side jitter buffer**, which §6.7 names as the
@@ -99,7 +99,7 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   `webrtcbin`, no dev headers, no cgo.
 
 ### B5. nftables apply + sysctl forwarding toggle need root at runtime
-- **Needed to clear:** the `captionbridge-firewall` helper runs as root (systemd
+- **Needed to clear:** the `openaccessbridge-firewall` helper runs as root (systemd
   unit) on the real appliance to apply rules and set `net.ipv4.ip_forward=0` /
   `net.ipv6.conf.all.forwarding=0`.
 - **Workaround in place:** the firewall manager **generates and verifies** the

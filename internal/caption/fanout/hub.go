@@ -27,7 +27,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // ErrTooManyClients is returned when the per-profile client cap is reached (D11).

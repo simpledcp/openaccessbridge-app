@@ -3,7 +3,7 @@ package web
 import (
 	"net/http"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // adminMux builds the admin routes (§8.4). It is served on a separate listener

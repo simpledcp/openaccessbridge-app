@@ -1,4 +1,4 @@
-// Package encode is the Opus-encode + WebRTC-transport seam for captionbridge-media
+// Package encode is the Opus-encode + WebRTC-transport seam for openaccessbridge-media
 // (buildplan.md §6.7). The encoder/transport is pluggable so the qualifier and
 // channel mapper (pure Go) stay testable without GStreamer, and so the media
 // backend can be swapped (e.g. aiortc) without touching the caption core (§3.5).

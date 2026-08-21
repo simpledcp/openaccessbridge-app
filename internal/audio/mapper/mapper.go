@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Mode is an admin-selectable channel mapping (§6.5). Its string value is the

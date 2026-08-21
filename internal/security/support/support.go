@@ -34,9 +34,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/security/firewall"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/security/firewall"
 )
 
 // Errors an operator surface turns into a message.

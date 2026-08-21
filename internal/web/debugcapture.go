@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/logging/debugcapture"
+	"github.com/simpledcp/openaccessbridge/internal/logging/debugcapture"
 )
 
 // DebugCaptureResponse is the operator-facing state.

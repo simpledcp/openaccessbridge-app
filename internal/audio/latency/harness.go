@@ -18,13 +18,13 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/encode"
-	"github.com/simpledcp/captionbridge/internal/audio/mapper"
-	"github.com/simpledcp/captionbridge/internal/audio/pipeline"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/audio/webrtcpeer"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/encode"
+	"github.com/simpledcp/openaccessbridge/internal/audio/mapper"
+	"github.com/simpledcp/openaccessbridge/internal/audio/pipeline"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/audio/webrtcpeer"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // ErrNoMeasurement reports that the streaming half of the harness could not run,

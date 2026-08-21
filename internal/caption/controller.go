@@ -10,9 +10,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/caption/timing"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/caption/timing"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Controller maps a single timeline onto per-language timing engines and the hub.

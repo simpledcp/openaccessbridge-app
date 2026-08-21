@@ -1,8 +1,9 @@
-// Package pipeline assembles the captionbridge-media chain (buildplan.md §6):
-// capture → channel mapper → four-state qualifier → Opus encode. It runs one
-// independent chain per named stream (HI, VI-N) so the two are fully independent
-// (§6.1), and continuously reports each stream's transient AudioStreamState (no
-// audio samples are ever stored or logged — guardrail #5, §9.4).
+// Package pipeline assembles the openaccessbridge-media chain (buildplan.md
+// §6): capture → channel mapper → four-state qualifier → Opus encode. It runs
+// one independent chain per named stream (HI, VI-N) so the two are fully
+// independent (§6.1), and continuously reports each stream's transient
+// AudioStreamState (no audio samples are ever stored or logged — guardrail #5,
+// §9.4).
 //
 // The Stream also owns the per-input history the qualifier cannot see, because
 // those §6.3 measurements are properties of TIME rather than of one block:
@@ -18,12 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/encode"
-	"github.com/simpledcp/captionbridge/internal/audio/mapper"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/encode"
+	"github.com/simpledcp/openaccessbridge/internal/audio/mapper"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Encoder states reported on AudioStreamState.EncoderState (§6.6 "encoder

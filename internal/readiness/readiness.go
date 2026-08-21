@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/security/verify"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/security/verify"
 )
 
 // Network names the interface/allowlist facts surfaced on the dashboard.
@@ -242,10 +242,10 @@ func deploymentBanner(d Deploy) string {
 // profileRequirementWarnings enforces §12.4's operational requirements.
 //
 // They were flags on the deployment profile that nothing read: an operator could
-// select Low-Cost Replacement — the profile for venues running CaptionBridge IN
-// LIEU OF a professional receiver system — with no audio calibration ever run, no
-// input being monitored, and no Phase 9 review. Every one of those is what a
-// venue is relying on when it retires the system this replaces.
+// select Low-Cost Replacement — the profile for venues running OpenAccessBridge
+// IN LIEU OF a professional receiver system — with no audio calibration ever
+// run, no input being monitored, and no Phase 9 review. Every one of those is
+// what a venue is relying on when it retires the system this replaces.
 //
 // They are CRITICAL because internal/web's setup gate blocks on critical
 // warnings: the same condition then stops an installer declaring setup complete,
@@ -258,7 +258,7 @@ func profileRequirementWarnings(d Deploy, audio []model.AudioStreamState) []mode
 			Code: model.WarnCalibrationRequired,
 			Message: "This deployment profile requires the audio calibration wizard to have been run, " +
 				"and no calibration is recorded for this auditorium. It is the profile for venues " +
-				"running CaptionBridge in place of a professional receiver system (§12.4).",
+				"running OpenAccessBridge in place of a professional receiver system (§12.4).",
 			Severity: model.SeverityCritical,
 		})
 	}

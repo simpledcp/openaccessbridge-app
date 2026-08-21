@@ -1,9 +1,9 @@
-# CaptionBridge — Phased Build Plan
+# OpenAccessBridge — Phased Build Plan
 
 **A local cinema accessibility appliance: ST 430-10/ST 430-11 captions to smartphones, plus HI/VI audio from low-cost analog inputs.**
 
 Version: Build-plan draft 1.2 (incorporates a second external technical-review pass)
-Source: `CaptionBridge_Project_Concept.md`
+Source: `OpenAccessBridge_Project_Concept.md`
 Status: Engineering plan for review. Not a compliance certification, not legal advice.
 
 ---
@@ -18,11 +18,11 @@ The phased plan in Section 13 is the spine. Everything before it is the design t
 
 ---
 
-## 1. Scope, guardrails, and what CaptionBridge is (and is not)
+## 1. Scope, guardrails, and what OpenAccessBridge is (and is not)
 
 ### 1.1 One-sentence definition
 
-CaptionBridge is a locked-down, dual-interface appliance that consumes a cinema server's standardized off-screen timed-text feed (SMPTE ST 430-10 synchronization + ST 430-11 resource lists + referenced timed-text assets), captures hearing-impaired (HI) and visually-impaired narrative (VI-N) audio from whatever analog output a venue can provide, and serves both to patron smartphones over a local web page using a low-latency browser audio path — without ever routing packets between the theater network and the patron network.
+OpenAccessBridge is a locked-down, dual-interface appliance that consumes a cinema server's standardized off-screen timed-text feed (SMPTE ST 430-10 synchronization + ST 430-11 resource lists + referenced timed-text assets), captures hearing-impaired (HI) and visually-impaired narrative (VI-N) audio from whatever analog output a venue can provide, and serves both to patron smartphones over a local web page using a low-latency browser audio path — without ever routing packets between the theater network and the patron network.
 
 ### 1.2 Hard guardrails (these are non-negotiable and shape every later decision)
 
@@ -36,13 +36,13 @@ Guardrails 1–6 are lifted directly from the brief and treated as invariants th
 6. **Default-deny firewalling with verified interface isolation** is part of the product, not an afterthought, and is re-verified at install time and at runtime.
 7. **No silent degradation.** If captions, HI, VI-N, network isolation, admin separation, or latency fall below the active profile's thresholds, the system must surface a clear staff warning *and* an appropriate patron-facing state. It must never present an unavailable or materially degraded service as if it were working — this is core to accessibility trust and underpins the loud-warning, four-state-qualifier, and patron-error-state behavior throughout.
 
-### 1.3 What CaptionBridge is *not*, and a necessary caution
+### 1.3 What OpenAccessBridge is *not*, and a necessary caution
 
 A phone-based caption/audio page is **not** automatically equivalent to a professional cinema accessibility system, and deploying it "in lieu of" one has operational and regulatory implications that this plan cannot resolve for you. In several jurisdictions (for example, US ADA obligations for digital cinema) exhibitors are required to provide and maintain working closed-captioning and audio-description equipment; whether a bring-your-own-device web approach satisfies that obligation depends on jurisdiction, enforcement posture, device availability, staff procedure, and how the venue operationalizes it.
 
-This is not legal advice, and the author is not a lawyer. **Phase 9 of this plan exists specifically to force an operational and legal review before any venue relies on CaptionBridge as a replacement.** Treat the "potential replacement" framing as a product goal that must be *earned* through reliability work and venue review, not assumed.
+This is not legal advice, and the author is not a lawyer. **Phase 9 of this plan exists specifically to force an operational and legal review before any venue relies on OpenAccessBridge as a replacement.** Treat the "potential replacement" framing as a product goal that must be *earned* through reliability work and venue review, not assumed.
 
-**Access-equivalence is not only latency and reliability — it is device availability.** A bring-your-own-device model provides access only if the patron actually has a usable device: a compatible phone, a charged battery, headphones, workable network settings, and the comfort to scan a QR code and use a web UI in a dark auditorium. A venue cannot claim equivalent access on CaptionBridge alone unless it *also* has a procedure for patrons who have none of these — for example venue-owned loaner phones/tablets, loaner wired earbuds, battery packs, staff setup assistance, and a documented fallback to professional receivers where they exist. Without that, the residual risk is not performance; it is access-equivalence and operational availability, and Phase 9 must verify the procedure exists rather than only that the technology works.
+**Access-equivalence is not only latency and reliability — it is device availability.** A bring-your-own-device model provides access only if the patron actually has a usable device: a compatible phone, a charged battery, headphones, workable network settings, and the comfort to scan a QR code and use a web UI in a dark auditorium. A venue cannot claim equivalent access on OpenAccessBridge alone unless it *also* has a procedure for patrons who have none of these — for example venue-owned loaner phones/tablets, loaner wired earbuds, battery packs, staff setup assistance, and a documented fallback to professional receivers where they exist. Without that, the residual risk is not performance; it is access-equivalence and operational availability, and Phase 9 must verify the procedure exists rather than only that the technology works.
 
 ### 1.4 Standards and references you must license and read before building
 
@@ -50,10 +50,10 @@ Public summaries (used to write this plan) are enough to design the architecture
 
 - **SMPTE ST 430-10** — *D-Cinema Operations — Auxiliary Content Synchronization Protocol (ACSP).* The caption sync/lease/timeline protocol. This plan's state machine (Section 5) is built from public ISDCF implementation notes and must be reconciled against the real PDU definitions.
 - **SMPTE ST 430-11** — *D-Cinema Operations — Auxiliary Resource Presentation List (RPL).* The XML list that points at timed-text assets.
-- **SMPTE ST 429-12** — *D-Cinema Packaging — Caption and Closed Subtitle.* Defines, at the Composition Playlist level, the on-screen `MainSubtitle`/`MainCaption` and the **off-screen (closed) `ClosedSubtitle`/`ClosedCaption` text tracks** (up to six per reel). The closed text tracks are exactly what CaptionBridge consumes via the ST 430-11 RPL, so this standard — not just ST 428-7 — governs how an accessibility device distinguishes captions from subtitles.
+- **SMPTE ST 429-12** — *D-Cinema Packaging — Caption and Closed Subtitle.* Defines, at the Composition Playlist level, the on-screen `MainSubtitle`/`MainCaption` and the **off-screen (closed) `ClosedSubtitle`/`ClosedCaption` text tracks** (up to six per reel). The closed text tracks are exactly what OpenAccessBridge consumes via the ST 430-11 RPL, so this standard — not just ST 428-7 — governs how an accessibility device distinguishes captions from subtitles.
 - **SMPTE ST 429-5** — *D-Cinema Packaging — Timed Text Track File.* The MXF track-file wrapper that all D-Cinema timed-text assets are packaged in; relevant for understanding how referenced assets are carried and resolved.
 - **SMPTE ST 428-7** — *D-Cinema Distribution Master — Subtitle.* The base subtitle timed-text XML grammar (used directly for on-screen subtitles).
-- **SMPTE ST 428-10** — *D-Cinema Distribution Master — Closed Caption and Closed Subtitle.* The XML profile that **closed** (off-screen) caption/subtitle text conforms to — i.e., the format CaptionBridge's parser actually receives for accessibility tracks. It builds on and constrains ST 428-7 rather than replacing it. (Plus **legacy Interop subtitle XML** in older content.)
+- **SMPTE ST 428-10** — *D-Cinema Distribution Master — Closed Caption and Closed Subtitle.* The XML profile that **closed** (off-screen) caption/subtitle text conforms to — i.e., the format OpenAccessBridge's parser actually receives for accessibility tracks. It builds on and constrains ST 428-7 rather than replacing it. (Plus **legacy Interop subtitle XML** in older content.)
 - **ISDCF** — *SMPTE ST 430-10 Implementation Notes* (Hallikainen, 2018) and the ISDCF channel-assignment / accessibility guidance for HI and VI-N channel definitions.
 - Vendor context (to understand the professional baseline you are standing in for): Dolby Accessibility Solution / AccessLink / Fidelio product documentation.
 
@@ -67,9 +67,9 @@ Understanding the professional baseline clarifies one architectural decision tha
 
 A professional system (e.g., Dolby's accessibility receiver line) does two things at once: it takes the **closed-caption text** *and* the **HI and VI-N audio** directly out of the decrypted DCP, in perfect sync, and streams all three wirelessly to a dedicated handheld/seat receiver. Because it lives inside the playback security boundary, it gets the audio essence digitally and time-aligned for free.
 
-**CaptionBridge cannot do that, and must not try.** It is an outboard device with no access to decrypted audio essence. This produces the defining asymmetry of the whole product:
+**OpenAccessBridge cannot do that, and must not try.** It is an outboard device with no access to decrypted audio essence. This produces the defining asymmetry of the whole product:
 
-| Path | Professional receiver | CaptionBridge |
+| Path | Professional receiver | OpenAccessBridge |
 |---|---|---|
 | **Captions** | From decrypted DCP timed text, in sync | From ST 430-10/ST 430-11 — *the same standards-based auxiliary-content path professional accessibility systems are designed to consume*. **Protocol/source parity is achievable**; full *rendering* parity (styling, positioning, image subtitles) is a later milestone (Section 5.4, Phase 8). |
 | **HI / VI-N audio** | From decrypted DCP audio essence, digitally, sample-accurate | From an **analog tap** of the cinema processor's accessibility outputs. Quality and latency are bounded by booth wiring and a consumer ADC. Parity is *not* achievable; "good enough for assistive listening" is the goal. |
@@ -98,7 +98,7 @@ Two consequences fall out of this and recur throughout the plan:
 └────────────────────────────────────────────┼───────────────────────┘
                                               │ analog wiring
                   ┌───────────────────────────▼───────────────────────┐
-                  │              CaptionBridge appliance               │
+                  │             OpenAccessBridge appliance             │
                   │                                                    │
                   │  Caption plane:  ACSP client → RPL parser →        │
                   │                  timed-text parser → timing engine │
@@ -134,7 +134,7 @@ The theater-facing **eth0** sees only the allowlisted ACSP/TCP relationship with
 
 "Application-layer bridge, not IP-layer bridge" is enforced by construction, not policy:
 
-- The caption plane **opens an outbound TCP connection** from CaptionBridge to the cinema server — CaptionBridge initiates the socket, and the server then drives the *application-layer* request/response. (These are two different layers, not a contradiction.) The exact TCP-initiation direction is confirmed against a real server in **Phase 0A** before the firewall and simulator are built around it. The patron plane never connects to the server; it connects to CaptionBridge. There is no socket, route, or rule that joins them.
+- The caption plane **opens an outbound TCP connection** from OpenAccessBridge to the cinema server — OpenAccessBridge initiates the socket, and the server then drives the *application-layer* request/response. (These are two different layers, not a contradiction.) The exact TCP-initiation direction is confirmed against a real server in **Phase 0A** before the firewall and simulator are built around it. The patron plane never connects to the server; it connects to OpenAccessBridge. There is no socket, route, or rule that joins them.
 - Captions are decoded into an internal cue model and re-serialized into a separate WebSocket/SSE protocol for browsers. Patrons never receive raw ST 430-10/-11 traffic.
 - Audio is decoded from analog, re-encoded to Opus, and delivered via a fresh WebRTC peer connection. No theater-side network audio (there isn't any in the supported path) is ever proxied.
 - Kernel `net.ipv4.ip_forward=0` and `net.ipv6.conf.all.forwarding=0`; no bridge devices; nftables default-deny with no `forward`-chain accepts (Section 9). A runtime watchdog re-asserts these and the dashboard screams if any flip.
@@ -146,7 +146,7 @@ Build plans should make decisions. The recommendation, with rationale:
 | Concern | Recommendation | Why |
 |---|---|---|
 | **Caption/control services** (ACSP state machine, RPL/timed-text parsing, timing engine, web/admin server, firewall mgr) | **Go** (single static binary, systemd-managed) | Strong concurrency for the state machine + many WebSocket clients; trivial deployment as one binary on a read-only-rootfs appliance; easy cross-compile for arm64/amd64; good XML and net libraries. |
-| **Media pipeline** (analog capture → level/qualify → Opus → WebRTC) | **GStreamer with `webrtcbin`**, run as a **separate supervised process** (`captionbridge-media`), not embedded in the Go binary (see 3.5) | Battle-tested ALSA capture, level analysis (`level` element), Opus encode, and standards-compliant WebRTC in one well-supported pipeline; far less risky than hand-rolling RTP/SRTP. Isolating it in its own process keeps a media crash from taking down the caption lease. |
+| **Media pipeline** (analog capture → level/qualify → Opus → WebRTC) | **GStreamer with `webrtcbin`**, run as a **separate supervised process** (`openaccessbridge-media`), not embedded in the Go binary (see 3.5) | Battle-tested ALSA capture, level analysis (`level` element), Opus encode, and standards-compliant WebRTC in one well-supported pipeline; far less risky than hand-rolling RTP/SRTP. Isolating it in its own process keeps a media crash from taking down the caption lease. |
 | **Patron + admin UI** | Static SPA (lightweight; e.g., Preact/Svelte) served by the Go binary; no SSR framework | Keeps the appliance dependency-light and offline; UI is simple enough not to need a heavy framework. |
 | **Config/state store** | SQLite for *configuration and profiles only* (never caption/audio content) | Single-file, crash-safe, easy backup/restore for auditorium profiles. Content stays in memory. |
 | **OS** | Minimal Debian/Ubuntu LTS or a Yocto-built image for the hardened tier | LTS for speed early; Yocto for a reproducible, read-only, A/B-updatable hardened image later. |
@@ -158,15 +158,15 @@ Build plans should make decisions. The recommendation, with rationale:
 The appliance runs as **three supervised processes** from day one rather than one monolith, communicating only over local loopback (Unix domain socket or loopback gRPC). This makes the plan's "captions and audio are independent" principle true at the process boundary, not just in state:
 
 ```text
-captionbridge-core      Go: ACSP state machine, RPL/timed-text, timing engine,
-                        caption fan-out, web/admin server, sessions
-captionbridge-media     GStreamer: ALSA capture → qualify → Opus → WebRTC
-captionbridge-firewall  privileged helper: nftables apply + sysctl/forwarding
-                        verification (the only component that needs root for
-                        network state)
+openaccessbridge-core      Go: ACSP state machine, RPL/timed-text, timing engine,
+                           caption fan-out, web/admin server, sessions
+openaccessbridge-media     GStreamer: ALSA capture → qualify → Opus → WebRTC
+openaccessbridge-firewall  privileged helper: nftables apply + sysctl/forwarding
+                           verification (the only component that needs root for
+                           network state)
 ```
 
-Benefits: a GStreamer/media crash cannot drop the caption lease or the admin surface; the privileged network-verification helper is a small, auditable component kept separate from the large web/parsing surface; each process restarts and health-checks independently; and the media backend can be swapped later (e.g., `aiortc`) without touching the caption core. `captionbridge-core` supervises the others (systemd units with restart policies) and reports each one's liveness to the dashboard.
+Benefits: a GStreamer/media crash cannot drop the caption lease or the admin surface; the privileged network-verification helper is a small, auditable component kept separate from the large web/parsing surface; each process restarts and health-checks independently; and the media backend can be swapped later (e.g., `aiortc`) without touching the caption core. `openaccessbridge-core` supervises the others (systemd units with restart policies) and reports each one's liveness to the dashboard.
 
 ---
 
@@ -213,15 +213,15 @@ The caption subsystem is where **protocol/source parity** with a professional de
 Per the public reference material, ST 430-10 (the Auxiliary Content Synchronization Protocol, ACSP) is an Ethernet/TCP request–response protocol. The role model — **confirm against the licensed standard and your first target server** — is:
 
 - The **cinema server / media block (IMB)** is the synchronization source.
-- **CaptionBridge is the Auxiliary Content Server (ACS)** — the device that ultimately serves auxiliary content (captions) to patrons.
-- **CaptionBridge (the ACS) opens the TCP connection** to the media block; once connected, the media block drives the *application-layer* exchange by issuing ACSP requests, to which the ACS responds. (Client-initiates-TCP / server-drives-protocol is one pattern, not two contradictory ones — but the exact TCP-initiation direction is itself confirmed in **Phase 0A** against a real server before anything is built around it.) CaptionBridge then **retrieves the referenced timed-text resources** from the media block based on the timing information it receives (the resource form — direct XML, a track-file reference, or an MXF-wrapped track — is a Phase 0A finding; see 5.3).
+- **OpenAccessBridge is the Auxiliary Content Server (ACS)** — the device that ultimately serves auxiliary content (captions) to patrons.
+- **OpenAccessBridge (the ACS) opens the TCP connection** to the media block; once connected, the media block drives the *application-layer* exchange by issuing ACSP requests, to which the ACS responds. (Client-initiates-TCP / server-drives-protocol is one pattern, not two contradictory ones — but the exact TCP-initiation direction is itself confirmed in **Phase 0A** against a real server before anything is built around it.) OpenAccessBridge then **retrieves the referenced timed-text resources** from the media block based on the timing information it receives (the resource form — direct XML, a track-file reference, or an MXF-wrapped track — is a Phase 0A finding; see 5.3).
 
 Two registration facts are **OPEN** and gate any real deployment (Section 14); both are closed by the **Phase 0A ACSP Wire Contract** (Section 13):
 
-1. **Endpoint registration:** does the target server auto-discover an ACSP device, or must an operator configure CaptionBridge's IP into the server's accessibility settings? This varies by server family and directly affects installability.
+1. **Endpoint registration:** does the target server auto-discover an ACSP device, or must an operator configure OpenAccessBridge's IP into the server's accessibility settings? This varies by server family and directly affects installability.
 2. **Connection initiation direction and ports:** confirm which side initiates TCP, on which port(s), and whether any TLS/auth is involved, per server family.
 
-> DCI security rules permit decrypted timed-text track files to be stored in the clear locally. CaptionBridge is therefore *permitted* to fetch and cache timed-text XML — but per guardrail #5 it still keeps that cache **in transient memory and purges at show end** rather than persisting it.
+> DCI security rules permit decrypted timed-text track files to be stored in the clear locally. OpenAccessBridge is therefore *permitted* to fetch and cache timed-text XML — but per guardrail #5 it still keeps that cache **in transient memory and purges at show end** rather than persisting it.
 
 ### 5.2 ST 430-10 state machine
 
@@ -254,7 +254,7 @@ CONNECTED ──► ANNOUNCED ──► LEASED ──► TIMELINE_ACTIVE ──�
 **Behaviors that are easy to get wrong (bake these into tests from day one):**
 
 1. **Request interval = half the lease interval.** Some servers push status requests close to lease expiry; with the half-lease cadence the lease should never lapse from timing jitter. Treat anything approaching the lease as a warning.
-2. **Continue output on comms loss until the lease expires.** ST 430-10 (per the implementation notes, §7.2.6.6) requires the ACS to keep outputting resources through a momentary communications interruption until the lease times out. CaptionBridge must therefore *keep showing valid captions across a brief Ethernet blip* and only blank or warn once the lease genuinely expires. This is a reliability feature, not a bug.
+2. **Continue output on comms loss until the lease expires.** ST 430-10 (per the implementation notes, §7.2.6.6) requires the ACS to keep outputting resources through a momentary communications interruption until the lease times out. OpenAccessBridge must therefore *keep showing valid captions across a brief Ethernet blip* and only blank or warn once the lease genuinely expires. This is a reliability feature, not a bug.
 3. **`Set Output Mode` = the server's play/stop status.** Use it to drive a "welcome / no captions for this content" state versus an active-caption state. Some servers only send it for captioned content; handle its absence gracefully (assume unknown rather than crash).
 4. **Playout ID uniqueness quirks.** Some servers send `Playout ID = 0` for every uncaptioned composition (trailers, etc.), producing several RPLs and timeline segments with non-unique Playout IDs that can look like a "loop back" to naïve code. Do **not** treat repeated/zero Playout IDs as a seek-to-start. Disambiguate using timeline position, not Playout ID alone.
 5. **Empty `ReelResources`.** Reels/compositions without captions legitimately carry empty resource lists. Render "no captions for this segment," not an error.
@@ -455,7 +455,7 @@ During playback, per input/stream, continuously report: input present/missing, d
 
 ### 6.7 WebRTC/Opus streaming design
 
-**Topology.** One **capture/analysis/Opus source per named stream** (HI, VI-N), distributed to **one WebRTC peer connection per browser subscriber** — not literal multicast. The appliance is the WebRTC peer (via GStreamer `webrtcbin`); each phone is a separate remote peer with its own SRTP/session state. The design must avoid re-running capture/analysis per client; whether the *encoded* Opus packets can be reused across peers (vs. re-packetized per peer) depends on the media backend, so treat that as an implementation detail of `captionbridge-media`, not a guarantee. Because every phone is on the appliance's own patron LAN, this is a single-hop, same-subnet path with **no NAT and no internet dependency**, so the path is designed for **host ICE candidates only**: **no internet STUN/TURN is expected or permitted in the production local-only path.** That host-candidate-only delivery is a Phase 0B **proof obligation**, not an assumption — mDNS `*.local` candidates, AP client-isolation, and mobile-browser quirks must be shown not to break it on the supported patron-network profile.
+**Topology.** One **capture/analysis/Opus source per named stream** (HI, VI-N), distributed to **one WebRTC peer connection per browser subscriber** — not literal multicast. The appliance is the WebRTC peer (via GStreamer `webrtcbin`); each phone is a separate remote peer with its own SRTP/session state. The design must avoid re-running capture/analysis per client; whether the *encoded* Opus packets can be reused across peers (vs. re-packetized per peer) depends on the media backend, so treat that as an implementation detail of `openaccessbridge-media`, not a guarantee. Because every phone is on the appliance's own patron LAN, this is a single-hop, same-subnet path with **no NAT and no internet dependency**, so the path is designed for **host ICE candidates only**: **no internet STUN/TURN is expected or permitted in the production local-only path.** That host-candidate-only delivery is a Phase 0B **proof obligation**, not an assumption — mDNS `*.local` candidates, AP client-isolation, and mobile-browser quirks must be shown not to break it on the supported patron-network profile.
 
 **Signaling.** SDP offer/answer + ICE are exchanged over the existing local web server's WebSocket — no third-party signaling. The patron page requests a stream (`HI` or `VI-N`), the appliance answers with a `webrtcbin` peer for that stream.
 
@@ -531,7 +531,7 @@ The admin interface is the difference between "a clever prototype" and "a thing 
 
 ### 8.1 First-boot / installer workflow
 
-1. Bring up a temporary **"CaptionBridge Setup"** network and serve a local setup URL.
+1. Bring up a temporary **"OpenAccessBridge Setup"** network and serve a local setup URL.
 2. **Force admin credential creation** — no default credentials may remain active past setup.
 3. Identify **theater-side** vs **client-side** interfaces (with a physical-port confirmation step to prevent miswiring).
 4. Configure the theater-side interface (static IP or DHCP).
@@ -618,7 +618,7 @@ Even with no TMS integration, "you are connected to Auditorium X" plus a pinned 
 
 ## 9. Network and security model
 
-CaptionBridge may sit on a booth network alongside cinema servers, projectors/media blocks, TMS, automation, NAS, and business systems. It is designed as a **locked-down booth device** whose security posture is configured *and continuously verified*, not set once and forgotten.
+OpenAccessBridge may sit on a booth network alongside cinema servers, projectors/media blocks, TMS, automation, NAS, and business systems. It is designed as a **locked-down booth device** whose security posture is configured *and continuously verified*, not set once and forgotten.
 
 ### 9.1 Interface isolation and firewall
 
@@ -633,7 +633,7 @@ The real ruleset is profile-driven and generated by the firewall manager. **The 
 Common to both (the parts that never change):
 
 ```text
-table inet captionbridge {
+table inet openaccessbridge {
   chain input {
     type filter hook input priority 0; policy drop;
     ct state established,related accept
@@ -656,7 +656,7 @@ table inet captionbridge {
 }
 ```
 
-**Variant A — ACS-initiated** (CaptionBridge opens the TCP connection; current working assumption):
+**Variant A — ACS-initiated** (OpenAccessBridge opens the TCP connection; current working assumption):
 
 ```text
 # output: allow the outbound connection to the server's ACSP port
@@ -665,15 +665,15 @@ oif "eth0" ip daddr $CINEMA_SERVER tcp dport $ACSP_PORT accept
 #        `ct state established,related accept` rule above.
 ```
 
-**Variant B — server-initiated** (the media block opens the connection to CaptionBridge):
+**Variant B — server-initiated** (the media block opens the connection to OpenAccessBridge):
 
 ```text
-# input: allow the server to reach CaptionBridge's local ACSP listener port
+# input: allow the server to reach OpenAccessBridge's local ACSP listener port
 iif "eth0" ip saddr $CINEMA_SERVER tcp dport $LOCAL_ACSP_PORT accept
 # output: nothing explicit needed — replies are established,related.
 ```
 
-Why this matters: in Variant A an explicit inbound `tcp sport $ACSP_PORT accept` rule is **redundant** (connection tracking already admits the replies) and only invites confusion; in Variant B such a rule is **required**, but it must match the *destination* port (CaptionBridge's listener), not the source port. Pinning the direction in Phase 0A removes the guesswork.
+Why this matters: in Variant A an explicit inbound `tcp sport $ACSP_PORT accept` rule is **redundant** (connection tracking already admits the replies) and only invites confusion; in Variant B such a rule is **required**, but it must match the *destination* port (OpenAccessBridge's listener), not the source port. Pinning the direction in Phase 0A removes the guesswork.
 
 ### 9.2 Firewall / install profiles
 
@@ -690,7 +690,7 @@ Security is only real if it is checked. The firewall manager runs a **verificati
 
 - forwarding disabled (v4 + v6); no bridge devices present;
 - default-deny active with no forward-accepts;
-- theater-side reachable scope == allowlist only — verified primarily by **introspecting CaptionBridge's own routes and firewall permissions** (the appliance has no configured route or rule beyond the allowlist), *not* by scanning the theater network. Any active reachability check is **limited to the configured server, rate-limited, profile-controlled, and never a broad subnet scan** in production profiles — the appliance must never behave like a network scanner on a cinema LAN;
+- theater-side reachable scope == allowlist only — verified primarily by **introspecting OpenAccessBridge's own routes and firewall permissions** (the appliance has no configured route or rule beyond the allowlist), *not* by scanning the theater network. Any active reachability check is **limited to the configured server, rate-limited, profile-controlled, and never a broad subnet scan** in production profiles — the appliance must never behave like a network scanner on a cinema LAN;
 - no DNS/route leak across interfaces (the patron side cannot reach the theater side or the internet through the appliance);
 - admin surface not bound/exposed on the patron network;
 - no default credentials; SSH state correct for the profile.
@@ -721,7 +721,7 @@ caption.cue.visible_no_text       firewall.profile.applied
 
 (`caption.cue.visible_no_text` records that a cue was shown and for how long, not its words — enough to debug a "captions look wrong" report without storing content.)
 
-**Streams are local-only.** No internet rebroadcast, ever. Per-show **access code or signed QR token** for patron access; sessions auto-expire at show end. (CaptionBridge may be retransmitting copyrighted accessibility assets locally; treat both captions and audio as sensitive content that never leaves the venue LAN.)
+**Streams are local-only.** No internet rebroadcast, ever. Per-show **access code or signed QR token** for patron access; sessions auto-expire at show end. (OpenAccessBridge may be retransmitting copyrighted accessibility assets locally; treat both captions and audio as sensitive content that never leaves the venue LAN.)
 
 **Support mode.** Off by default. When enabled by an admin it is **outbound-only, time-limited, and audited**, and visibly indicated. It is the only re-entry path once SSH is disabled.
 
@@ -943,7 +943,7 @@ For temporary/festival/pop-up accessibility use. Most locked down: theater side 
 
 ### 12.4 Low-Cost Accessibility Replacement
 
-For venues running CaptionBridge **in lieu of** a professional receiver system, often with only basic analog outputs and a non-specialist installer. Adds operational requirements on top of Patron-Facing: ST 430-10/-11 captions over Ethernet; 3.5 mm/USB audio for HI/VI-N; local Wi-Fi web app; **mandatory audio calibration wizard**; **mandatory signal-health monitoring**; per-show access code/token; no internet rebroadcast; no recording by default; and **clear staff/patron error states**. This profile may only ship to a venue **after Phase 9** operational/legal review (Section 1.3).
+For venues running OpenAccessBridge **in lieu of** a professional receiver system, often with only basic analog outputs and a non-specialist installer. Adds operational requirements on top of Patron-Facing: ST 430-10/-11 captions over Ethernet; 3.5 mm/USB audio for HI/VI-N; local Wi-Fi web app; **mandatory audio calibration wizard**; **mandatory signal-health monitoring**; per-show access code/token; no internet rebroadcast; no recording by default; and **clear staff/patron error states**. This profile may only ship to a venue **after Phase 9** operational/legal review (Section 1.3).
 
 ### 12.5 Loaner Device Mode (overlay on Patron-Facing or Low-Cost Replacement)
 
@@ -967,7 +967,7 @@ The plan extends the brief's phases and adds explicit **gates**. Each phase list
 ### Phase 0A — ACSP wire discovery
 
 - **Goal:** pin the one assumption everything else is built on — how the caption protocol actually behaves on a real server — *before* writing the simulator, firewall rules, or fetcher.
-- **Scope:** one session against a **real cinema server/IMB** of the chosen first target family, capturing a **pcap** and answering: does CaptionBridge connect to the server or vice versa; the ACSP port; whether the appliance IP must be registered in the server UI; request framing; the RPL location/locator form; how timed-text assets are actually fetched (server-relative / http(s) / file-like / vendor-specific); and whether the **theater-side firewall needs inbound rules**.
+- **Scope:** one session against a **real cinema server/IMB** of the chosen first target family, capturing a **pcap** and answering: does OpenAccessBridge connect to the server or vice versa; the ACSP port; whether the appliance IP must be registered in the server UI; request framing; the RPL location/locator form; how timed-text assets are actually fetched (server-relative / http(s) / file-like / vendor-specific); and whether the **theater-side firewall needs inbound rules**.
 - **Deliverables:** **ACSP Wire Contract v0** — first target server family; connection direction; port; registration model; sample packet capture; sample RPL; sample timed-text asset plus its fetch mechanism; whether inbound theater-side firewall rules are needed. (This does not require a finished parser — one real server session and a capture.)
 - **Exit:** the Wire Contract is documented, and the **firewall variant (Section 9.1) and simulator (Phase 3) are committed to the confirmed direction**, not a guess.
 
@@ -1019,9 +1019,9 @@ The audio MVP is split into two gates because the two streams have **fundamental
 
 - **Goal:** prove one analog input → one browser audio stream, and characterize HI latency honestly against a real phone fleet.
 - **Scope:** capture a single analog input; run the calibration wizard; encode Opus; deliver via WebRTC to a phone browser; level meter, clipping detection, silence detection; simple staff/patron error messages. **Run the real glass-to-ear latency test (11.4) here**, across **iOS Safari and Android Chrome and both wired and Bluetooth** headphones, and confront the HI target.
-- **Deliverables:** capture + qualifier v1; calibration wizard v1; GStreamer `webrtcbin` audio path (as the `captionbridge-media` process, Section 3.5); **minimum audio MVP** (one consumer analog input path; calibration wizard; level meter; clipping + silence + mono/stereo detection; one WebRTC/Opus stream; patron error messages; no recording; local-only access).
+- **Deliverables:** capture + qualifier v1; calibration wizard v1; GStreamer `webrtcbin` audio path (as the `openaccessbridge-media` process, Section 3.5); **minimum audio MVP** (one consumer analog input path; calibration wizard; level meter; clipping + silence + mono/stereo detection; one WebRTC/Opus stream; patron error messages; no recording; local-only access).
 - **G2a (VI-N) exit criteria:** a non-specialist can calibrate a Tier-1/Tier-2 input to "Usable" via the wizard; one **VI-N** stream plays stably in iOS Safari and Android Chrome; **measured VI-N latency is within budget**; nothing is recorded.
-- **G2b (HI) exit criteria:** **measured glass-to-ear HI latency is acceptable while auditorium sound is present**, validated (not assumed) across the test phone fleet with **wired** headphones (Bluetooth characterized separately); and a **documented failure threshold** is defined above which a venue should **not** offer HI through CaptionBridge. G2b may be met as "achieved on this fleet" or explicitly recorded as "device/Wi-Fi-limited — HI offered only under stated conditions"; either way the claim is evidence-based.
+- **G2b (HI) exit criteria:** **measured glass-to-ear HI latency is acceptable while auditorium sound is present**, validated (not assumed) across the test phone fleet with **wired** headphones (Bluetooth characterized separately); and a **documented failure threshold** is defined above which a venue should **not** offer HI through OpenAccessBridge. G2b may be met as "achieved on this fleet" or explicitly recorded as "device/Wi-Fi-limited — HI offered only under stated conditions"; either way the claim is evidence-based.
 
 ### Phase 6 — HI/VI channel mapping
 
@@ -1049,7 +1049,7 @@ The audio MVP is split into two gates because the two streams have **fundamental
 - **Goal:** earn the "replacement" claim responsibly (this gate is *not* in the original brief and is added deliberately — see Section 1.3).
 - **Scope:** supervised pilots in real venues; validate staff procedures (including **what staff do when a readiness check fails**), device availability, glare/battery/headphone realities, multilingual needs, and failure fallback; gather latency/reliability data across a real phone fleet; and complete the **operational and legal/accessibility-obligation review** for each target jurisdiction/venue.
 - **Deliverables:** pilot report (reliability, latency distribution, incident log); the **validated staff runbook** (the Phase 7 v0 proven and corrected in real venues); a documented compliance posture per venue/jurisdiction (produced with the venue's own legal/accessibility counsel — **not** by the engineering team alone).
-- **G5 exit criteria:** pilots meet agreed reliability/latency thresholds; staff procedures are proven; and a venue-specific operational/legal review has explicitly cleared CaptionBridge for use in lieu of a professional system **before** it is sold/deployed as such.
+- **G5 exit criteria:** pilots meet agreed reliability/latency thresholds; staff procedures are proven; and a venue-specific operational/legal review has explicitly cleared OpenAccessBridge for use in lieu of a professional system **before** it is sold/deployed as such.
 
 
 ## 14. Open standards & interoperability questions to resolve before production
@@ -1057,7 +1057,7 @@ The audio MVP is split into two gates because the two streams have **fundamental
 These are blockers or near-blockers. Each should be assigned an owner and closed with a real server, real venue, or real stakeholder — not assumed. (Marked **OPEN** where referenced above.) The ACSP/caption-path items 1–4 are the explicit job of the **Phase 0A ACSP Wire Contract** (Section 13).
 
 **ACSP / caption path**
-1. **Endpoint registration:** does the first target server **auto-discover** an ACSP device, or must an operator **configure CaptionBridge's IP** into the server's accessibility settings? Per server family. *(Biggest installability unknown.)*
+1. **Endpoint registration:** does the first target server **auto-discover** an ACSP device, or must an operator **configure OpenAccessBridge's IP** into the server's accessibility settings? Per server family. *(Biggest installability unknown.)*
 2. **Transport details:** exact ACSP framing/PDU structure, port(s), connection-initiation direction, and any TLS/authentication — confirmed against the **licensed ST 430-10** and the first target server.
 3. **Which server family to target first** for lab validation (drives Phase 4 scheduling and lab-time cost).
 4. **Message-flow and resource-locator specifics** the chosen server actually exposes: lease durations, timeline cadence, output-mode habits, Playout-ID behavior, **and the form of the RPL's resource locators** (URI schemes, paths, and the timed-text fetch mechanism) — which determines the resource-resolver handlers (Section 5.3).
@@ -1071,7 +1071,7 @@ These are blockers or near-blockers. Each should be assigned an owner and closed
 10. **Acceptable HI vs VI-N latency** in a phone-browser workflow — confirmed against the **measured** achievable numbers from Phases 0C/5, not just the aspirational targets.
 
 **Network / security / operations**
-11. **Patron Wi-Fi model:** does CaptionBridge **host its own** caption/audio Wi-Fi (recommended), or integrate into an existing theater guest/admin VLAN? Per venue/chain.
+11. **Patron Wi-Fi model:** does OpenAccessBridge **host its own** caption/audio Wi-Fi (recommended), or integrate into an existing theater guest/admin VLAN? Per venue/chain.
 12. **Minimum security profile a chain will accept** on a booth network (drives the production firewall profile and audit features).
 13. **Secure-context / cert strategy** for patron WebRTC + wake-lock (Section 6.7) — pick one approach and standardize it (candidates **characterized in Phase 0B, locked in Phase 7**; note that Loaner Device Mode, 12.5, can sidestep this for venue-owned fleets).
 14. **First-deployment intent:** internal diagnostic-only, festival operations, low-cost replacement, or patron-facing pilot? (Sets which profile ships first.)
@@ -1104,7 +1104,7 @@ These are blockers or near-blockers. Each should be assigned an owner and closed
 
 ## 16. Summary
 
-CaptionBridge is buildable as a phased product whose **caption path can reach protocol/source parity** with professional systems (it consumes the same standards-based ST 430-10/ST 430-11 auxiliary-content feed) — with full *rendering* parity a later milestone — and whose **audio path is honestly constrained** by analog wiring and consumer ADCs, which is why captions and audio carry fully independent state, health, and readiness throughout. The likely first shippable product is the **Booth Diagnostic** profile, which earns real-world compatibility data without making an access-equivalence claim.
+OpenAccessBridge is buildable as a phased product whose **caption path can reach protocol/source parity** with professional systems (it consumes the same standards-based ST 430-10/ST 430-11 auxiliary-content feed) — with full *rendering* parity a later milestone — and whose **audio path is honestly constrained** by analog wiring and consumer ADCs, which is why captions and audio carry fully independent state, health, and readiness throughout. The likely first shippable product is the **Booth Diagnostic** profile, which earns real-world compatibility data without making an access-equivalence claim.
 
 The plan front-loads the things most likely to sink the project into Phase 0 spikes — the **ACSP wire contract (0A)**, **browser local-appliance reality (0B)**, and **audio-hardware + HI-latency reality (0C)** — and treats **network isolation correctness** as a first-class gate (woven into Phase 4's G1). It treats the **ST 430-10 state machine** as a lease-and-timeline state machine (not a parser), grounds it in the concrete ACSP request sequences and robustness behaviors from public implementation notes, and demands those behaviors be reconciled against the **licensed standards and a real server** before shipping. It makes the **WebRTC/Opus** decision concrete (host-only ICE, a supervised GStreamer `webrtcbin` media process, tuned Opus) while flagging the **HI latency target as an aggressive risk to measure, not assume** — which is why audio is split into a likely-achievable **VI-N gate (G2a)** and an earn-it **HI gate (G2b)**. And it adds a deliberate **Phase 9 / G5 gate** so the "in lieu of a professional system" claim is *earned* through field reliability and venue/legal review rather than asserted.
 

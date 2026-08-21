@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption"
-	"github.com/simpledcp/captionbridge/internal/caption/resolver"
-	"github.com/simpledcp/captionbridge/internal/caption/rpl"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption"
+	"github.com/simpledcp/openaccessbridge/internal/caption/resolver"
+	"github.com/simpledcp/openaccessbridge/internal/caption/rpl"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // WarnLeaseNearExpiry is raised while the lease is close to lapsing — §5.2 item 1

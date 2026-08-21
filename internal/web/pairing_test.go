@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func saveCalibration(t *testing.T, s *Server, body string) CalibrationSaveResponse {

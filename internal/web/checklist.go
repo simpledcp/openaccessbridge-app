@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/readiness"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/readiness"
 )
 
 // handleAdminPreShow serves the §11.5 sheet. `?format=text` returns the
@@ -78,7 +78,7 @@ func (s *Server) preShowChecklist() model.PreShowChecklist {
 				Section: "§11.5", Source: model.SourceMeasured, State: model.CheckNotRun, Blocking: true,
 				Detail: "this surface has no link to the readiness supervisor, so nothing on the sheet " +
 					"below could be measured",
-				Remedy: "Do not open the house on this sheet. Check captionbridge-core.",
+				Remedy: "Do not open the house on this sheet. Check openaccessbridge-core.",
 			}},
 		}
 	}
@@ -132,7 +132,7 @@ func wrap(text, prefix string, contPrefix ...string) string {
 // consulted by someone who is already late.
 func renderChecklistText(cl model.PreShowChecklist) string {
 	var b strings.Builder
-	title := "CaptionBridge pre-show checklist"
+	title := "OpenAccessBridge pre-show checklist"
 	if cl.Auditorium != "" {
 		title += " — " + cl.Auditorium
 	}

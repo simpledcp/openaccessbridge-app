@@ -3,8 +3,8 @@ package readiness
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
-	"github.com/simpledcp/captionbridge/internal/security/verify"
+	"github.com/simpledcp/openaccessbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/security/verify"
 )
 
 func cleanVerify() verify.Report {

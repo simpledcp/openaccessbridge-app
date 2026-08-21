@@ -22,7 +22,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Format identifies the detected timed-text grammar.

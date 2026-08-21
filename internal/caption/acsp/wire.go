@@ -19,7 +19,7 @@ import (
 )
 
 // RequestType is an ACSP request issued by the server (media block) to the ACS
-// (CaptionBridge). The media block drives the application-layer exchange; the ACS
+// (OpenAccessBridge). The media block drives the application-layer exchange; the ACS
 // responds (§5.1).
 type RequestType string
 

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/caption/acsp"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/acsp"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Scenario is one named, self-contained ACSP behavior the simulator reproduces.

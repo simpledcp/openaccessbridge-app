@@ -54,9 +54,10 @@ func (p FirewallProfile) AdminAllowedOnPatronNet() bool {
 type ACSPInitiation string
 
 const (
-	// ACSInitiated: CaptionBridge (the ACS) opens the TCP connection (Variant A).
+	// ACSInitiated: OpenAccessBridge (the ACS) opens the TCP connection (Variant
+	// A).
 	ACSInitiated ACSPInitiation = "acs_initiated"
-	// ServerInitiated: the media block opens the connection to CaptionBridge
+	// ServerInitiated: the media block opens the connection to OpenAccessBridge
 	// (Variant B).
 	ServerInitiated ACSPInitiation = "server_initiated"
 )
@@ -144,7 +145,7 @@ func (p AuditoriumProfile) ValidateInputs(multiDevice bool, streams []StreamType
 		// it is a real and useful state — no device chosen, so the synthetic
 		// stand-in feeds the streams — and this type cannot tell that apart from a
 		// half-finished configuration. Whichever caller knows the difference
-		// decides; cmd/captionbridge-media does.
+		// decides; cmd/openaccessbridge-media does.
 		return nil
 	}
 	if len(streams) == 0 {

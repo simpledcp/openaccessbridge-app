@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/acsp"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/acsp"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestEstimateIsNeverPromotedToAMeasurement: §8.2 asks for "Estimated audio
@@ -296,8 +296,8 @@ func TestIdentityCheckVocabularyMatchesTheACSPLayer(t *testing.T) {
 
 // TestSyntheticSourceTravelsWithTheVerdict: the first fabrication this codebase
 // caught was a synthetic tone reported under a real hardware device's identity.
-// captionbridge-media now refuses to do that, but the refusal only helps if the
-// identity survives the derivation on its way to §8.2's audio rows: "HI —
+// openaccessbridge-media now refuses to do that, but the refusal only helps if
+// the identity survives the derivation on its way to §8.2's audio rows: "HI —
 // excellent, −13 dBFS" with no source is the same false claim about the
 // auditorium's feed, made one layer further out (BLOCKER B3).
 func TestSyntheticSourceTravelsWithTheVerdict(t *testing.T) {

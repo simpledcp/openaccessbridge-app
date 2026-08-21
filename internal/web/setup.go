@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/config"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/config"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // DefaultSetupWindow is how long first-boot setup mode stays open (§8.1 step 14).
@@ -354,7 +354,7 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		w.Header().Set("WWW-Authenticate", `Basic realm="CaptionBridge Admin"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="OpenAccessBridge Admin"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 }

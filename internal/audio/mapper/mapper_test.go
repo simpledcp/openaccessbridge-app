@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // allModes is every mode defined in §6.5, used for exhaustive round-trip tests.

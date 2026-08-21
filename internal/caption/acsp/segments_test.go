@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/rpl"
+	"github.com/simpledcp/openaccessbridge/internal/caption/rpl"
 )
 
 // segRPL builds an RPL of `reels` equal-length reels at 1000 units/s (units == ms),

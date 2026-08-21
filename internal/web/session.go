@@ -11,7 +11,7 @@ package web
 // WHERE THE SIGNING KEY LIVES. Tokens are HMAC-SHA256 over a compact claim
 // string, and the key is a 32-byte random secret held in the CONFIG store as a
 // setting. The alternative — a key generated fresh at every process start — was
-// rejected: a mid-show restart of captionbridge-core would invalidate every
+// rejected: a mid-show restart of openaccessbridge-core would invalidate every
 // displayed code at once and the patrons holding them would have no staff-free way
 // back in. Persisting the key is safe here because it is configuration, not
 // content (guardrail #5 covers caption/audio content), it sits beside the admin
@@ -44,9 +44,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/config"
-	"github.com/simpledcp/captionbridge/internal/deploy"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/config"
+	"github.com/simpledcp/openaccessbridge/internal/deploy"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // settingPatronSessionKey names the config setting holding the token signing key.
@@ -471,7 +471,7 @@ func randomID(n int) string {
 	if _, err := rand.Read(b); err != nil {
 		// A crypto/rand failure must not degrade to a predictable id
 		// (guardrail #7: no silent degradation).
-		panic("captionbridge: crypto/rand unavailable: " + err.Error())
+		panic("openaccessbridge: crypto/rand unavailable: " + err.Error())
 	}
 	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
 }
@@ -479,7 +479,7 @@ func randomID(n int) string {
 func (s *SessionStore) newJoinCode() string {
 	b := make([]byte, joinCodeLen)
 	if _, err := rand.Read(b); err != nil {
-		panic("captionbridge: crypto/rand unavailable: " + err.Error())
+		panic("openaccessbridge: crypto/rand unavailable: " + err.Error())
 	}
 	out := make([]byte, joinCodeLen)
 	for i, v := range b {

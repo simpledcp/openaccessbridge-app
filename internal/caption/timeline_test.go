@@ -3,8 +3,8 @@ package caption
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestTimelineRowTracksTheTransportState: §8.2's "Timeline: playing / paused /

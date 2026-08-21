@@ -23,10 +23,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/mapper"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/mapper"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Use is the intended accessibility use of an input (§6.4 step 2).
@@ -98,8 +98,9 @@ func itoa(n int) string { return fmt.Sprintf("%d", n) }
 
 // RequiredChannels is how many capture channels a mode needs. It mirrors the
 // §6.5 table in internal/audio/mapper: every stereo-derived mode needs two. It
-// is exported because captionbridge-media has to size the input it opens for a
-// live calibration run to the same table the wizard judged against (§6.4 step 5).
+// is exported because openaccessbridge-media has to size the input it opens for
+// a live calibration run to the same table the wizard judged against (§6.4 step
+// 5).
 func RequiredChannels(m mapper.Mode) int {
 	switch m {
 	case mapper.StereoLeftHIRightVIN, mapper.StereoLeftVINRightHI,
@@ -208,7 +209,7 @@ func Analyze(s Session, b Block) Result {
 
 // Judge derives the wizard's answer (§6.4 steps 6-8) from measurements taken
 // SOMEWHERE ELSE — the live capture → qualify chain already running inside
-// captionbridge-media, which is what §6.4 step 5's "live input meter" is showing.
+// openaccessbridge-media, which is what §6.4 step 5's "live input meter" is showing.
 // It is the same decision layer Analyze uses; only the origin of the
 // measurements differs, so the verdict the installer sees in the wizard and the
 // verdict the dashboard shows during a show can never disagree.

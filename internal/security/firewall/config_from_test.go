@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestConfigFromInputs_DerivesApplicableRuleset proves stored configuration turns

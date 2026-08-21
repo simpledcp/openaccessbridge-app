@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/rpl"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/rpl"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // oneReelRPL builds a single-reel RPL whose one resource carries the given ID and

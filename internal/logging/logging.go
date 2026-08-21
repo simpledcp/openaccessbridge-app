@@ -53,7 +53,7 @@ func New(opts Options) *Logger {
 	}
 	comp := opts.Component
 	if comp == "" {
-		comp = "captionbridge"
+		comp = "openaccessbridge"
 	}
 	return &Logger{sl: slog.New(h), component: comp}
 }

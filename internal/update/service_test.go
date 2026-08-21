@@ -27,10 +27,10 @@ func writeBundle(t *testing.T, dir, name string, raw []byte) {
 func TestAGoodBundleOnTheMediaVerifies(t *testing.T) {
 	dir := t.TempDir()
 	s := newSigner(t, "vendor-2026")
-	writeBundle(t, dir, "cb-1.4.2.cbupd", s.bundle(t, []byte("image"), nil))
+	writeBundle(t, dir, "cb-1.4.2.oabupd", s.bundle(t, []byte("image"), nil))
 
 	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000, BuildKnown: true})
-	res, err := svc.VerifyFile("cb-1.4.2.cbupd")
+	res, err := svc.VerifyFile("cb-1.4.2.oabupd")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,10 +49,10 @@ func TestAGoodBundleOnTheMediaVerifies(t *testing.T) {
 func TestAValidBundleIsNotReportedAsInstallableWithoutSlots(t *testing.T) {
 	dir := t.TempDir()
 	s := newSigner(t, "vendor-2026")
-	writeBundle(t, dir, "cb-1.4.2.cbupd", s.bundle(t, []byte("image"), nil))
+	writeBundle(t, dir, "cb-1.4.2.oabupd", s.bundle(t, []byte("image"), nil))
 
 	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000, BuildKnown: true})
-	res, _ := svc.VerifyFile("cb-1.4.2.cbupd")
+	res, _ := svc.VerifyFile("cb-1.4.2.oabupd")
 	if !res.OK {
 		t.Fatalf("the bundle should verify: %s", res.Reason)
 	}
@@ -73,10 +73,10 @@ func TestAValidBundleIsNotReportedAsInstallableWithoutSlots(t *testing.T) {
 func TestAFailedVerificationStillNamesTheBuild(t *testing.T) {
 	dir := t.TempDir()
 	real, other := newSigner(t, "vendor-2026"), newSigner(t, "vendor-2030")
-	writeBundle(t, dir, "hostile.cbupd", other.bundle(t, []byte("image"), nil))
+	writeBundle(t, dir, "hostile.oabupd", other.bundle(t, []byte("image"), nil))
 
 	svc := serviceWith(t, dir, trust(t, real), Current{Build: 1000, BuildKnown: true})
-	res, _ := svc.VerifyFile("hostile.cbupd")
+	res, _ := svc.VerifyFile("hostile.oabupd")
 	if res.OK {
 		t.Fatal("a bundle signed by an untrusted key verified")
 	}
@@ -96,7 +96,7 @@ func TestABundleNameIsNeverAPath(t *testing.T) {
 
 	for _, name := range []string{
 		"../../etc/passwd",
-		"sub/dir.cbupd",
+		"sub/dir.oabupd",
 		"/etc/shadow",
 		"",
 		"   ",
@@ -124,11 +124,11 @@ func TestAnApplianceWithNoKeysSaysSoUpFront(t *testing.T) {
 func TestTheMediaListingShowsBundles(t *testing.T) {
 	dir := t.TempDir()
 	s := newSigner(t, "vendor-2026")
-	writeBundle(t, dir, "cb-1.4.2.cbupd", s.bundle(t, []byte("image"), nil))
+	writeBundle(t, dir, "cb-1.4.2.oabupd", s.bundle(t, []byte("image"), nil))
 	writeBundle(t, dir, "notes.txt", []byte("not a bundle"))
 
 	rep := serviceWith(t, dir, trust(t, s), Current{BuildKnown: true}).Status()
-	if len(rep.Bundles) != 1 || rep.Bundles[0] != "cb-1.4.2.cbupd" {
+	if len(rep.Bundles) != 1 || rep.Bundles[0] != "cb-1.4.2.oabupd" {
 		t.Fatalf("the listing is %v", rep.Bundles)
 	}
 }

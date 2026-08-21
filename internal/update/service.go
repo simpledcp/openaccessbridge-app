@@ -126,7 +126,7 @@ func (s *Service) Status() Report {
 		} else {
 			rep.MediaReadable = true
 			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".cbupd") {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".oabupd") {
 					rep.Bundles = append(rep.Bundles, e.Name())
 				}
 			}

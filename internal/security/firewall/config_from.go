@@ -3,7 +3,7 @@ package firewall
 import (
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Defaults for the parts of the ruleset that are not per-auditorium configuration.
@@ -32,7 +32,7 @@ type Inputs struct {
 	// Auditorium carries the theater-side facts: the cinema-server allowlist, the
 	// ACSP port, and the confirmed initiation direction (§10.5).
 	Auditorium model.AuditoriumProfile
-	// LocalACSPPort is CaptionBridge's own ACSP listener port, used only by
+	// LocalACSPPort is OpenAccessBridge's own ACSP listener port, used only by
 	// Variant B. Zero falls back to the auditorium's ACSPPort.
 	LocalACSPPort int
 	// AdminOnClientIface requests the admin/setup rule on the client interface. It

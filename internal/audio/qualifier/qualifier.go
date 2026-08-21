@@ -21,7 +21,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // MinDBFS is the floor reported for digital silence so dB arithmetic stays

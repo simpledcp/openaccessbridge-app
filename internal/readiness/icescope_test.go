@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // D27's condition, on the dashboard: patrons were handed candidates for more

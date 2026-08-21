@@ -3,7 +3,7 @@ package readiness
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // leased builds a link state with a granted lease of leaseMS and remainingMS

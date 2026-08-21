@@ -10,7 +10,7 @@ package web
 //
 // The decisions all live in internal/audio/calibration, which is pure and
 // testable without a sound card; the measurements all live in
-// captionbridge-media, which owns every device. This file is the thin layer
+// openaccessbridge-media, which owns every device. This file is the thin layer
 // between them and a booth tech's browser: it never measures anything itself and
 // never decides a verdict itself.
 //
@@ -30,7 +30,7 @@ package web
 // substitutable, and tests inject a fake.
 //
 // HONESTY (the whole point of this screen). This appliance image has no ALSA
-// capture source (BLOCKERS B3/B4). captionbridge-media therefore refuses to
+// capture source (BLOCKERS B3/B4). openaccessbridge-media therefore refuses to
 // measure a named device, and the only source it can run is the synthetic tone.
 // Every figure this file hands the browser carries the provenance that produced
 // it, and saveProfile will not write §10.5's last_qualification from anything but
@@ -46,13 +46,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/audio/calibration"
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/mapper"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/ipc"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/calibration"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/mapper"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/ipc"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // CalibrationDriver is the seam to the process that owns audio. Core's web
@@ -154,7 +154,7 @@ type CalibrationDevicesResponse struct {
 	// symptom, and an installer who cannot tell them apart re-seats the wrong
 	// cable (§6.3 presence / device health).
 	EnumerationError string `json:"enumeration_error,omitempty"`
-	// HelperError is set when captionbridge-media could not be reached at all.
+	// HelperError is set when openaccessbridge-media could not be reached at all.
 	HelperError string `json:"helper_error,omitempty"`
 	// HardwareCapture reports whether any listed device can actually be measured
 	// on this build; HardwareDetail says why not.
@@ -303,7 +303,7 @@ func (s *Server) handleCalibrationStop(w http.ResponseWriter, r *http.Request) {
 //
 // It deliberately does NOT stop the run when the browser goes away: EventSource
 // reconnects by itself, and tearing the capture down on every reconnect would
-// reset the measurement before any verdict could settle. captionbridge-media
+// reset the measurement before any verdict could settle. openaccessbridge-media
 // releases the input on its own idle timeout, which is what actually covers a
 // closed tab.
 func (s *Server) handleCalibrationMeter(w http.ResponseWriter, r *http.Request) {
@@ -702,7 +702,7 @@ func (unreachableDriver) Stop() (calibration.Report, error) {
 
 // --- the loopback driver --------------------------------------------------
 
-// mediaCalibrationDriver talks to captionbridge-media over its loopback Unix
+// mediaCalibrationDriver talks to openaccessbridge-media over its loopback Unix
 // socket (§3.5). It dials per request, exactly as core's other helper clients do:
 // a wedged helper then fails this one request instead of holding a connection
 // that outlives it.
@@ -715,8 +715,9 @@ func NewMediaCalibrationDriver(socketPath string) CalibrationDriver {
 	return &mediaCalibrationDriver{socket: socketPath}
 }
 
-// defaultMediaSocket is where captionbridge-media listens when nobody says
-// otherwise — the same default cmd/captionbridge-core's --socket-dir carries.
+// defaultMediaSocket is where openaccessbridge-media listens when nobody says
+// otherwise — the same default cmd/openaccessbridge-core's --socket-dir
+// carries.
 func defaultMediaSocket(dir string) string {
 	if dir == "" {
 		dir = ipc.DefaultSocketDir()

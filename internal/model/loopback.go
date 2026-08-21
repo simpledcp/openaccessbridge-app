@@ -2,9 +2,10 @@ package model
 
 // Wire payloads for the §3.5 loopback IPC between the three supervised
 // processes. They live here, beside the state they carry, so the two ends of a
-// request cannot drift into different shapes: the sender (captionbridge-core)
-// and the receiver (captionbridge-media / captionbridge-firewall) are separate
-// binaries and would otherwise each keep their own copy of the struct.
+// request cannot drift into different shapes: the sender
+// (openaccessbridge-core) and the receiver (openaccessbridge-media /
+// openaccessbridge-firewall) are separate binaries and would otherwise each
+// keep their own copy of the struct.
 //
 // These carry STATE and COMMANDS only. No caption text, no audio samples, no SDP
 // bodies and no client identifiers cross this boundary (§9.4).

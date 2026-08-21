@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 type fakeClock struct {

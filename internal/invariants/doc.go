@@ -1,4 +1,4 @@
-// Package invariants holds the cross-cutting guardrail assertions for CaptionBridge
+// Package invariants holds the cross-cutting guardrail assertions for OpenAccessBridge
 // (buildplan.md §1.2 guardrails, §11.6 security tests). The per-subsystem packages
 // test their own behavior; this suite asserts the SYSTEM-LEVEL invariants the
 // kickoff requires to hold from day one:

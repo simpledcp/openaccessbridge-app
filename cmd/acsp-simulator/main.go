@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/simpledcp/captionbridge/internal/buildinfo"
-	"github.com/simpledcp/captionbridge/internal/sim"
+	"github.com/simpledcp/openaccessbridge/internal/buildinfo"
+	"github.com/simpledcp/openaccessbridge/internal/sim"
 )
 
 // logT implements sim.T for standalone runs, recording failures.

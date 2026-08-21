@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // interleave builds a 2-channel buffer from two mono lanes.

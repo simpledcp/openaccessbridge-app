@@ -44,10 +44,10 @@ import (
 	"time"
 )
 
-// Magic identifies a CaptionBridge update bundle and its format version. It is
+// Magic identifies an OpenAccessBridge update bundle and its format version. It
 // checked first so a file that is not a bundle at all fails with that reason
 // rather than as a parse error deeper in.
-const Magic = "CBUPD1\n"
+const Magic = "OABUPD1\n"
 
 // MaxManifestBytes bounds the manifest. It is read from removable media handed
 // to the appliance by a person, so every length that comes off that media is
@@ -62,12 +62,12 @@ const MaxPayloadBytes = 512 << 20
 // Refusals. Each one is a distinct reason, because "the update was rejected" is
 // not something an operator standing at a booth with a USB stick can act on.
 var (
-	ErrNotABundle      = errors.New("update: this file is not a CaptionBridge update bundle")
+	ErrNotABundle      = errors.New("update: this file is not an OpenAccessBridge update bundle")
 	ErrMalformed       = errors.New("update: the bundle is malformed")
 	ErrUnknownKey      = errors.New("update: the bundle is signed by a key this appliance does not trust")
 	ErrBadSignature    = errors.New("update: the signature does not verify")
 	ErrPayloadMismatch = errors.New("update: the payload does not match the digest the manifest signs")
-	ErrWrongProduct    = errors.New("update: this bundle is not for CaptionBridge")
+	ErrWrongProduct    = errors.New("update: this bundle is not for OpenAccessBridge")
 	ErrNotAnUpgrade    = errors.New("update: this bundle is not newer than the version already installed")
 	ErrTooLarge        = errors.New("update: the bundle declares a length this appliance will not read")
 	ErrNoTrustedKeys   = errors.New("update: this appliance holds no trusted update keys, so no update can be verified")
@@ -85,7 +85,7 @@ var (
 )
 
 // Product is the only product string this appliance will install.
-const Product = "captionbridge"
+const Product = "openaccessbridge"
 
 // Manifest describes an update. It is the SIGNED part: the payload is bound to
 // it by digest, so one signature covers both without the signer having to stream
@@ -93,7 +93,7 @@ const Product = "captionbridge"
 type Manifest struct {
 	// Format is the manifest schema version, separate from Magic's bundle format.
 	Format int `json:"format"`
-	// Product must be "captionbridge". A signed bundle for something else is
+	// Product must be "openaccessbridge". A signed bundle for something else is
 	// still a validly signed bundle, and installing it is still wrong.
 	Product string `json:"product"`
 	// Version is the human-readable release, e.g. "1.4.2".

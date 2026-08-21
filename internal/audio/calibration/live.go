@@ -1,7 +1,7 @@
 package calibration
 
 // The LIVE half of the §6.4 wizard: the seam between the admin screen (which
-// owns no audio) and captionbridge-media (which owns all of it). Step 5 asks for
+// owns no audio) and openaccessbridge-media (which owns all of it). Step 5 asks for
 // "a live input meter (the qualifier's real-time output)", so the measurements
 // the wizard renders must be the SAME capture → qualify chain that runs during a
 // show — not a second, wizard-only measurement path that could disagree with it.
@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/audio/capture"
-	"github.com/simpledcp/captionbridge/internal/audio/mapper"
-	"github.com/simpledcp/captionbridge/internal/audio/qualifier"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/audio/capture"
+	"github.com/simpledcp/openaccessbridge/internal/audio/mapper"
+	"github.com/simpledcp/openaccessbridge/internal/audio/qualifier"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
-// Request is what the wizard asks captionbridge-media to measure — the
+// Request is what the wizard asks openaccessbridge-media to measure — the
 // installer's §6.4 step 1-3 selections, and nothing else.
 type Request struct {
 	// DeviceID is the STABLE device identifier from capture.Device.ID (§6.1),
@@ -81,7 +81,7 @@ func (k SourceKind) Label() string {
 	}
 }
 
-// Report is captionbridge-media's answer for one live calibration run: the
+// Report is openaccessbridge-media's answer for one live calibration run: the
 // qualifier's real-time output for every stream the mapping produces (§6.4
 // step 5), plus the provenance of the measurement.
 type Report struct {
@@ -143,7 +143,8 @@ const MinMeasureMS = 1500
 // describes the input rather than the moment the capture opened.
 func (r Report) Settled() bool { return r.MeasuredMS >= MinMeasureMS }
 
-// DeviceList is captionbridge-media's answer to the §6.4 step-1 device picker.
+// DeviceList is openaccessbridge-media's answer to the §6.4 step-1 device
+// picker.
 type DeviceList struct {
 	Devices []capture.Device `json:"devices"`
 	// Error is why the list is empty. "ALSA is not present on this host" and "no

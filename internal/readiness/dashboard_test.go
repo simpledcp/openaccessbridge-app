@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestCaptionWarningsReachTheDashboard: guardrail #7 is not audio-only. A

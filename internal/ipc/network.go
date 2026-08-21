@@ -1,6 +1,6 @@
 package ipc
 
-// The patron-network scope core pushes to captionbridge-media (buildplan.md
+// The patron-network scope core pushes to openaccessbridge-media (buildplan.md
 // §9.1 interface separation, §6.7 local-only, DECISIONS D27).
 //
 // Core owns the configuration store, so it is the only process that knows which
@@ -14,7 +14,7 @@ package ipc
 // Folding the two together would mean a network correction restarted the room's
 // audio.
 
-import "github.com/simpledcp/captionbridge/internal/model"
+import "github.com/simpledcp/openaccessbridge/internal/model"
 
 const (
 	// TypeMediaNetwork — core → helper: the patron-facing interface ICE

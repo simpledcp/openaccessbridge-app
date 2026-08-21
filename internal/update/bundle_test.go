@@ -178,7 +178,7 @@ func TestAManifestSignedAsItWasWrittenVerifiesWhateverTheEncoding(t *testing.T) 
 	raw := []byte(`{
   "key_id": "vendor-2026",
   "build": 1420,
-  "product": "captionbridge",
+  "product": "openaccessbridge",
   "payload_size": ` + itoa(len(payload)) + `,
   "version": "1.4.2",
   "format": 1,

@@ -16,7 +16,7 @@ type TrackKind string
 
 const (
 	// TrackClosedCaption is an off-screen ST 429-12 ClosedCaption track — the
-	// accessibility-grade track CaptionBridge prefers.
+	// accessibility-grade track OpenAccessBridge prefers.
 	TrackClosedCaption TrackKind = "closed_caption"
 	// TrackClosedSubtitle is an off-screen ST 429-12 ClosedSubtitle track.
 	TrackClosedSubtitle TrackKind = "closed_subtitle"

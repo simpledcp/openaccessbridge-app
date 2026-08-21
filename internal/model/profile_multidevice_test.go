@@ -67,8 +67,8 @@ func TestPerStreamDevicesOnASingleDeviceMappingAreRefused(t *testing.T) {
 // An empty single-device InputDeviceID is NOT judged here. On this build it is a
 // real state — no device chosen, so the synthetic stand-in feeds the streams —
 // and this type cannot tell that apart from a half-finished configuration. The
-// caller that knows the difference decides (cmd/captionbridge-media does, and
-// refuses any device it has no backend for).
+// caller that knows the difference decides (cmd/openaccessbridge-media does,
+// and refuses any device it has no backend for).
 func TestAnEmptySingleDeviceIsLeftToTheCaller(t *testing.T) {
 	p := AuditoriumProfile{ChannelMapping: "mono:HI"}
 	if err := p.ValidateInputs(false, []StreamType{StreamHI}); err != nil {

@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Settings that configure where a support session may reach. All three are

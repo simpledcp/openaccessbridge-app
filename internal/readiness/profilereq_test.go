@@ -3,7 +3,7 @@ package readiness
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func lowCost(d Deploy) Deploy {
@@ -15,9 +15,9 @@ func lowCost(d Deploy) Deploy {
 }
 
 // §12.4's requirements were flags on the deployment profile that NOTHING read.
-// An operator could select the profile for venues running CaptionBridge in lieu
-// of a professional receiver system with no calibration ever run, nothing being
-// monitored, and no Phase 9 review.
+// An operator could select the profile for venues running OpenAccessBridge in
+// lieu of a professional receiver system with no calibration ever run, nothing
+// being monitored, and no Phase 9 review.
 func TestTheReplacementProfileRefusesItsOwnUnmetRequirements(t *testing.T) {
 	r := Assemble(Inputs{Verify: cleanVerify(), Deploy: lowCost(Deploy{})})
 

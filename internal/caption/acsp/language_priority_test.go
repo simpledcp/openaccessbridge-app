@@ -3,11 +3,11 @@ package acsp
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/web"
+	"github.com/simpledcp/openaccessbridge/internal/web"
 
-	"github.com/simpledcp/captionbridge/internal/caption"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/caption/resolver"
+	"github.com/simpledcp/openaccessbridge/internal/caption"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/caption/resolver"
 )
 
 // mixedKindRPL carries two languages: a SUBTITLE track first in playlist order,

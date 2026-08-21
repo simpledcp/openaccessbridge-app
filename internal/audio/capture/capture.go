@@ -1,4 +1,4 @@
-// Package capture is the audio capture abstraction for captionbridge-media
+// Package capture is the audio capture abstraction for openaccessbridge-media
 // (buildplan.md §6.1). Capture is an interface with a synthetic-tone source so the
 // pipeline can be smoke-tested end-to-end locally with no hardware; the real ALSA
 // source is hardware-gated (BLOCKERS B3/B4) and lives behind the same Source seam.

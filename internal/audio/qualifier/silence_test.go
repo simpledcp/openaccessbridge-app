@@ -3,7 +3,7 @@ package qualifier
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // quietLine is a live input carrying only a low-level tone: RMS is below the

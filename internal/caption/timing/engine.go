@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Drift/latency budget defaults (§5.5 "configurable drift/latency budget", D9):

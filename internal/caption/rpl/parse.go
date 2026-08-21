@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/caption/timedtext"
+	"github.com/simpledcp/openaccessbridge/internal/caption/timedtext"
 )
 
 // ParseBytes parses an ST 430-11 RPL document (PROVISIONAL grammar). It is

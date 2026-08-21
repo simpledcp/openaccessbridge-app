@@ -88,7 +88,7 @@ appliance runs end-to-end on synthetic/simulated inputs.
 The previous wave built real capability that nothing called. This pass made the
 running system use it:
 
-- **cmd/captionbridge-core** grew a supervisor (`status.go`, `media.go`,
+- **cmd/openaccessbridge-core** grew a supervisor (`status.go`, `media.go`,
   `firewall.go`): it applies the profile-derived firewall ruleset through the
   privileged helper, runs the §9.3 verification pass through that helper (with a
   local fallback that fails loud rather than passing), pushes the §10.5
@@ -99,11 +99,11 @@ running system use it:
   the §8.5 wrong-room guard is armed from the stored fingerprint, and the
   dashboard now shows the CONFIGURED allowed server plus the connected one and
   the §10.5 identity-strength label.
-- **cmd/captionbridge-media** implements `media.configure/start/stop`: the stored
+- **cmd/openaccessbridge-media** implements `media.configure/start/stop`: the stored
   `channel_mapping` is parsed through `mapper.ParseMode`/`PlanFor` and rebuilds
   the streams. A real capture device is REFUSED (B3/B4) rather than served by a
   synthetic tone.
-- **cmd/captionbridge-firewall**'s watchdog now re-asserts the posture on a flip
+- **cmd/openaccessbridge-firewall**'s watchdog now re-asserts the posture on a flip
   (sysctls + the last ruleset core asked for), re-measures, and says plainly when
   it is not permitted to fix anything.
 - **internal/readiness** fixed the `reasonHas("requires")` over-match, added the
@@ -191,7 +191,7 @@ production caller. Its review pass caught two more:
 **Fixed directly, in packages no lane owned:**
 
 - The privileged helper's loopback socket was unreachable as deployed: the
-  firewall runs as root, core as `captionbridge`, and `ipc.Listen` created an
+  firewall runs as root, core as `openaccessbridge`, and `ipc.Listen` created an
   owner-only 0600 socket — so core's dial always got EACCES and the dashboard
   would have shown a permanent "Firewall INACTIVE". Privilege separation
   silently disabling the security surface it exists to prove. Socket ownership is
@@ -241,7 +241,7 @@ engine.
 were live on the shipped page, all three passed their tests, and all three are
 the same shape — a value that was never measured rendered as though it had been:
 
-- **A synthetic tone shown as the booth's feed.** `captionbridge-media` marks
+- **A synthetic tone shown as the booth's feed.** `openaccessbridge-media` marks
   generated inputs with a `synthetic-` device-id prefix, but the dashboard
   dropped `input_device_id` entirely, so the page rendered "HI · excellent ·
   -13.5 dBFS" and an audio verdict of READY with nothing saying the source was a
@@ -367,7 +367,7 @@ measured" for glass-to-ear and prints the encode-path estimate under its own nam
 
 **Proven end to end**, because two halves that each pass their own tests is the
 failure this codebase has produced repeatedly:
-`cmd/captionbridge-core/audio_e2e_test.go` builds and runs all three binaries,
+`cmd/openaccessbridge-core/audio_e2e_test.go` builds and runs all three binaries,
 then joins as a patron would — the same protocol `assets/patron.js` speaks, a
 receive-only Pion peer with `iceServers: []`, an offer over `/api/audio/ws`, the
 answer applied — and asserts Opus RTP arrives, that the answer carries `typ host`
@@ -1244,7 +1244,7 @@ useful result rather than the wasted one.
 `RequireCalibration`, `RequireSignalHealth`, `RequireClearErrorStates`,
 `RequiresPhase9Review` — four flags on the Low-Cost Replacement profile, read by
 nothing but the profile's own test. That profile is the one for venues running
-CaptionBridge **in lieu of** a professional receiver system, which makes it the
+OpenAccessBridge **in lieu of** a professional receiver system, which makes it the
 one place where an unqualified audio input is not a configuration detail: it is
 the thing the venue retired a working system for.
 
@@ -1422,3 +1422,85 @@ language". That is fail-wrong on the patron surface, which is the one thing this
 codebase will not ship. Both are named in D43 as the work the cap requires.
 
 `make check` green: 753 top-level Go tests, 23 browser cases.
+
+## The rename to OpenAccessBridge, and what a global substitution cannot see
+
+The application, the module, the binaries, the runtime identifiers and the GitHub
+repository are now OpenAccessBridge (D44). 785 occurrences across 207 tracked
+files, in three case forms, plus the update-bundle magic and its file extension.
+
+The mechanical part took one `sed` and was uniformly correct: `go build`, `go vet`
+and the full suite passed on the first run, and all three binaries started under
+their new names. That is exactly what made the rest worth doing, because
+everything a global substitution gets wrong, it gets wrong invisibly — a compiler
+cannot tell a product name from a directory that exists on a real machine, and a
+green test suite is not evidence that the docs still describe reality.
+
+So the rename was put to six independent lenses — residue, over-application,
+comments that now lie, runtime coherence, docs, and mechanical damage — and every
+finding to a skeptic told to refute it. 34 raw findings, 32 unique, 6 confirmed.
+
+### What the sweep actually broke
+
+Five of the six confirmed findings were one defect: **it rewrote the build host's
+real filesystem paths.** `/home/libserv-2/captionbridge-app` is where the working
+tree is and `/home/libserv-2/captionbridge` is the root-owned directory D0 exists
+to explain. Neither is a brand string; both were swept anyway. The damage was not
+theoretical — `cd /home/libserv-2/openaccessbridge-app` is the first line of a
+copy-pasteable block in STATUS.md, and with no `set -e` the `make check` after it
+would have run in whatever directory the reader started in. D0's operator
+relocation command named three paths that do not exist. And STATUS.md's
+"key facts for a future session" block — written specifically to orient a
+post-compaction session — asserted a project location that would fail on the
+first command.
+
+The lens that caught it did so by *running* the documented commands rather than
+reading them. Nothing else would have: it compiles, it tests, it reads fine.
+
+Two more classes the compiler cannot see. **A vowel:** "a CaptionBridge" is
+correct English and "a OpenAccessBridge" is not, which broke an operator-facing
+refusal message and two doc comments. The check for it turned up a line that must
+*not* be corrected — `"Bienvenido a OpenAccessBridge."` is Spanish demo caption
+text where "a" is a preposition, and "fixing" it would have introduced the error.
+**Three characters:** the new name is three wider than the old, which pushed a
+box-drawing border out of true in the §3.1 architecture diagram, misaligned the
+§3.5 hanging indent, and carried 22 comment lines over the wrap. Each is now back
+at exactly its pre-rename column, verified by measuring every line against HEAD
+rather than by eye.
+
+### The verification corrupted the thing it was verifying
+
+One agent, checking whether the session cookie could safely be renamed, restored
+`internal/web/patron.go` from `git show HEAD:` to compare — and left the
+pre-rename version in place. The build broke. Worse, a fix of mine landed on the
+clobbered file afterwards, so it briefly held HEAD's content plus one new line.
+
+The repair was easy. Trusting the repair was not, and that is the real cost: once
+an agent has written to the working tree, "the other 206 files are probably fine"
+is a guess. So it was made into a measurement — reconstruct every tracked file
+from `HEAD` plus the exact five substitutions, and diff against what is on disk.
+Seven files differed, and all seven were deliberate post-sweep fixes, itemised.
+Nothing else had been touched.
+
+Two lessons, and the second is the one worth keeping. First: verification agents
+get read-only tools on a live working tree, or they get a worktree of their own.
+Second, and more general: the answer to "did something tamper with my work" is
+never recollection. It is a reconstruction of what the tree *should* contain,
+compared byte-for-byte against what it does — the same reasoning the appliance
+applies to its own firewall, which is that a posture you assert is not a posture
+you have measured.
+
+### Deliberately not done
+
+No migration code for the old nftables table, state directory, runtime directory
+or bundle magic. Renaming those would strand an in-place upgrade — the old table
+would keep enforcing while verification looked for one that was not there, a
+security row stating the opposite of the truth — but B6 means nothing has ever
+been deployed, so there is no installed base and inventing one to migrate would be
+ceremony. If an appliance is ever installed, the migration has to exist before the
+first install, not after.
+
+The local working directory keeps its old name, at the operator's choice; both
+D0 and STATUS.md now say why, so the next reader does not mistake it for residue.
+
+`make check` green: 34 packages, 753 top-level Go tests, 23 browser cases.

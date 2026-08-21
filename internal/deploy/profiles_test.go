@@ -3,7 +3,7 @@ package deploy
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func TestBuiltinProfilesPosture(t *testing.T) {

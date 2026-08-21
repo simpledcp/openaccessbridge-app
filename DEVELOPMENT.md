@@ -1,6 +1,6 @@
 # Getting started on a new machine
 
-This guide gets CaptionBridge building, testing, and running from a clean clone
+This guide gets OpenAccessBridge building, testing, and running from a clean clone
 on a fresh box. Nothing outside this repository is required except a Go
 toolchain — the build and the **entire test suite are pure Go** (no cgo, no
 system libraries). GStreamer and nftables are only needed to exercise the
@@ -23,11 +23,11 @@ at `/home/libserv-2/go-sdk` (hence references to that path in `STATUS.md` /
 
 - **GStreamer 1.x runtime** (`gst-launch-1.0` + the `opusenc`, `audiotestsrc`,
   `level` elements) — enables the real synthetic-tone → Opus smoke test in
-  `internal/audio/encode` and live audio in `captionbridge-media`. Without it
+  `internal/audio/encode` and live audio in `openaccessbridge-media`. Without it
   that one test skips and the media helper falls back to its synthetic seam.
   - Debian/Ubuntu: `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good`
 - **nftables + root** — only to apply *real* firewall rules on an appliance.
-  Off-appliance, `captionbridge-firewall` runs in dry-run mode and verifies via
+  Off-appliance, `openaccessbridge-firewall` runs in dry-run mode and verifies via
   self-introspection; rule generation is unit-tested with no privileges.
 
 **Not needed:** a C compiler (SQLite is `modernc.org/sqlite`, pure Go), Node/npm
@@ -41,8 +41,8 @@ pure-Go core builds and tests fine on macOS/Windows too.
 ## 2. Clone and verify
 
 ```sh
-git clone git@github.com:simpledcp/captionbridge-app.git
-cd captionbridge-app
+git clone git@github.com:simpledcp/openaccessbridge-app.git
+cd openaccessbridge-app
 
 make check     # gofmt + go vet + full race test suite — this is what CI gates on
 make build     # builds all four binaries into ./bin
@@ -73,10 +73,10 @@ Three supervised processes over loopback Unix sockets, plus a self-advancing
 ACSP demo — no cinema server, phones, or audio hardware required:
 
 ```sh
-RT=/tmp/cb; mkdir -p "$RT"
-./bin/captionbridge-firewall --socket-dir="$RT" &      # dry-run unless root + --allow-apply
-./bin/captionbridge-media    --socket-dir="$RT" &      # synthetic HI/VI-N streams
-./bin/captionbridge-core --config "$RT/config.db" \
+RT=/tmp/oab; mkdir -p "$RT"
+./bin/openaccessbridge-firewall --socket-dir="$RT" &      # dry-run unless root + --allow-apply
+./bin/openaccessbridge-media    --socket-dir="$RT" &      # synthetic HI/VI-N streams
+./bin/openaccessbridge-core --config "$RT/config.db" \
     --patron-bind 127.0.0.1:8080 --admin-bind 127.0.0.1:8090 --socket-dir="$RT" &
 
 # Patron page:  http://127.0.0.1:8080/accessibility

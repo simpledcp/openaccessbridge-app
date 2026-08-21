@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func sshCfg(t *testing.T, profile model.FirewallProfile, reader SSHReader) Config {

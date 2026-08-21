@@ -1,4 +1,4 @@
-module github.com/simpledcp/captionbridge
+module github.com/simpledcp/openaccessbridge
 
 go 1.26
 

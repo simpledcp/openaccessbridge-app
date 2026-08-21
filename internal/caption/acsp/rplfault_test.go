@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // A playlist the appliance cannot load used to produce ONE LOG LINE: no state

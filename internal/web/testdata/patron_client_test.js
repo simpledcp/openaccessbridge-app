@@ -3,7 +3,7 @@
  * internal/web/patron_client_test.go. Each case names the buildplan requirement it
  * defends. Nothing here asserts anything about a real phone, a real Wi-Fi network
  * or real audio — those remain BLOCKER B2. The real appliance path is proven
- * against real processes in cmd/captionbridge-core/audio_e2e_test.go.
+ * against real processes in cmd/openaccessbridge-core/audio_e2e_test.go.
  */
 
 const assert = require("assert");

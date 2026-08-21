@@ -3,7 +3,7 @@ package rpl
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // doc builds an RPL whose resources appear in the given (type, language) order,

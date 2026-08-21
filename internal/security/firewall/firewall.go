@@ -1,4 +1,4 @@
-// Package firewall generates the nftables ruleset for CaptionBridge's deployment
+// Package firewall generates the nftables ruleset for OpenAccessBridge's deployment
 // profiles (buildplan.md §9.1). It only GENERATES rule text — it never touches the
 // kernel, needs no root, and applies nothing; a separate privileged helper (§3.5)
 // is responsible for installing what this package emits.
@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // DefaultAdminPort is the admin/setup UI port opened on the client interface when
@@ -44,7 +44,7 @@ type Config struct {
 	// emits one rule per family because the nft match keyword differs (ip vs ip6).
 	CinemaServerIPs []string
 	ACSPPort        int                  // Variant A: remote server ACSP port (dport on output)
-	LocalACSPPort   int                  // Variant B: CaptionBridge's local ACSP listener port
+	LocalACSPPort   int                  // Variant B: OpenAccessBridge's local ACSP listener port
 	Initiation      model.ACSPInitiation // ACSInitiated (A) or ServerInitiated (B)
 	WebRTCPortRange string               // e.g. "10000-20000"; omitted if empty
 	PatronWebPorts  []int                // e.g. {80, 443}; omitted if empty
@@ -102,7 +102,7 @@ func SysctlSettings() map[string]string {
 	}
 }
 
-// Generate returns a complete nft script for "table inet captionbridge" implementing
+// Generate returns a complete nft script for "table inet openaccessbridge" implementing
 // the profile in cfg per §9.1. It validates cfg and returns an error rather than
 // emitting a rule that would be useless or a hole (e.g. the wrong ACSP variant).
 func Generate(cfg Config) (string, error) {
@@ -130,9 +130,9 @@ func Generate(cfg Config) (string, error) {
 	// it if it is absent, so the `delete` cannot fail on a fresh boot, and both
 	// land inside the same `nft -f` transaction as the definition that follows —
 	// so the appliance is never momentarily unprotected between them.
-	b.WriteString("table inet captionbridge\n")
-	b.WriteString("delete table inet captionbridge\n")
-	b.WriteString("table inet captionbridge {\n")
+	b.WriteString("table inet openaccessbridge\n")
+	b.WriteString("delete table inet openaccessbridge\n")
+	b.WriteString("table inet openaccessbridge {\n")
 
 	// --- input chain -------------------------------------------------------
 	b.WriteString("  chain input {\n")

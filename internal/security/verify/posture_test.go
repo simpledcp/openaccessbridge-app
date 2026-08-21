@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // knob is one forwarding sysctl in a fixture tree, named the sysctl way

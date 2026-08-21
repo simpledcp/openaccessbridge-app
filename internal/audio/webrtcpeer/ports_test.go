@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // §9.1 opens `iif <client> udp dport 10000-20000 accept` for patron media. Until

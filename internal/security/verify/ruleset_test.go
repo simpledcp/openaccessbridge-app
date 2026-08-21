@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
-// nftJSON assembles a captured-shape `nft -j list table inet captionbridge`
+// nftJSON assembles a captured-shape `nft -j list table inet openaccessbridge`
 // document from per-chain descriptions, so the fixtures stay readable.
 type chainFixture struct {
 	name    string
@@ -21,21 +21,21 @@ func nftJSON(table bool, chains ...chainFixture) string {
 	var b strings.Builder
 	b.WriteString(`{"nftables":[{"metainfo":{"version":"1.0.9","json_schema_version":1}}`)
 	if table {
-		b.WriteString(`,{"table":{"family":"inet","name":"captionbridge","handle":1}}`)
+		b.WriteString(`,{"table":{"family":"inet","name":"openaccessbridge","handle":1}}`)
 	}
 	for _, c := range chains {
-		b.WriteString(`,{"chain":{"family":"inet","table":"captionbridge","handle":1,"name":"` + c.name +
+		b.WriteString(`,{"chain":{"family":"inet","table":"openaccessbridge","handle":1,"name":"` + c.name +
 			`","type":"filter","hook":"` + c.name + `","prio":0`)
 		if c.policy != "" {
 			b.WriteString(`,"policy":"` + c.policy + `"`)
 		}
 		b.WriteString(`}}`)
 		for i := 0; i < c.accepts; i++ {
-			b.WriteString(`,{"rule":{"family":"inet","table":"captionbridge","chain":"` + c.name +
+			b.WriteString(`,{"rule":{"family":"inet","table":"openaccessbridge","chain":"` + c.name +
 				`","handle":4,"expr":[{"match":{"op":"in","left":{"ct":{"key":"state"}},"right":["established","related"]}},{"accept":null}]}}`)
 		}
 		for i := 0; i < c.drops; i++ {
-			b.WriteString(`,{"rule":{"family":"inet","table":"captionbridge","chain":"` + c.name +
+			b.WriteString(`,{"rule":{"family":"inet","table":"openaccessbridge","chain":"` + c.name +
 				`","handle":5,"expr":[{"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"wlan0"}},{"drop":null}]}}`)
 		}
 	}

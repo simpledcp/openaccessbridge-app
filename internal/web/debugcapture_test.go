@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/logging/debugcapture"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/logging/debugcapture"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 func captureServer(t *testing.T) (*Server, *debugcapture.Manager) {

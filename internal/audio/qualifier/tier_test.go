@@ -3,7 +3,7 @@ package qualifier
 import (
 	"testing"
 
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // TestParseTier covers the §6.2 tier tokens and the short forms an installer or

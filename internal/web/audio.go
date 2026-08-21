@@ -12,7 +12,7 @@ package web
 // WHAT IS REAL HERE AND WHAT IS STILL GATED. The availability model, the
 // patron-safe projection, the picker's server contract and the signaling relay
 // are real software and are tested, and the appliance-side WebRTC peer now
-// exists: captionbridge-media answers offers with pion (DECISIONS D20), fed by a
+// exists: openaccessbridge-media answers offers with pion (DECISIONS D20), fed by a
 // live Opus encode per named stream. What is NOT here is a real audio source or
 // a real phone: on a host with no capture hardware the audio a patron receives
 // is a generated tone (BLOCKER B3), which this surface says out loud, and the
@@ -39,9 +39,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/simpledcp/captionbridge/internal/ipc"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/ipc"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // Patron-facing labels for the two named streams. Patrons are not expected to know
@@ -209,7 +209,7 @@ type SignalFrame struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// AudioSignaler relays WebRTC signaling to captionbridge-media. §6.7: "SDP
+// AudioSignaler relays WebRTC signaling to openaccessbridge-media. §6.7: "SDP
 // offer/answer + ICE are exchanged over the existing local web server's WebSocket
 // — no third-party signaling", and the local path is host-ICE-candidate only (no
 // STUN/TURN), so an implementation must never reach the internet.
@@ -221,8 +221,9 @@ type SignalFrame struct {
 // It is minted per connection here, is meaningless outside this appliance, and
 // must never be logged: it is a client identifier (§9.4).
 //
-// The production implementation lives in cmd/captionbridge-core (signaler.go);
-// tests inject a loopback one to exercise this relay without a media process.
+// The production implementation lives in cmd/openaccessbridge-core
+// (signaler.go); tests inject a loopback one to exercise this relay without a
+// media process.
 type AudioSignaler interface {
 	// Signal relays one frame from a patron and returns the frames to send back.
 	// Implementations must not log SDP or candidate bodies.

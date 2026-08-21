@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/simpledcp/captionbridge/internal/caption/fanout"
-	"github.com/simpledcp/captionbridge/internal/logging"
-	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/openaccessbridge/internal/caption/fanout"
+	"github.com/simpledcp/openaccessbridge/internal/logging"
+	"github.com/simpledcp/openaccessbridge/internal/model"
 )
 
 // msgShowEnded is the terminal patron frame for §7.2's show-end behavior:
@@ -25,7 +25,7 @@ const msgShowEnded = "show_ended"
 
 // sessionCookie carries the per-show token after a scan or a typed join code, so
 // the token stops travelling in URLs (and out of the phone's history).
-const sessionCookie = "cb_session"
+const sessionCookie = "oab_session"
 
 // patronMux builds the public patron routes (§7.1, §8.4). It contains NO admin or
 // diagnostic routes — that separation is structural, not just authorization.
@@ -154,11 +154,11 @@ func (s *Server) renderPatron(w http.ResponseWriter, data patronPageData) {
 func patronTitle(mode string) string {
 	switch mode {
 	case "caption":
-		return "CaptionBridge — Captions"
+		return "OpenAccessBridge — Captions"
 	case "listen":
-		return "CaptionBridge — Listen"
+		return "OpenAccessBridge — Listen"
 	default:
-		return "CaptionBridge — Captions and Listening"
+		return "OpenAccessBridge — Captions and Listening"
 	}
 }
 
