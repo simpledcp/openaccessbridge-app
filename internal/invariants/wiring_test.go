@@ -398,6 +398,41 @@ func TestInvariant_TheCueVisibilityEventHasAProducer(t *testing.T) {
 	}
 }
 
+// TestInvariant_TheProfileRequirementsAreEnforced: §12.4 puts operational
+// requirements on the Low-Cost Replacement profile — mandatory calibration,
+// mandatory signal health, a Phase 9 review before it ships — and they were
+// FLAGS ON THE PROFILE THAT NOTHING READ. An operator could select the profile
+// for venues running CaptionBridge in lieu of a professional receiver system
+// with none of them met.
+//
+// This asserts the derivation exists, is wired, and that the Phase 9 record has
+// a writer (a setting only the appliance can read is a requirement nobody can
+// satisfy — the mistake this suite already caught once).
+func TestInvariant_TheProfileRequirementsAreEnforced(t *testing.T) {
+	root := repoRoot(t)
+	rd := readFile(t, filepath.Join(root, "internal", "readiness", "readiness.go"))
+	if !strings.Contains(rd, "profileRequirementWarnings(in.Deploy, in.Audio)") {
+		t.Error("§12.4's profile requirements are not evaluated: they are decoration on the profile")
+	}
+	status := readFile(t, filepath.Join(root, "cmd", "captionbridge-core", "status.go"))
+	for _, field := range []string{"RequireCalibration:", "RequiresPhase9Review:", "CalibrationRecorded:"} {
+		if !strings.Contains(status, field) {
+			t.Errorf("core does not supply %s, so the requirement cannot be evaluated", field)
+		}
+	}
+	web := readFile(t, filepath.Join(root, "internal", "web", "phase9.go"))
+	if !strings.Contains(web, "config.SettingPhase9Review") {
+		t.Error("the Phase 9 review has no writer: a requirement nobody can satisfy")
+	}
+
+	// And the requirement must be MEASURED, not inferred from a configured
+	// profile: an auditorium can be fully set up without anyone having measured
+	// the input, which is the appliance this requirement exists for.
+	if !strings.Contains(status, "aud.LastQualification") {
+		t.Error("calibration evidence is not §10.5's measured qualification")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

@@ -43,6 +43,22 @@ type Deploy struct {
 	// WarningBanner is deploy.Profile.WarningBanner: this posture must not be
 	// operated without a visible banner saying what it is.
 	WarningBanner bool
+	// RequireCalibration / RequireSignalHealth are the §12.4 operational
+	// requirements this profile carries. They were set on the profile and read by
+	// nothing, so the profile reserved for replacing a professional receiver
+	// system could be selected with neither.
+	RequireCalibration  bool
+	RequireSignalHealth bool
+	// CalibrationRecorded is the MEASURED counterpart: a §10.5 last_qualification
+	// written by a run that actually measured an input. The calibration lane
+	// leaves it empty for anything else, which is exactly what makes it usable as
+	// evidence here.
+	CalibrationRecorded bool
+	// RequiresPhase9Review / Phase9ReviewRecorded: §12.4 and §1.3. The appliance
+	// cannot verify that an operational/legal review happened; it can refuse to
+	// let the claim go unrecorded.
+	RequiresPhase9Review bool
+	Phase9ReviewRecorded bool
 	// AdminOnPatronNet is the MEASURED §8.4 fact — the admin surface's bind
 	// address is reachable from the patron network. verify.Report.AdminIsolated
 	// cannot answer this: it reports whether the binding meets the active
@@ -187,6 +203,7 @@ func Assemble(in Inputs) model.SystemReadiness {
 	warnings = append(warnings, processWarnings(in.Processes)...)
 	warnings = append(warnings, supportWarnings(in.Support)...)
 	warnings = append(warnings, iceScopeWarnings(in.ICEScope)...)
+	warnings = append(warnings, profileRequirementWarnings(in.Deploy, in.Audio)...)
 	r.Warnings = warnings
 	return r
 }
@@ -215,6 +232,48 @@ func deploymentBanner(d Deploy) string {
 	}
 	return title + " profile: diagnostic posture, not a public install. " +
 		"Switch to Patron-Facing or Low-Cost Replacement before serving an audience."
+}
+
+// profileRequirementWarnings enforces §12.4's operational requirements.
+//
+// They were flags on the deployment profile that nothing read: an operator could
+// select Low-Cost Replacement — the profile for venues running CaptionBridge IN
+// LIEU OF a professional receiver system — with no audio calibration ever run, no
+// input being monitored, and no Phase 9 review. Every one of those is what a
+// venue is relying on when it retires the system this replaces.
+//
+// They are CRITICAL because internal/web's setup gate blocks on critical
+// warnings: the same condition then stops an installer declaring setup complete,
+// shows on the dashboard, and blocks the §11.5 pre-show sheet. One mechanism,
+// three surfaces, no third definition of "ready".
+func profileRequirementWarnings(d Deploy, audio []model.AudioStreamState) []model.Warning {
+	var out []model.Warning
+	if d.RequireCalibration && !d.CalibrationRecorded {
+		out = append(out, model.Warning{
+			Code: model.WarnCalibrationRequired,
+			Message: "This deployment profile requires the audio calibration wizard to have been run, " +
+				"and no calibration is recorded for this auditorium. It is the profile for venues " +
+				"running CaptionBridge in place of a professional receiver system (§12.4).",
+			Severity: model.SeverityCritical,
+		})
+	}
+	if d.RequireSignalHealth && len(audio) == 0 {
+		out = append(out, model.Warning{
+			Code: model.WarnSignalHealthRequired,
+			Message: "This deployment profile requires continuous audio signal-health monitoring " +
+				"(§6.6) and no input is being monitored at all.",
+			Severity: model.SeverityCritical,
+		})
+	}
+	if d.RequiresPhase9Review && !d.Phase9ReviewRecorded {
+		out = append(out, model.Warning{
+			Code: model.WarnPhase9ReviewMissing,
+			Message: "This profile may only be deployed to a venue after the Phase 9 operational and " +
+				"legal review (§12.4, §1.3), and no review is recorded on this appliance.",
+			Severity: model.SeverityCritical,
+		})
+	}
+	return out
 }
 
 // iceScopeWarnings raises the §9.1/D27 conditions from the MEASUREMENT — what

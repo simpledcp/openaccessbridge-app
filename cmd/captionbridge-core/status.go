@@ -242,6 +242,13 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 		Deploy: readiness.Deploy{
 			Profile: s.deployed.Name, Title: s.deployed.Title,
 			WarningBanner: s.deployed.WarningBanner,
+			// §12.4's operational requirements, and the evidence for each. They
+			// were flags nothing read.
+			RequireCalibration:   s.deployed.RequireCalibration,
+			RequireSignalHealth:  s.deployed.RequireSignalHealth,
+			RequiresPhase9Review: s.deployed.RequiresPhase9Review,
+			CalibrationRecorded:  s.calibrationRecorded(),
+			Phase9ReviewRecorded: s.phase9Recorded(),
 			// §8.4's actual condition, measured from the two bind addresses this
 			// process is serving on. verify.Report.AdminIsolated cannot stand in
 			// for it: it answers "does this meet the profile's requirement", and
@@ -422,4 +429,27 @@ func (s *supervisor) debugCaptureWarnings() []model.Warning {
 		return nil
 	}
 	return s.debugCapture.Warnings()
+}
+
+// calibrationRecorded reports whether a §6.4 calibration that actually MEASURED
+// an input is on file for this auditorium (§12.4).
+//
+// The evidence is §10.5's last_qualification, and it is good evidence precisely
+// because the calibration lane refuses to write it for anything else: a run
+// against the synthetic stand-in, or one that measured nothing, leaves it empty.
+// That refusal is what makes this checkable at all.
+func (s *supervisor) calibrationRecorded() bool {
+	aud, ok := auditoriumProfile(s.store)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(string(aud.LastQualification)) != ""
+}
+
+// phase9Recorded reports whether the §12.4 / §1.3 operational and legal review
+// has been recorded. It is a RECORD, never a check: nothing on this appliance
+// can verify that a review happened.
+func (s *supervisor) phase9Recorded() bool {
+	v, ok, _ := s.store.GetSetting(config.SettingPhase9Review)
+	return ok && strings.TrimSpace(v) != ""
 }

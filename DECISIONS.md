@@ -840,3 +840,44 @@ that: the link is fine and the next Set RPL may well succeed. Entering ERROR for
 it would send a tech to check cables for a fault in the DCP. The real defect was
 the silence, not the missing state, and the collapse is a deliberate choice that
 was simply never recorded.
+
+### D41. §12.4's operational requirements were flags nothing read, and one of them is a record rather than a check [§12.4, §9.2, §1.3]
+The Low-Cost Accessibility Replacement profile carries the strongest operational
+requirements in the plan — mandatory audio calibration, mandatory signal-health
+monitoring, and shipping only after the Phase 9 operational/legal review —
+because it is the profile for venues running CaptionBridge **in lieu of** a
+professional receiver system. `RequireCalibration`, `RequireSignalHealth`,
+`RequireClearErrorStates` and `RequiresPhase9Review` were all set on the profile
+and read by nothing except the profile's own test. An operator could select it
+with none of them met.
+
+**They are enforced as CRITICAL warnings, deliberately, because that is the
+mechanism that already exists.** `internal/web`'s setup gate blocks on any
+critical warning, so one derivation stops an installer declaring setup complete,
+shows on the dashboard, and blocks the §11.5 sheet. Inventing a second definition
+of "ready" for this would have been the mistake the checklist pass already
+avoided once.
+
+**The calibration evidence is a MEASUREMENT, not a configured profile.** An
+auditorium can be fully set up — device, mapping, server, port label — without
+anyone ever having measured the input, and that appliance is precisely the one
+this requirement is about. The evidence is §10.5's `last_qualification`, which is
+usable here only because the calibration lane REFUSES to write it for a run
+against the synthetic stand-in or a run that measured nothing. An earlier
+honesty pass created the property that makes this checkable.
+
+**The Phase 9 review is a RECORD and says so.** This appliance cannot verify that
+an operational and legal review happened — it is an organisational fact about a
+venue. So it stores the operator's own reference (ticket, date, signatory) and
+every surface states plainly that it is a record rather than a check. That is a
+deliberate departure from D30's refusal to store staff attestations, and the
+distinction is staleness: a per-show tick the appliance cannot verify ages badly
+between shows, while a Phase 9 review is a one-time event with a reference that
+a later reviewer actually needs to find. What recording it prevents is the claim
+going unmade — without somewhere to put it, the profile that replaces a
+professional receiver system could be selected by anyone, silently, with nothing
+anywhere saying it had been considered.
+
+`RequireClearErrorStates` is deliberately NOT given a runtime gate: it is a
+property of the code (§7.2's patron copy), not of a running appliance, and the
+patron-truth pass (D40) is what actually satisfies it.

@@ -62,6 +62,8 @@ func (s *Server) adminSurface() http.Handler {
 	// unsanctioned ways are the only ways.
 	mux.HandleFunc("/api/admin/debug-capture", s.requireAdmin(s.handleAdminDebugCapture))
 	mux.HandleFunc("/api/admin/debug-capture/stop", s.requireAdmin(postOnly(s.handleAdminDebugCaptureStop)))
+	// §12.4 / §1.3: the operational and legal review this profile ships behind.
+	mux.HandleFunc("/api/admin/phase9-review", s.requireAdmin(s.handleAdminPhase9))
 	mux.Handle("/", s.adminMux())
 	return securityHeaders(mux)
 }

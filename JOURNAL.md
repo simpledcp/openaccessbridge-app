@@ -1238,3 +1238,39 @@ the text, and the mutation fails as it should.
 
 That is the second time in this pass that a mutation proving nothing was the
 useful result rather than the wasted one.
+
+## §12.4's requirements were decoration (D41)
+
+`RequireCalibration`, `RequireSignalHealth`, `RequireClearErrorStates`,
+`RequiresPhase9Review` — four flags on the Low-Cost Replacement profile, read by
+nothing but the profile's own test. That profile is the one for venues running
+CaptionBridge **in lieu of** a professional receiver system, which makes it the
+one place where an unqualified audio input is not a configuration detail: it is
+the thing the venue retired a working system for.
+
+The enforcement mechanism was already there. `internal/web`'s setup gate blocks
+on any CRITICAL warning, so routing the unmet requirements through the warning
+set stops an installer declaring setup complete, shows on the dashboard, and
+blocks the §11.5 sheet — one derivation, three surfaces, no second definition of
+"ready" to disagree with the first.
+
+**The calibration evidence had to be a measurement.** An auditorium can be fully
+configured — device, mapping, server, port label — with nobody ever having
+measured the input, and that is exactly the appliance this requirement is about.
+§10.5's `last_qualification` works as evidence only because an earlier honesty
+pass made the calibration lane refuse to write it for a synthetic run or a run
+that measured nothing. That refusal, made for its own reasons, is what makes this
+checkable at all. The mutation for it is the one worth keeping: taking the
+evidence from "a profile exists" instead passes every other test.
+
+**And one of the four is a record, not a check.** The appliance cannot verify
+that a legal review happened. Storing the operator's reference is a deliberate
+departure from D30's refusal to keep staff attestations, and the difference is
+staleness: a per-show tick ages badly between shows, while a Phase 9 review is a
+one-time event with a reference a later reviewer needs to find. Every surface
+says it is a record. What it prevents is the claim going unmade — the profile
+that replaces a professional receiver system could otherwise be selected by
+anyone, silently, with nothing anywhere saying it had been considered.
+
+`RequireClearErrorStates` got no runtime gate on purpose: it is a property of the
+patron copy, not of a running appliance, and D40 is what actually satisfies it.

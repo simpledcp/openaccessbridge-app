@@ -189,8 +189,8 @@ A fresh audit of every `buildplan.md` section against the shipped tree produced
 refute it; survivors carry reproductions). Three broke shipped behaviour and are
 fixed (D36); the §9.3 SSH row (D37), §8.5's half-wired wrong-room guard and its
 missing wizard fields (D38), §9.4's unreachable debug capture (D39) and the
-§5/§7 patron-truth cluster (D40) are done too. **26 remain open**, grouped below
-by section. This is the
+§5/§7 patron-truth cluster (D40) and §12.4's unenforced profile requirements
+(D41) are done too. **25 remain open**, grouped below by section. This is the
 next backlog, and it is listed rather than summarised because a summary is how a
 list like this stops being acted on.
 
@@ -233,11 +233,9 @@ network test harness. The soak does not run multi-hour with device hot-plug, and
 the Wi-Fi soak (N concurrent patrons) has never run — the D11 caps are enforced
 arithmetically and the capacity behind them is untested.
 
-**§12 profiles (3).** Low-Cost Replacement does not enforce its mandatory
-calibration wizard, so an operator can select the profile reserved for venues
-running CaptionBridge in lieu of a professional receiver system without it.
-§12.5's Loaner overlay cannot be configured by a venue. Admin-subnet handling is
-partial.
+**§12 profiles (2 open).** Low-Cost Replacement now enforces its own
+requirements (D41). Still open: §12.5's Loaner overlay cannot be configured by a
+venue, and admin-subnet handling is partial.
 
 An adversarial review of the five slices above (2026-08-21) confirmed 17 defects
 and refuted 2. They are fixed; the three worth carrying forward as a LESSON are

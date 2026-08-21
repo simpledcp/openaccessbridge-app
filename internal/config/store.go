@@ -62,6 +62,16 @@ const (
 	SettingUpdateTrustedKeys = "update_trusted_keys"
 	// SettingUpdateMediaDir is the mount point removable update media appears at.
 	SettingUpdateMediaDir = "update_media_dir"
+	// SettingPhase9Review records the §12.4 / §1.3 operational and legal review a
+	// Low-Cost Replacement deployment may only ship after.
+	//
+	// The appliance cannot verify that a review happened — it is an
+	// organisational fact, not a measurement — so this holds the operator's own
+	// reference (a ticket, a date, a signatory) and the surfaces say plainly that
+	// it is a RECORD rather than a check. What it does prevent is the claim going
+	// unmade: without it the profile that replaces a professional receiver system
+	// could be selected by anyone, silently.
+	SettingPhase9Review = "phase9_review_reference"
 	// SettingAuditoriumName is the room name §7.2 shows a patron and §8.5 relies
 	// on as the last human check against a wrong-room join.
 	//

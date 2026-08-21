@@ -58,6 +58,21 @@ const (
 	// is running — whatever else the audio inputs happen to report.
 	WarnAudioInputProfileRejected = "audio_input_profile_rejected"
 
+	// WarnCalibrationRequired: this deployment profile makes the §6.4 audio
+	// calibration MANDATORY (§12.4) and no calibration has ever been recorded for
+	// this auditorium. It is the profile for venues running CaptionBridge in lieu
+	// of a professional receiver system, so an uncalibrated input is not a
+	// configuration detail — it is the thing the venue replaced a working system
+	// with.
+	WarnCalibrationRequired = "audio_calibration_required_by_profile"
+	// WarnSignalHealthRequired: the profile requires §6.6 continuous signal-health
+	// monitoring and there is no input being monitored at all.
+	WarnSignalHealthRequired = "signal_health_required_by_profile"
+	// WarnPhase9ReviewMissing: §12.4 and §1.3 — this profile "may only ship to a
+	// venue after Phase 9 operational/legal review", and no review is recorded.
+	// The appliance cannot verify that a review happened; it can refuse to let
+	// the claim go unrecorded.
+	WarnPhase9ReviewMissing = "phase9_review_not_recorded"
 	// WarnSSHUnverified is the SSH half of the "asserted but never measured" case.
 	// The §9.3 row used to be derived from a configuration setting nothing wrote,
 	// so an appliance with sshd genuinely running reported "SSH disabled" —
