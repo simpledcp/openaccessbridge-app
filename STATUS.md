@@ -207,6 +207,13 @@ the audit lanes' own reports.
   only and can never sign (asserted in `internal/invariants`), but where the
   private half lives, how it rotates, and what happens if it leaks are process
   questions nobody has answered.
+- **§9.5's Wi-Fi onboarding QR is not built.** §9.5 wants onboarding to carry
+  "SSID + password + URL where the platform allows", which in practice is a
+  SECOND QR in the `WIFI:` form — one code cannot be both a network join and a
+  URL. `internal/qr` already encodes that payload (there is a fixture for it),
+  but nothing stores the patron SSID or its passphrase, and adding a place to
+  keep a shared network password is a decision about what this appliance holds,
+  not a rendering change. Left for that decision.
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
 - **The ICE scope row is as fresh as the last posture reconcile** (15 s), not as
