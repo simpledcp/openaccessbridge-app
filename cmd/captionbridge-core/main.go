@@ -13,6 +13,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,6 +28,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/deploy"
 	"github.com/simpledcp/captionbridge/internal/ipc"
 	"github.com/simpledcp/captionbridge/internal/logging"
+	"github.com/simpledcp/captionbridge/internal/logging/debugcapture"
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/readiness"
 	"github.com/simpledcp/captionbridge/internal/security/support"
@@ -102,6 +104,20 @@ func main() {
 	// trail still shows as open: support mode fails closed across a restart
 	// (internal/security/support).
 	clearLegacySupportFlag(store, log)
+	// §9.4 debug capture: the sanctioned way to record caption text or audio for
+	// a support case. The sink is the unit's tmpfs RuntimeDirectory, so anything
+	// left behind dies with a reboot, and RequireTmpfs refuses to start a capture
+	// anywhere that is not really tmpfs — a capture that quietly wrote content to
+	// the persistent filesystem is the guardrail-#5 breach this whole feature is
+	// bounded to avoid.
+	sup.debugCapture = debugcapture.New(debugcapture.Options{
+		Dir:          filepath.Join(*socketDir, "debug-capture"),
+		RequireTmpfs: true,
+		Log:          log,
+	})
+	go sup.debugCapture.Run(ctx, debugcapture.DefaultSweepInterval)
+	defer sup.debugCapture.Close()
+
 	sup.support = support.New(support.Options{
 		Store:    store,
 		Log:      log,
@@ -152,6 +168,7 @@ func main() {
 		// §9.4: the surface that opens a way into this appliance, and the trail
 		// that makes its use reviewable.
 		Support:      sup.support,
+		DebugCapture: sup.debugCapture,
 		SupportTrail: store.RecentSupportSessions,
 		// §9.4: verify-only on this image (no A/B slots, BLOCKERS B8).
 		Update: newUpdateService(store, log),

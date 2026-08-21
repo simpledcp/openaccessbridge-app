@@ -13,6 +13,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/deploy"
 	"github.com/simpledcp/captionbridge/internal/logging"
+	"github.com/simpledcp/captionbridge/internal/logging/debugcapture"
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/readiness"
 	"github.com/simpledcp/captionbridge/internal/security/firewall"
@@ -54,6 +55,10 @@ type supervisor struct {
 	ctrl *caption.Controller
 
 	captionWarnings *readiness.CaptionWarnings
+
+	// debugCapture owns §9.4's bounded content capture. Its warnings are §8.3's
+	// "debug capture / support mode active" alert, which had no producer.
+	debugCapture *debugcapture.Manager
 
 	// support owns the §9.4 session: the only re-entry path once SSH is off, and
 	// therefore the one whose window must never outlive its deadline.
@@ -229,7 +234,11 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 		Verify:          rep,
 		Network:         net,
 		CaptionWarnings: s.captionWarnings.Snapshot(),
-		HelperWarnings:  append(s.media.warnings(), s.firewall.warnings()...),
+		// §8.3: an ACTIVE capture must be visibly indicated for as long as it
+		// runs. The manager already produced these warnings and nothing consumed
+		// them, so the alert could not appear however loudly it was configured.
+		HelperWarnings: append(append(s.media.warnings(), s.firewall.warnings()...),
+			s.debugCaptureWarnings()...),
 		Deploy: readiness.Deploy{
 			Profile: s.deployed.Name, Title: s.deployed.Title,
 			WarningBanner: s.deployed.WarningBanner,
@@ -405,4 +414,12 @@ func failureReason(ws []model.Warning) string {
 		all = all[:6]
 	}
 	return strings.Join(all, ",")
+}
+
+// debugCaptureWarnings is §8.3's alert for a running capture, or nothing.
+func (s *supervisor) debugCaptureWarnings() []model.Warning {
+	if s.debugCapture == nil {
+		return nil
+	}
+	return s.debugCapture.Warnings()
 }

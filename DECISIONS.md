@@ -766,3 +766,25 @@ the §11.5 pattern: the sheet prints the label the installer recorded and asks a
 person to confirm the rack matches. With no label recorded it says there is
 nothing to check against, rather than printing an empty instruction — an
 unrecorded label is itself the finding.
+
+### D39. §9.4's sanctioned debug capture needed a door, because the alternative to a bounded path is an unbounded one [§9.4, §8.3]
+`internal/logging/debugcapture` implemented every constraint §9.4 asks for —
+explicit, admin-only, time-limited, size-limited, tmpfs-only, self-deleting on a
+timer and on reboot, audited without content — and had no production caller. So
+the sanctioned way to capture caption text or audio for a support case did not
+exist on any surface.
+
+**That is worse than a missing feature.** §9.4 does not forbid capturing content;
+it forbids capturing it casually, and offers this as the trade. A support
+engineer who cannot capture evidence the sanctioned way does not stop needing
+evidence — they add a log line, or ask a booth to film the screen with a phone.
+None of those is bounded, admin-only, time-limited, visible on the dashboard, or
+deleted afterwards. Withholding the safe path does not prevent the act; it just
+removes every constraint from it.
+
+It now has an admin route, a sink on the unit's tmpfs (with `RequireTmpfs: true`,
+so a capture cannot quietly write content to the persistent filesystem and breach
+guardrail #5), a sweeper, and — the half that was equally missing — §8.3's
+"debug capture active" alert is finally CONSUMED: the manager produced those
+warnings and nothing read them, so a running capture could not be visibly
+indicated however loudly it was configured.

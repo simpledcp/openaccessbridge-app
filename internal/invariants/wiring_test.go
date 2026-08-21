@@ -351,6 +351,35 @@ func TestInvariant_BothPinnedIdentityHalvesReachTheGuard(t *testing.T) {
 	}
 }
 
+// TestInvariant_DebugCaptureHasADoorAndAnAlert: §9.4 offers debug capture as the
+// SANCTIONED trade against the no-content rule — explicit, admin-only,
+// time-limited, size-limited, visibly indicated, self-deleting. The manager
+// implemented every one of those and had no production caller.
+//
+// A sanctioned path nobody can reach does not reduce the capturing of content;
+// it moves it somewhere unbounded. So this asserts BOTH halves: a door on the
+// admin surface, and the §8.3 alert actually consumed.
+//
+// The literals are LOAD-BEARING.
+func TestInvariant_DebugCaptureHasADoorAndAnAlert(t *testing.T) {
+	root := repoRoot(t)
+	admin := readFile(t, filepath.Join(root, "internal", "web", "session_admin.go"))
+	if !strings.Contains(admin, `"/api/admin/debug-capture"`) {
+		t.Error("§9.4's sanctioned capture has no route: the unsanctioned ways are the only ways")
+	}
+	main := readFile(t, filepath.Join(root, "cmd", "captionbridge-core", "main.go"))
+	if !strings.Contains(main, "debugcapture.New(") {
+		t.Error("core builds no capture sink, so the admin route has nothing to reach")
+	}
+	if !strings.Contains(main, "RequireTmpfs: true") {
+		t.Error("the capture sink does not require tmpfs: content could reach the persistent filesystem")
+	}
+	status := readFile(t, filepath.Join(root, "cmd", "captionbridge-core", "status.go"))
+	if !strings.Contains(status, "s.debugCaptureWarnings()") {
+		t.Error("§8.3's capture alert has no consumer, so a running capture cannot be visibly indicated")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

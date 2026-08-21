@@ -21,6 +21,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
 	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/logging"
+	"github.com/simpledcp/captionbridge/internal/logging/debugcapture"
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/security/support"
 )
@@ -97,6 +98,11 @@ type Deps struct {
 	// names the room in the setup wizard must not have to restart the appliance
 	// to stop it telling patrons the wrong one. Nil falls back to Config.Auditorium.
 	AuditoriumName func() string
+	// DebugCapture is §9.4's sanctioned, bounded, self-deleting way to record
+	// caption text or audio for a support case. Nil on an appliance with no
+	// capture sink, and the handlers say so — an operator who is told the feature
+	// does not exist looks for another way, which is the point of having it.
+	DebugCapture *debugcapture.Manager
 }
 
 // Server owns the patron and admin HTTP servers.

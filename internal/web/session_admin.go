@@ -58,6 +58,10 @@ func (s *Server) adminSurface() http.Handler {
 	// §9.5 patron Wi-Fi onboarding (wifi.go): a SECOND code, beside the show's.
 	mux.HandleFunc("/api/admin/wifi", s.requireAdmin(s.handleAdminWiFi))
 	mux.HandleFunc("/api/admin/wifi-qr.png", s.requireAdmin(s.handleAdminWiFiQR))
+	// §9.4's sanctioned debug capture (debugcapture.go). Without a door, the
+	// unsanctioned ways are the only ways.
+	mux.HandleFunc("/api/admin/debug-capture", s.requireAdmin(s.handleAdminDebugCapture))
+	mux.HandleFunc("/api/admin/debug-capture/stop", s.requireAdmin(postOnly(s.handleAdminDebugCaptureStop)))
 	mux.Handle("/", s.adminMux())
 	return securityHeaders(mux)
 }

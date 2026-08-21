@@ -1136,3 +1136,30 @@ The port label gets the §11.5 treatment rather than a fake check: an appliance
 cannot see a cable, so the sheet prints the label the installer recorded and asks
 a person to confirm the rack matches it. With none recorded it says there is
 nothing to check against — an unrecorded label is the finding, not a blank line.
+
+## §9.4's debug capture had no door (D39)
+
+`internal/logging/debugcapture` is a careful piece of work: explicit,
+admin-only, time-limited, size-limited, tmpfs-only, self-deleting on a timer and
+on reboot, audited without content, with the grantee hashed and the operator's
+reason deliberately kept out of the log stream because "free text typed about a
+caption fault can quote the caption". Every constraint §9.4 asks for.
+
+It had no production caller. Not one.
+
+That is worse than a missing feature, and the reasoning is worth writing down
+because it cuts against the instinct this codebase otherwise runs on. §9.4 does
+not forbid capturing caption text or audio; it forbids capturing them CASUALLY,
+and offers this as the sanctioned trade. A support engineer who cannot capture
+evidence the sanctioned way does not stop needing evidence — they add a log line,
+or ask the booth to film the screen with a phone. None of those is bounded,
+admin-only, time-limited, visible on the dashboard, or deleted afterwards.
+Withholding the safe path does not prevent the act. It removes every constraint
+from it.
+
+The §8.3 half was missing in the same way: the manager produced "debug capture
+active" warnings and nothing consumed them, so a running capture could not be
+visibly indicated however loudly it was configured. Both halves are pinned by an
+invariant now — the route, the sink, `RequireTmpfs: true`, and the alert's
+consumer — because each was individually absent and each is individually
+deletable by a refactor that looks harmless.

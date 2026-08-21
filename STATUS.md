@@ -187,7 +187,9 @@ the audit lanes' own reports.
 A fresh audit of every `buildplan.md` section against the shipped tree produced
 **39 confirmed gaps** (each found by an auditor, then put to a skeptic told to
 refute it; survivors carry reproductions). Three broke shipped behaviour and are
-fixed — see D36. The other **36 are open**, grouped below by section. This is the
+fixed (D36); the §9.3 SSH row (D37), §8.5's half-wired wrong-room guard and its
+missing wizard fields (D38), and §9.4's unreachable debug capture (D39) are done
+too. **31 remain open**, grouped below by section. This is the
 next backlog, and it is listed rather than summarised because a summary is how a
 list like this stops being acted on.
 
@@ -209,26 +211,19 @@ operator cannot tell "the phone never started audio" from "the feed is silent".
 ("Connecting…" while audio plays). §7.1's mode selection is not fully
 reload-free. Two others are fixed in D36.
 
-**§8 admin and wrong-room safeguards (10) — the largest and most consequential
-cluster.** Everything an installer types into the identity step is STORED AND
-IGNORED: `expected_screen_name` and `expected_server_fingerprint` are persisted
-and never compared, so §8.5's wrong-room guard cannot be turned on by the person
-doing the install. The physical port label is never set, so the re-cabling
-defence never runs. §8.1's steps are incomplete: no physical-port confirmation
-(the miswiring step exists to prevent), no theater-side static IP/DHCP
-configuration, partial server-family collection, partial audio steps. §8.3's
-debug-capture alert has nothing to raise it.
+**§8 admin and wrong-room safeguards (4 open).** The identity cluster is done
+(D38): both pinned halves reach the guard, and the wizard can set the
+fingerprint, the port label and the room name. §8.3's alert now has a producer
+(D39). Still open: §8.1's steps are incomplete — no physical-port confirmation
+step (the miswiring §8.1 step 3 exists to prevent), no theater-side static
+IP/DHCP configuration (which needs root, B5), partial server-family collection,
+and the audio device/calibration steps are not part of the wizard flow.
 
-**§9 security (8).** THE SSH ROW IS A CONSTANT: §9.3's verification reports "SSH
-state correct" from a config setting rather than from the running sshd, so a
-Patron-Facing appliance with sshd actually running reports "SSH disabled". That
-is fail-wrong, and it is the sharpest item in the backlog. Debug caption logging
-and debug audio capture have no admin path at all, so §9.4's sanctioned,
-bounded, self-deleting way to capture content for a support case does not exist —
-which makes the unsanctioned way the only way. `caption.cue.visible_no_text` and
-`caption.timeline.anchor_updated` are never emitted. Booth Diagnostic's "admin on
-the configured admin subnet" is admin on the whole patron interface instead.
-§9.5's Wi-Fi spec is unenforced prose.
+**§9 security (5 open).** The SSH row (D37) and debug capture (D39) are done.
+Still open: `caption.cue.visible_no_text` and `caption.timeline.anchor_updated`
+are never emitted, so §9.4's sanctioned content-free diagnostics do not exist;
+Booth Diagnostic's "admin on the configured admin subnet" is admin on the whole
+patron interface instead; §9.5's Wi-Fi spec is unenforced prose.
 
 **§10 models (4).** `last_timeline_anchor_monotonic_ns` is declared and never
 populated. Two of §10.8's four compatibility revisions are never written, so
