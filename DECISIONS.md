@@ -657,3 +657,50 @@ reasoning.** The format is de facto (ZXing's), not a standard.
     B2). So the appliance reports the ambiguity to the one party who can remove
     it: the venue, by changing one character. Guessing silently on a patron's
     behalf is the only option that helps nobody.
+
+### D36. Three defects a spec-vs-code audit found in shipped behaviour, and what they had in common [§7.2, §8.5, §9.1, §6.7]
+A fresh audit of every buildplan section against the tree produced 39 confirmed
+gaps. Three of them broke behaviour that was already shipped and looked correct,
+and all three shared a shape: the code was right and its CONFIGURATION was
+unreachable, so the fault only existed on a real installation.
+
+**The QR pointed every patron's phone at itself.** `joinURL` derived the patron
+address from the ADMIN request's `Host` when the patron bind was a wildcard. The
+shipped unit binds `--patron-bind=0.0.0.0:80 --admin-bind=127.0.0.1:8443`, so on
+any real appliance that Host is `127.0.0.1` — and the QR encoded
+`http://127.0.0.1:80/accessibility?t=…`. It scanned perfectly. Nobody would have
+looked for a fault, because the scan worked.
+
+The address now comes from the §9.1 CLIENT INTERFACE — the patron LAN by
+definition, and the same interface D28 confines ICE gathering to — falling back
+to the admin Host only when it is not loopback. When no address can be
+determined there is NO join URL and NO QR, with the reason on the operator's
+screen: a code that scans and goes nowhere is worse than no code.
+
+**Patron media landed outside the ports the firewall opens.** §9.1's ruleset
+opens `iif <client> udp dport 10000-20000 accept`, and nothing constrained pion,
+which bound to whatever ephemeral ports the kernel gave it (typically
+32768-60999). On a real appliance with the ruleset loaded as root, the phone's
+inbound connectivity checks arrive on ports the input chain drops; audio worked
+here only because no ruleset is ever loaded without root (B5). The peer now sets
+`SetEphemeralUDPPortRange` from constants an invariant test holds equal to
+`firewall.DefaultWebRTCPortRange` — the two halves live in different packages and
+nothing but that assertion connects them.
+
+**Every screen in a multiplex told its patrons the same room name.** The
+auditorium name came only from `--auditorium`, whose default is "Auditorium 1",
+and the shipped systemd unit passes no such flag. §8.5 puts the room name on the
+patron page precisely so a patron or passing staff member can catch a wrong-room
+join — and it would have read "Auditorium 1" in every room. It is now a stored
+setting the wizard writes and the page resolves PER REQUEST (so naming a room
+needs no restart), the flag is a development fallback used only when explicitly
+passed, and an unnamed appliance shows NO name and fails a blocking pre-show
+check. A wrong name that looks right is worse than none.
+
+**What they have in common is the lesson.** Each was reachable only through the
+configuration a real install produces, and each was invisible on this host —
+because the developer path passes the flag, reaches admin over a real address,
+and never loads a ruleset. That is the same class as the three
+readers-without-writers the previous review found, and it is now the thing to
+look for first: not "is the code right" but "is the code reachable, with the
+values a real installation has".

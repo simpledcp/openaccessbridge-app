@@ -55,6 +55,25 @@ var (
 	ErrClosed = errors.New("webrtcpeer: hub is closed")
 )
 
+// DefaultPortMin and DefaultPortMax bound patron media, and they are not a
+// preference — they are one half of an agreement with the firewall.
+//
+// §9.1's ruleset opens `iif <client> udp dport 10000-20000 accept` on the patron
+// interface. Until this was set, pion bound its ICE agent to whatever ephemeral
+// ports the kernel handed out (typically 32768-60999), so on a real appliance
+// with that ruleset loaded as root the phone's inbound connectivity checks
+// arrived on ports the input chain drops. The rule protected a range nothing
+// used, and patron audio depended on conntrack happening to have an entry from
+// the appliance's own outbound check — which is timing, not design.
+//
+// These numbers must stay equal to firewall.DefaultWebRTCPortRange. An invariant
+// test asserts it, because the two live in different packages and the failure is
+// silent on this host (no root, so no ruleset is ever loaded — BLOCKER B5).
+const (
+	DefaultPortMin uint16 = 10000
+	DefaultPortMax uint16 = 20000
+)
+
 // defaultGatherTimeout bounds host-candidate gathering. On the local-only path
 // gathering is a synchronous enumeration of this host's interfaces and finishes
 // in milliseconds; the bound exists so a wedged gatherer surfaces as a failed
@@ -67,6 +86,10 @@ type Options struct {
 	Log *logging.Logger
 	// GatherTimeout bounds ICE gathering for one answer (0 = 3 s).
 	GatherTimeout time.Duration
+	// PortMin / PortMax bound the UDP ports patron media is carried on, and MUST
+	// match the range §9.1's ruleset opens on the client interface. Zero uses
+	// DefaultPortMin/Max, which are the same numbers the firewall defaults to.
+	PortMin, PortMax uint16
 	// Scope confines ICE gathering to the patron interface (scope.go). The zero
 	// value gathers on every interface — the behaviour D27 recorded as a known
 	// limit — and reports itself as unconfined rather than passing for scoped.
@@ -162,6 +185,19 @@ func New(opts Options) (*Hub, error) {
 	// own (no gather), so a phone can always reach it by address on the patron
 	// LAN.
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
+
+	// §9.1: media must land inside the range the firewall opens. A failure here
+	// is fatal to the hub rather than logged and continued — a peer that gathers
+	// outside the opened range produces audio a patron cannot receive on any
+	// appliance where the ruleset is actually loaded, and that is worse than no
+	// peer at all, because the dashboard would report a stream as available.
+	portMin, portMax := opts.PortMin, opts.PortMax
+	if portMin == 0 || portMax == 0 {
+		portMin, portMax = DefaultPortMin, DefaultPortMax
+	}
+	if err := se.SetEphemeralUDPPortRange(portMin, portMax); err != nil {
+		return nil, fmt.Errorf("webrtcpeer: media port range %d-%d: %w", portMin, portMax, err)
+	}
 
 	h := &Hub{
 		log:     log,

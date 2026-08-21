@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -132,6 +133,22 @@ func main() {
 		// admission enforces the same number the caption fan-out does (D11).
 		Signaler: &mediaSignaler{media: sup.media, log: log, maxPeers: deployed.MaxConcurrentClients},
 		Status:   sup.status,
+		// §7.2/§8.5: the room name comes from the STORE, resolved per request, so
+		// naming a room in the setup wizard takes effect without a restart. The
+		// --auditorium flag is a development fallback only: the shipped unit does
+		// not pass it, and an appliance that has not been named must not tell its
+		// patrons a build-time default (every screen would claim the same room).
+		AuditoriumName: func() string {
+			if name, ok, _ := store.GetSetting(config.SettingAuditoriumName); ok {
+				if trimmed := strings.TrimSpace(name); trimmed != "" {
+					return trimmed
+				}
+			}
+			if flagSet("auditorium") {
+				return *auditorium
+			}
+			return ""
+		},
 		// §9.4: the surface that opens a way into this appliance, and the trail
 		// that makes its use reviewable.
 		Support:      sup.support,

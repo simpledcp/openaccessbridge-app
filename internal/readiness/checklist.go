@@ -373,7 +373,22 @@ func patronChecks(st model.SystemReadiness, facts ChecklistFacts, now time.Time)
 			strings.Join(sc.OfferedInterfaces, ", ")
 	}
 
-	return []model.PreShowCheck{session, scope}
+	room := model.PreShowCheck{
+		ID: "auditorium_named", Title: "This appliance knows which room it is",
+		Section: "§7.2, §8.5", Source: model.SourceMeasured, Blocking: true,
+		Remedy: "Name this auditorium in the setup wizard. Until then the patron page shows no room " +
+			"name, and the last human check against a wrong-room join — a patron or passing staff " +
+			"member reading the room off the page — cannot happen.",
+	}
+	if strings.TrimSpace(facts.Auditorium) == "" {
+		room.State = model.CheckFail
+		room.Detail = "this appliance has not been told which auditorium it serves"
+	} else {
+		room.State = model.CheckPass
+		room.Detail = "the patron page shows " + facts.Auditorium
+	}
+
+	return []model.PreShowCheck{session, scope, room}
 }
 
 // staffChecks are the items only a person can answer. The appliance prints the

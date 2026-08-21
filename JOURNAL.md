@@ -1031,3 +1031,49 @@ redacts field names containing "password", a real mechanism I had not known was
 protecting this. Re-run with an innocuous field name (`detail`), the test failed
 as it should. A mutation that is silently neutralised proves nothing, and the
 second one was worth understanding rather than working around.
+
+## A spec-vs-code audit, and three defects that only existed on a real appliance (D36)
+
+A fresh audit of every buildplan section against the shipped tree returned 39
+confirmed gaps — each one found by an auditor and then put to a skeptic told to
+refute it, with the survivors carrying reproductions rather than readings.
+
+Three of them broke behaviour that was already shipped, tested, and green. All
+three had the same shape, and it is worth naming because it is the second time
+this shape has come up: the code was correct and its CONFIGURATION was
+unreachable or wrong, so the defect existed only on a real installation and was
+invisible on this host.
+
+**The QR I finished this morning pointed every patron's phone at itself.** The
+join URL fell back to the admin request's `Host` when the patron listener binds
+to a wildcard — and the shipped unit binds patron to `0.0.0.0:80` with admin on
+`127.0.0.1:8443`. Every QR a real appliance produced encoded
+`http://127.0.0.1:80/`. The auditor verified it by execution rather than by
+reading. It is the perfect example of the class this repo hunts: the code scans,
+the image decodes, the payload matches the URL exactly — every test I wrote
+passed — and the URL is useless.
+
+**Patron audio would not have started on a real appliance.** §9.1 opens UDP
+10000-20000 on the patron interface for media; pion bound wherever the kernel
+put it. Here that never mattered, because without root no ruleset is loaded
+(B5) — so the one host that could have caught it is the one host where it cannot
+happen. The peer now binds inside the range, and an invariant holds the two
+constants equal across the packages that own them.
+
+**Every screen in a multiplex would have told its patrons the same room.** The
+auditorium name came from a flag the shipped systemd unit does not pass, so it
+rendered the build-time default "Auditorium 1" everywhere. §8.5 puts that name on
+the patron page for exactly one reason — so a patron or passing staff member can
+notice they are in the wrong room — and it would have said the same thing in
+every room in the building. An unnamed appliance now shows no name at all and
+fails a blocking pre-show check, because a wrong name that looks right is worse
+than none.
+
+All three are mutation-confirmed by restoring the original behaviour and watching
+the new tests fail: the loopback URL comes back verbatim, the room shows
+"Auditorium 1", and moving either end of the port range breaks the invariant.
+
+The remaining 36 gaps are recorded in STATUS as the next backlog. The lesson for
+working through them is the one D36 ends on: the question that finds this class
+is not "is the code right" but "is it reachable, with the values a real
+installation has".

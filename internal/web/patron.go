@@ -117,7 +117,7 @@ func (s *Server) servePatronPage(w http.ResponseWriter, r *http.Request) {
 		Captions:   captions,
 		Audio:      audio,
 		Title:      patronTitle(mode),
-		Auditorium: s.cfg.Auditorium,
+		Auditorium: s.auditoriumName(),
 	}
 	sess, err := s.authorize(r)
 	if err != nil {
@@ -688,4 +688,22 @@ func noStore(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// auditoriumName is the room name shown to a patron (§7.2) and relied on by
+// §8.5 as the last human check against a wrong-room join.
+//
+// An unnamed room renders EMPTY rather than falling back to a build-time
+// default. "Auditorium 1" on every screen in a multiplex is worse than no name
+// at all: it is a wrong name that looks like a right one, and the whole reason
+// the page carries a room name is so a patron or passing staff member can catch
+// exactly that. The admin surface raises the unnamed state loudly instead.
+func (s *Server) auditoriumName() string {
+	if s.deps.AuditoriumName != nil {
+		if name := strings.TrimSpace(s.deps.AuditoriumName()); name != "" {
+			return name
+		}
+		return ""
+	}
+	return strings.TrimSpace(s.cfg.Auditorium)
 }

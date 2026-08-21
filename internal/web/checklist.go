@@ -47,7 +47,9 @@ func (s *Server) handleAdminPreShow(w http.ResponseWriter, r *http.Request) {
 // booth chasing faults that were never measured.
 func (s *Server) preShowChecklist() model.PreShowChecklist {
 	facts := readiness.ChecklistFacts{
-		Auditorium:           s.cfg.Auditorium,
+		// The RESOLVED name, not the configured default: an appliance nobody named
+		// must fail this item rather than pass it on a flag's build-time value.
+		Auditorium:           s.auditoriumName(),
 		PerShowTokenRequired: s.cfg.PerShowToken,
 	}
 	if cur, ok := s.sessions.Current(); ok {
@@ -57,7 +59,7 @@ func (s *Server) preShowChecklist() model.PreShowChecklist {
 	}
 	if s.deps.Status == nil {
 		return model.PreShowChecklist{
-			Auditorium:  s.cfg.Auditorium,
+			Auditorium:  s.auditoriumName(),
 			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 			Checks: []model.PreShowCheck{{
 				ID: "status_unavailable", Title: "The appliance's own readiness could not be read",

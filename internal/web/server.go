@@ -91,6 +91,12 @@ type Deps struct {
 	// appliance without one; the handlers say so rather than implying an update
 	// could be verified.
 	Update UpdateService
+	// AuditoriumName resolves the room name at request time (§7.2, §8.5).
+	//
+	// Resolved per request rather than captured in Config because an operator who
+	// names the room in the setup wizard must not have to restart the appliance
+	// to stop it telling patrons the wrong one. Nil falls back to Config.Auditorium.
+	AuditoriumName func() string
 }
 
 // Server owns the patron and admin HTTP servers.

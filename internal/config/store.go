@@ -62,6 +62,14 @@ const (
 	SettingUpdateTrustedKeys = "update_trusted_keys"
 	// SettingUpdateMediaDir is the mount point removable update media appears at.
 	SettingUpdateMediaDir = "update_media_dir"
+	// SettingAuditoriumName is the room name §7.2 shows a patron and §8.5 relies
+	// on as the last human check against a wrong-room join.
+	//
+	// It is a SETTING rather than only a flag because the shipped systemd unit
+	// passes no --auditorium: every appliance installed through the wizard
+	// rendered the flag's build-time default, so every screen in a multiplex told
+	// its patrons the same room name — the exact confusion §8.5 exists to catch.
+	SettingAuditoriumName = "auditorium_name"
 	// §9.5 patron Wi-Fi onboarding. The passphrase IS stored, and that is a
 	// deliberate decision (D35): a patron network's passphrase is handed to every
 	// person in the room and printed on a lobby sign, so it is not a secret in the

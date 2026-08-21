@@ -1,14 +1,17 @@
 package invariants
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/simpledcp/captionbridge/internal/audio/pipeline"
+	"github.com/simpledcp/captionbridge/internal/audio/webrtcpeer"
 	"github.com/simpledcp/captionbridge/internal/caption/acsp"
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/readiness"
+	"github.com/simpledcp/captionbridge/internal/security/firewall"
 	"github.com/simpledcp/captionbridge/internal/security/verify"
 )
 
@@ -303,6 +306,24 @@ func TestInvariant_TheBuildNumberIsStamped(t *testing.T) {
 	ci := readFile(t, filepath.Join(repoRoot(t), ".github", "workflows", "ci.yml"))
 	if !strings.Contains(ci, "make build") {
 		t.Error("CI builds binaries without the Makefile's ldflags, so its artifacts carry no build number")
+	}
+}
+
+// TestInvariant_MediaPortsMatchTheFirewallRange: §9.1's ruleset opens one UDP
+// range on the client interface for patron media, and the WebRTC peer must bind
+// inside it. They live in different packages and nothing connects them but this
+// assertion.
+//
+// The failure is SILENT on any host without root: no ruleset is ever loaded
+// here (B5), so a mismatch cannot be caught by running the appliance — it
+// surfaces as patron audio that will not start, in a booth, with the dashboard
+// reporting the stream as available.
+func TestInvariant_MediaPortsMatchTheFirewallRange(t *testing.T) {
+	want := fmt.Sprintf("%d-%d", webrtcpeer.DefaultPortMin, webrtcpeer.DefaultPortMax)
+	if firewall.DefaultWebRTCPortRange != want {
+		t.Errorf("the firewall opens UDP %s but the peer binds %s: the phone's connectivity checks "+
+			"would arrive on ports the input chain drops",
+			firewall.DefaultWebRTCPortRange, want)
 	}
 }
 

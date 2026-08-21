@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/qr"
@@ -78,6 +79,10 @@ type SessionResponse struct {
 	// is served separately, because a PNG does not belong inside a JSON status
 	// document that the admin page polls.
 	QR *QRInfo `json:"qr,omitempty"`
+	// JoinNote explains why there is no join URL, when there is none. An empty
+	// JoinURL with no explanation is a blank space on an operator's screen at the
+	// moment they need to admit an audience.
+	JoinNote string `json:"join_note,omitempty"`
 }
 
 // QRInfo is what the operator surface needs to render and, more importantly, to
@@ -162,14 +167,23 @@ func (s *Server) sessionResponse(r *http.Request, issued IssuedSession) SessionR
 		sess.ClientCountCaption = s.deps.Hub.ClientCount()
 	}
 	joinURL := s.joinURL(r, issued.Token)
-	return SessionResponse{
+	out := SessionResponse{
 		Active:               true,
 		PatronSession:        sess,
 		JoinCode:             issued.JoinCode,
 		JoinURL:              joinURL,
 		PerShowTokenRequired: s.cfg.PerShowToken,
-		QR:                   qrInfo(joinURL),
 	}
+	if joinURL == "" {
+		// No QR, and a reason. A code encoding an address no phone can reach is
+		// worse than no code: it scans, so nobody looks for a fault.
+		out.JoinNote = "This appliance cannot work out an address a patron's phone could reach, so " +
+			"there is no join URL or QR. Set the patron (client) interface in the setup wizard, or " +
+			"bind the patron listener to a specific address. Patrons can still type the join code."
+		return out
+	}
+	out.QR = qrInfo(joinURL)
+	return out
 }
 
 // qrInfo describes the symbol for a join URL, or nil if it cannot be encoded at
@@ -213,6 +227,13 @@ func (s *Server) handleAdminSessionQR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no show session is live: issue one first", http.StatusNotFound)
 		return
 	}
+	joinURL := s.joinURL(r, cur.Token)
+	if joinURL == "" {
+		http.Error(w, "this appliance cannot work out an address a patron's phone could reach, "+
+			"so a QR would encode one that goes nowhere; set the patron interface in the setup wizard",
+			http.StatusConflict)
+		return
+	}
 	scale := qrDefaultScale
 	if v := strings.TrimSpace(r.URL.Query().Get("scale")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -222,7 +243,7 @@ func (s *Server) handleAdminSessionQR(w http.ResponseWriter, r *http.Request) {
 		}
 		scale = n
 	}
-	sym, err := qr.Encode([]byte(s.joinURL(r, cur.Token)), qr.DefaultECC)
+	sym, err := qr.Encode([]byte(joinURL), qr.DefaultECC)
 	if err != nil {
 		// Refused rather than approximated: a truncated join URL would produce a
 		// QR that scans perfectly and sends a patron nowhere.
@@ -256,10 +277,19 @@ func writePNG(w http.ResponseWriter, sym *qr.Symbol, scale int) {
 // to sit in a dashboard tile.
 const qrDefaultScale = 8
 
-// joinURL builds the address a patron's phone should open. It points at the
-// PATRON bind address, never the admin one the operator is currently talking to.
+// joinURL builds the address a patron's phone should open, or "" when this
+// appliance cannot work out an address a phone could reach.
+//
+// Returning "" matters more than it looks. A join URL that names an address the
+// phone cannot route to produces a QR that scans perfectly and goes nowhere —
+// the patron sees their browser fail, the operator sees a valid-looking code,
+// and nothing in between reports a fault. So an address that cannot be
+// determined is an empty join URL and no QR, with the reason on the admin page.
 func (s *Server) joinURL(r *http.Request, token string) string {
-	host := patronHostHint(s.cfg.PatronBind, r)
+	host, ok := s.patronHost(r)
+	if !ok {
+		return ""
+	}
 	u := url.URL{
 		Scheme:   "http", // DECISIONS D12: plain HTTP on the patron LAN by default
 		Host:     host,
@@ -269,9 +299,94 @@ func (s *Server) joinURL(r *http.Request, token string) string {
 	return u.String()
 }
 
-// patronHostHint renders the patron listener's host:port. A wildcard bind has no
-// single address to advertise; rather than invent one, it falls back to the host
-// the operator reached the appliance on, which at least resolves for them.
+// patronHost resolves the host:port a patron's phone should be sent to.
+//
+// THE ORDER IS THE WHOLE POINT, and it is written this way because the obvious
+// version shipped a broken QR. The patron listener binds to 0.0.0.0:80 on the
+// shipped unit, so there is no address in the bind to use; the previous
+// implementation fell back to the Host header of the ADMIN request — which on
+// that same unit is 127.0.0.1:8443, because admin is bound to loopback. Every
+// QR a real appliance produced would have encoded http://127.0.0.1/, pointing
+// each patron's phone at itself.
+//
+//  1. An explicit, non-wildcard host in the patron bind. If an operator named an
+//     address, that is the answer.
+//  2. The address of the configured §9.1 CLIENT INTERFACE. This is the patron
+//     LAN by definition — the same interface D28 confines ICE gathering to — so
+//     it is the address a phone on that network can reach.
+//  3. The admin request's Host, but ONLY if it is not a loopback address. This
+//     keeps the dev convenience of reaching a Lab appliance over the network
+//     while making the failure above impossible.
+//
+// If none of those yields an address, it refuses rather than inventing one.
+func (s *Server) patronHost(r *http.Request) (string, bool) {
+	_, port, err := net.SplitHostPort(s.cfg.PatronBind)
+	if err != nil {
+		return "", false
+	}
+	if h, _, err := net.SplitHostPort(s.cfg.PatronBind); err == nil && !isWildcardHost(h) {
+		return net.JoinHostPort(h, port), true
+	}
+	if addr, ok := s.clientInterfaceAddr(); ok {
+		return net.JoinHostPort(addr, port), true
+	}
+	if r != nil && r.Host != "" {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(r.Host); err == nil {
+			host = h
+		}
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			return net.JoinHostPort(host, port), true
+		}
+	}
+	return "", false
+}
+
+// clientInterfaceAddr is the address of the configured patron interface (§9.1).
+// A link-local or loopback address is not an answer: a phone cannot reach the
+// first and should never be sent to the second.
+func (s *Server) clientInterfaceAddr() (string, bool) {
+	if s.deps.Store == nil {
+		return "", false
+	}
+	name, _, _ := s.deps.Store.GetSetting(config.SettingClientInterface)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return "", false
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "", false
+	}
+	// IPv4 first: a QR is read by a human-held camera and typed by hand when the
+	// scan fails, and an IPv6 literal in a URL is neither short nor typable.
+	var v6 string
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP == nil {
+			continue
+		}
+		ip := ipnet.IP
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			continue
+		}
+		if ip.To4() != nil {
+			return ip.String(), true
+		}
+		if v6 == "" {
+			v6 = "[" + ip.String() + "]"
+		}
+	}
+	if v6 != "" {
+		return v6, true
+	}
+	return "", false
+}
+
 func patronHostHint(bind string, r *http.Request) string {
 	h, p, err := net.SplitHostPort(bind)
 	if err != nil {

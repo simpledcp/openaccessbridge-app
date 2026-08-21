@@ -5,6 +5,7 @@ package main
 // posture reconciliation.
 
 import (
+	"flag"
 	"strconv"
 	"strings"
 
@@ -80,4 +81,22 @@ func clearLegacySupportFlag(store *config.SQLiteStore, log *logging.Logger) {
 	log.Warn(logging.EvSupportSessionClosed,
 		logging.Field("phase", "legacy_flag_cleared"),
 		logging.Field("detail", "a stored support_mode flag granted no window and has been cleared"))
+}
+
+// flagSet reports whether a flag was given on the command line, as opposed to
+// carrying its default.
+//
+// It exists for exactly one decision: --auditorium's default is a plausible room
+// name ("Auditorium 1"), and an appliance that was never told its room must not
+// present that default to patrons as though it were the answer. Everywhere else
+// a default is fine; here the default is indistinguishable from a real value and
+// §8.5's whole purpose is telling those apart.
+func flagSet(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }

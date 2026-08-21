@@ -205,10 +205,22 @@ func (s *Server) handleSetupNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetupServer(w http.ResponseWriter, r *http.Request) {
-	var p model.AuditoriumProfile
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	// The profile plus the room's display NAME, which is not part of §10.5's
+	// record but is what §7.2 shows a patron and §8.5 relies on.
+	var body struct {
+		model.AuditoriumProfile
+		AuditoriumName string `json:"auditorium_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
+	}
+	p := body.AuditoriumProfile
+	// §7.2/§8.5: the room's NAME, which the patron page shows and a passing staff
+	// member reads to catch a wrong-room join. Stored beside the profile so it
+	// survives a restart and does not depend on a flag the shipped unit omits.
+	if name := strings.TrimSpace(body.AuditoriumName); name != "" {
+		_ = s.deps.Store.PutSetting(config.SettingAuditoriumName, name)
 	}
 	if p.AuditoriumID == "" || p.CinemaServerIP == "" {
 		http.Error(w, "auditorium id and cinema server ip required", http.StatusBadRequest)
