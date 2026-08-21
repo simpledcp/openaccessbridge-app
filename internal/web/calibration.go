@@ -431,6 +431,17 @@ type CalibrationSaveRequest struct {
 	// GainNotes is §10.5's free-text "attenuator pad inline; isolator fitted".
 	// It is operator input, so it is persisted but never logged (§9.4).
 	GainNotes string `json:"gain_notes"`
+	// PartOfPairing marks this as one half of §6.5's "Multiple USB inputs:
+	// Device A = HI, Device B = VI-N".
+	//
+	// The wizard measures ONE input at a time and refuses to run the multi-device
+	// plan against a single device, which is correct — it would report both feeds
+	// as measured when only one was opened. So a pairing is built by calibrating
+	// each device on its own, with a single-stream mapping, and this flag says
+	// "keep the other stream's device rather than replacing the room's whole
+	// configuration with mine". Without it the second save silently overwrote the
+	// first and the pairing was lost.
+	PartOfPairing bool `json:"part_of_pairing"`
 }
 
 // CalibrationSaveResponse says exactly what was written and what was not.
@@ -444,6 +455,53 @@ type CalibrationSaveResponse struct {
 	// Note is the plain-language statement of what was persisted, shown verbatim.
 	Note  string `json:"note,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// applyPairingHalf records one device of a §6.5 multi-device pairing, keeping
+// whatever the other half already had.
+//
+// It insists on a SINGLE-STREAM mapping. A pairing half calibrated with a stereo
+// split would have measured two streams from one device and then claimed to be
+// half of a two-device room — a configuration that describes neither of the two
+// things it might mean.
+func applyPairingHalf(prof *model.AuditoriumProfile, mode mapper.Mode, deviceID string) error {
+	plan, err := mapper.PlanFor(mode, 1)
+	if err != nil || len(plan.Maps) != 1 {
+		if plan2, err2 := mapper.PlanFor(mode, 2); err2 == nil && len(plan2.Maps) == 1 {
+			plan = plan2
+		} else {
+			return fmt.Errorf("a multi-device pairing is built one stream at a time: %q feeds "+
+				"more than one stream, so calibrate this device as HI only or VI-N only (§6.5)", mode)
+		}
+	}
+	stream := plan.Maps[0].Stream
+	if prof.StreamDevices == nil {
+		prof.StreamDevices = map[model.StreamType]string{}
+	}
+	prof.StreamDevices[stream] = deviceID
+	prof.ChannelMapping = mapper.MultiDevice.String()
+	// InputDeviceID stays as the first device calibrated, so a reader that knows
+	// nothing about pairings still has something real rather than an empty field.
+	if strings.TrimSpace(prof.InputDeviceID) == "" {
+		prof.InputDeviceID = deviceID
+	}
+	return nil
+}
+
+// pairingNote says what is still missing, so an operator knows the room is not
+// finished. Silence here is how the first version lost the second device.
+func pairingNote(prof model.AuditoriumProfile) string {
+	var missing []string
+	for _, st := range []model.StreamType{model.StreamHI, model.StreamVIN} {
+		if strings.TrimSpace(prof.StreamDevices[st]) == "" {
+			missing = append(missing, string(st))
+		}
+	}
+	if len(missing) == 0 {
+		return "Both halves of this multi-device room are now assigned."
+	}
+	return "This room is NOT finished: " + strings.Join(missing, " and ") +
+		" still has no input device. Calibrate the second device and save it as part of the pairing."
 }
 
 func (s *Server) handleCalibrationSave(w http.ResponseWriter, r *http.Request) {
@@ -492,9 +550,20 @@ func (s *Server) handleCalibrationSave(w http.ResponseWriter, r *http.Request) {
 
 	prof, _ := s.storedProfile(auditorium)
 	prof.AuditoriumID = auditorium
-	prof.InputDeviceID = req.DeviceID
-	prof.ChannelMapping = req.Mode.String()
 	prof.GainNotes = strings.TrimSpace(body.GainNotes)
+	if body.PartOfPairing {
+		if err := applyPairingHalf(&prof, req.Mode, req.DeviceID); err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, CalibrationSaveResponse{Error: err.Error()})
+			return
+		}
+	} else {
+		// A single-device room replaces the whole assignment, pairing included:
+		// leaving a stale per-stream device behind would mean the room ran on a
+		// mapping nobody chose.
+		prof.InputDeviceID = req.DeviceID
+		prof.ChannelMapping = req.Mode.String()
+		prof.StreamDevices = nil
+	}
 	out := CalibrationSaveResponse{Qualified: qualified}
 	if qualified {
 		prof.LastQualification = calibration.Judge(sess, rep.Streams).Verdict
@@ -505,6 +574,9 @@ func (s *Server) handleCalibrationSave(w http.ResponseWriter, r *http.Request) {
 		// verdict here is the exact fabrication this lane exists to prevent.
 		prof.LastQualification = ""
 		out.Note = "Settings saved. No verdict was recorded for this input. " + why
+	}
+	if body.PartOfPairing {
+		out.Note += " " + pairingNote(prof)
 	}
 	if err := s.deps.Store.PutAuditoriumProfile(prof); err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, CalibrationSaveResponse{

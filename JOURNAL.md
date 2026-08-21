@@ -923,3 +923,64 @@ on naming the old address — it now ends the session instead, because moving th
 window is a new decision that deserves its own audit row. And `SetPatronScope`
 logged a state transition on every one of core's fifteen-second pushes, filling
 the log a review reads with events that did not happen.
+
+## Two decisions that had been waiting: the latency double-count and the two-device room
+
+Both were recorded as "worth a decision" rather than as defects, which is why
+they survived several passes. Making the decisions turned out to be most of the
+work; the code was small.
+
+**The estimate was not conservative, it was wrong.** `EncoderPathLatencyMS`
+returned capture period + Opus frame — 20 ms at the shipped settings — and the
+previous pass left it alone on the grounds that erring high is the safe direction
+for a latency budget. It is not the safe direction when the number is simply
+untrue. The captured block is handed straight to the encoder and becomes exactly
+one Opus frame: one wait, not two. §11.4 had already measured the whole
+appliance-side path at ~10.7 ms and was the first thing able to say so.
+
+The correct model is the smallest whole number of capture periods that holds at
+least one Opus frame, which is a CEILING rather than a `max` — with a 7 ms period
+and a 10 ms frame the encoder waits for a second block, so the answer is 14 ms,
+not 10. That case is in the tests precisely because `max` is the plausible wrong
+answer, and it is one of the two mutations confirmed here: reverting to the
+double-count fails three cases, and substituting `max` fails exactly the 7/10
+one.
+
+The estimate got SMALLER. That is worth stating plainly, because a padded budget
+does not just look cautious — it misdirects the effort. §15 names HI latency as
+the plan's largest risk, and §11.4 has since shown essentially all of it lives on
+the phone side.
+
+**A venue with two USB dongles could not be configured at all.** §6.5 lists
+"Multiple USB inputs: Device A = HI, Device B = VI-N" as a supported mapping; the
+mapper implemented it; the calibration wizard offered it in the picker. And then
+`AuditoriumProfile` had one `input_device_id` to save it into, so the room could
+be measured and never recorded.
+
+The wizard's refusal to run the multi-device plan against a single device STAYS,
+because that refusal was right: it would have reported both feeds as measured
+when only one input was ever opened. What was missing was the record, and the
+flow that fills it. A pairing is now built one device at a time — each half
+calibrated with a single-stream mapping and saved with `part_of_pairing` — and
+the response says which stream is still unassigned, because silence there is
+exactly how the second device gets forgotten. The first save now says "This room
+is NOT finished: VI-N still has no input device".
+
+Three ways to record it wrongly are refused rather than stored: a stream with no
+device, both streams on one device (which is a channel mapping wearing a
+pairing's clothes, and hides which channel each stream takes), and per-stream
+devices left behind on a single-device mapping. That last one is the stale-state
+bug this kind of change usually ships with, and going back to a single-device
+room now clears the pairing.
+
+The sharpest detail is in the media process: it checks EVERY device the profile
+names against its capture backend, not just the first. A pairing naming one
+synthetic device and one real one would otherwise have had half of it served by a
+tone under the real device's identity — which is the same fabrication the
+single-device refusal was written to prevent, arriving through a door that did
+not exist when that refusal was written. Both are mutation-confirmed: checking
+only the first device lets the half-real pairing through, and attributing every
+stream to `InputDeviceID` puts both feeds under the wrong device.
+
+None of this clears B3/B4. There is still no capture backend for a real device,
+and every one of these paths refuses one.

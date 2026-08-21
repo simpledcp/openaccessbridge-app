@@ -99,6 +99,8 @@ green.
 | 23 | §11.5 pre-show QA checklist codified as a staff procedure: explicit three-state pass/fail per item, a remedy on every item, staff steps printed but never recorded, and a printable booth sheet (D30) | `internal/model/checklist.go`, `internal/readiness/checklist.go`, `internal/web/checklist.go` |
 | 24 | §9.4 support mode: a bounded, audited, outbound-only WINDOW with an absolute deadline that does not survive a restart, one scoped egress rule, an audit trail beside the switch — plus the fix for an nftables ruleset that could never remove a rule (D31, D31a) | `internal/security/support`, `internal/security/firewall`, `internal/config/support.go`, `cmd/captionbridge-core` |
 | 25 | §9.4 signed offline updates: a bundle format whose signature covers the bytes that arrived, a trust store the bundle cannot add to, refusal to downgrade or replay, and the full A/B rollback state machine in which the NEW image confirms its own health — verify-only on this image, and it says so (D32, B8) | `internal/update`, `internal/web/update.go`, `cmd/captionbridge-core/update.go` |
+| 26 | §6.5 multi-device rooms: a per-stream device assignment the profile can hold, validated against the three ways it can be recorded wrongly, built one device at a time through the wizard, and honoured per stream by the media process (D34) | `internal/model/profile.go`, `internal/web/calibration.go`, `cmd/captionbridge-media` |
+| 27 | §6.7 encode-path latency corrected to ONE accumulation: the smallest whole number of capture periods that holds an Opus frame, which at the shipped settings is 10 ms rather than the 20 ms the estimate used to claim (D33) | `internal/audio/pipeline` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -189,11 +191,6 @@ writer, and that the build number is stamped.
 - **The §6.4 wizard has no hardware path to measure.** `calibration.SourceHardware`
   is implemented and tested, but nothing on this image can emit it — the single
   line that becomes a real-device open is the synthetic-device-id refusal (B3/B4).
-- **A multi-device room is not representable in one §10.5 profile record**
-  (`AuditoriumProfile` holds a single `input_device_id`). The wizard now refuses
-  the pairing rather than calibrating one device and reporting two; the show path
-  in `cmd/captionbridge-media` has the same shape and is masked only by the B3/B4
-  refusal. Worth a decision before the hardware path lands.
 - **Support mode opens the WINDOW, not a tunnel.** §9.4's session is built —
   bounded, audited, outbound-only, visibly indicated — but this appliance has no
   tunnel client and no support endpoint of its own, so nothing dials out. Every
@@ -234,13 +231,6 @@ writer, and that the build number is stamped.
   buffer, Wi-Fi, the DOMINANT phone jitter buffer, phone output — are still
   quoted typicals: they need the §11.4 loopback rig (B3) and a phone fleet (B2).
   §15 named HI latency as the plan's largest risk and it remains one.
-- **`pipeline.EncoderPathLatencyMS` double-counts one accumulation.** It reports
-  capture period + Opus frame (20 ms shipped), but at the shipped settings the
-  10 ms capture frame IS the 10 ms Opus frame — one accumulation, not two. The
-  §11.4 harness measures the whole appliance path at ~10.7 ms. It errs
-  conservative, so it was left alone in the latency pass; it needs a decision
-  alongside the real ALSA period, where a period longer than one frame does add
-  a genuine second term.
 - **There is no in-product latency estimate calibrated against ground truth**
   (§11.4's last bullet). The dashboard shows a structural encode-path budget and
   says "not measured"; calibrating it needs the loopback rig.

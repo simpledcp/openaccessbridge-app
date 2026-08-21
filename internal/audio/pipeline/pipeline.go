@@ -671,29 +671,60 @@ func (s *Stream) latencyEstimateMS() int {
 	}
 }
 
-// EncoderPathLatencyMS estimates the APPLIANCE-side audio latency: the capture
-// period (the ALSA buffer this process consumes) plus the Opus frame — rows 1
-// and 3 of the §6.7 latency table. Nothing else is added, and nothing is
-// invented:
+// EncoderPathLatencyMS estimates the APPLIANCE-side FRAMING latency: how long the
+// oldest sample in a block waits before the Opus packet carrying it can exist.
+//
+// IT IS ONE ACCUMULATION, NOT TWO, and correcting that is the point of this
+// function's current shape. It used to return capturePeriod + opusFrame, which at
+// the shipped settings (a 10 ms capture period feeding 10 ms Opus frames) claimed
+// 20 ms — but those are the SAME wait. The captured block is handed straight to
+// the encoder and becomes exactly one Opus frame; nothing accumulates twice. The
+// §11.4 harness measured the whole appliance-side path at ~10.7 ms, which is the
+// 10 ms framing term plus a measured 0.65 ms of transit, and it is the first
+// thing able to say so.
+//
+// The general rule is the smallest whole number of capture periods that holds at
+// least one Opus frame:
+//
+//	period 10, frame 10 -> 10   (one block IS one frame)
+//	period  5, frame 10 -> 10   (two blocks make a frame)
+//	period 20, frame 10 -> 20   (a block makes two frames; the wait is the block)
+//	period  7, frame 10 -> 14   (two blocks, because a frame does not divide them)
+//
+// That last case is why this is a ceiling rather than a max: with a period that
+// does not divide the frame, the encoder waits for a whole extra block.
+//
+// WHAT IS DELIBERATELY NOT IN IT. This is the STRUCTURAL term only:
 //
 //   - the level-analysis tap runs BESIDE the encode path rather than in front of
 //     it (§6.1), so the analysis window is not part of delivery latency;
+//   - the measured transit through the encoder and the WebRTC fan-out (§11.4:
+//     0.65 ms at p95 on this host) is a MEASUREMENT and does not belong in a
+//     structural estimate;
 //   - the local Wi-Fi hop, the BROWSER JITTER BUFFER (the dominant and least
-//     controllable term, 40–300+ ms) and the phone's audio output all happen
+//     controllable term, 40-300+ ms) and the phone's audio output all happen
 //     outside this process and are UNMEASURED here.
 //
 // So this is never a glass-to-ear figure and must not be compared against the
 // §6.7 / D10 end-to-end budgets as if it were one. Measuring the real number
 // needs the Phase 0C loopback rig and a phone fleet (BLOCKERS B3, §11.4); until
 // that runs, AudioStreamState.LatencyMeasured stays false.
+//
+// The estimate got SMALLER when this was corrected, which is worth stating
+// plainly: the old number was not conservative, it was wrong, and a latency
+// budget padded by a term that does not exist misdirects the effort to fix the
+// terms that do (§15 names HI latency as the plan's largest risk).
 func EncoderPathLatencyMS(capturePeriodMS, opusFrameMS int) int {
-	if capturePeriodMS < 0 {
-		capturePeriodMS = 0
-	}
 	if opusFrameMS <= 0 {
 		opusFrameMS = encode.DefaultOpusParams().FrameMS
 	}
-	return capturePeriodMS + opusFrameMS
+	if capturePeriodMS <= 0 {
+		// No capture period observed yet: the encoder's own frame is the only
+		// accumulation this function can account for.
+		return opusFrameMS
+	}
+	blocks := (opusFrameMS + capturePeriodMS - 1) / capturePeriodMS // ceil
+	return blocks * capturePeriodMS
 }
 
 // Status returns the latest per-stream state (transient; no samples).

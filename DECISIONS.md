@@ -561,3 +561,55 @@ would wait for something that is never going to happen.
 **Cloud update is not built at all.** §9.4 makes it "optional and outbound-only",
 and nothing here reaches the network for an update. If it is ever built it should
 reuse D31's support-window shape rather than adding a second egress path.
+
+### D33. The encode-path latency estimate is ONE accumulation, and it got smaller [§6.7, §11.4]
+`pipeline.EncoderPathLatencyMS` returned capture period + Opus frame, which at
+the shipped settings (a 10 ms capture period feeding 10 ms Opus frames) claimed
+20 ms. Those are the same wait. The captured block is handed straight to the
+encoder and becomes exactly one Opus frame; nothing accumulates twice. §11.4
+measured the whole appliance-side path at ~10.7 ms — 10 ms of framing plus 651 µs
+of measured transit — and was the first thing able to say so.
+
+The estimate is now the smallest whole number of capture periods that holds at
+least one Opus frame: 10/10 → 10, 5/10 → 10, 20/10 → 20, 7/10 → **14** (a period
+that does not divide the frame costs a whole extra block, which is why this is a
+ceiling and not a `max`).
+
+**It got smaller, and that is the point.** The previous pass left this alone
+because it "errs conservative". It does not: it was wrong, and a latency budget
+padded by a term that does not exist misdirects effort away from the terms that
+do. §15 names HI latency as the plan's largest risk, and §11.4 has since shown
+that essentially all of it lives on the phone side.
+
+Deliberately still excluded, and stated in the code: the measured transit (a
+measurement does not belong in a structural estimate), the analysis tap (it runs
+beside the delivery path, §6.1), and everything off the appliance — Wi-Fi, the
+phone jitter buffer, phone output. `LatencyMeasured` stays false.
+
+### D34. A two-device room is representable, and a pairing is built one device at a time [§6.5, §10.5]
+§6.5 lists "Multiple USB inputs: Device A = HI, Device B = VI-N" as a supported
+mapping. The mapper implemented it and the wizard offered it — and then
+`AuditoriumProfile` had one `input_device_id` to save it into, so a venue wired
+that way could not be configured at all.
+
+`StreamDevices map[StreamType]string` holds the per-stream assignment, and
+`ValidateInputs` refuses the three ways it can be recorded wrongly: a stream with
+no device (nothing feeds it, and a patron selecting that feed hears silence);
+both streams on one device (that is a channel mapping, and recording it as a
+pairing hides which channel each stream takes); and per-stream devices on a
+single-device mapping (they would be ignored and the room would run on a mapping
+nobody chose).
+
+**The wizard's refusal to run the multi-device plan against one device STAYS**,
+because it was right: it would report both feeds as measured when only one was
+opened. A pairing is instead built one device at a time, each with a
+single-stream mapping and `part_of_pairing`, and the response says which stream
+is still unassigned — silence there is how the second device gets forgotten. A
+subsequent single-device save clears the pairing, so no stale per-stream device
+can survive into a room that no longer has one.
+
+The media process checks EVERY device the profile names against its capture
+backend, not just the first: a pairing naming one synthetic and one real device
+would otherwise have had half of it served by a tone under the real device's
+identity — the same fabrication the single-device refusal exists to prevent. The
+hardware refusal itself is unchanged (B3/B4).

@@ -469,24 +469,56 @@ func TestPipelineEncoderStateAndLatency(t *testing.T) {
 	})
 }
 
-// TestEncoderPathLatencyMS documents what the estimate is made of.
+// TestEncoderPathLatencyMS pins the framing model: ONE accumulation, being the
+// smallest whole number of capture periods that holds at least one Opus frame.
+//
+// The first case is the correction. A 10 ms capture period feeding 10 ms Opus
+// frames is one wait, not two: the block is handed straight to the encoder and
+// becomes exactly one frame. The old estimate said 20 ms; §11.4 measured the
+// whole appliance path at ~10.7 ms.
 func TestEncoderPathLatencyMS(t *testing.T) {
 	tests := []struct {
 		name          string
 		period, frame int
 		want          int
+		why           string
 	}{
-		{name: "10 ms period + 10 ms frame", period: 10, frame: 10, want: 20},
-		{name: "20 ms stability fallback frame", period: 10, frame: 20, want: 30},
-		{name: "unknown frame size falls back to the default", period: 5, frame: 0, want: 5 + encode.DefaultOpusParams().FrameMS},
-		{name: "no capture period yet", period: 0, frame: 10, want: 10},
+		{name: "the shipped settings are ONE accumulation", period: 10, frame: 10, want: 10,
+			why: "one captured block IS one Opus frame"},
+		{name: "several blocks make a frame", period: 5, frame: 10, want: 10,
+			why: "the encoder waits for the second block"},
+		{name: "a block longer than a frame waits for the block", period: 20, frame: 10, want: 20,
+			why: "the block yields two frames at once; the wait is the block"},
+		{name: "a period that does not divide the frame costs a whole extra block", period: 7, frame: 10, want: 14,
+			why: "two 7 ms blocks, because one is not enough for a 10 ms frame"},
+		{name: "the §6.7 stability fallback frame", period: 10, frame: 20, want: 20,
+			why: "two 10 ms blocks make one 20 ms frame"},
+		{name: "unknown frame size falls back to the default", period: 5, frame: 0,
+			want: encode.DefaultOpusParams().FrameMS, why: "default frame, made of whole 5 ms blocks"},
+		{name: "no capture period observed yet", period: 0, frame: 10, want: 10,
+			why: "only the encoder's own frame can be accounted for"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := EncoderPathLatencyMS(tc.period, tc.frame); got != tc.want {
-				t.Errorf("EncoderPathLatencyMS(%d, %d) = %d, want %d", tc.period, tc.frame, got, tc.want)
+				t.Errorf("EncoderPathLatencyMS(%d, %d) = %d, want %d — %s",
+					tc.period, tc.frame, got, tc.want, tc.why)
 			}
 		})
+	}
+}
+
+// The estimate must never exceed what §11.4 MEASURED the whole appliance-side
+// path to be. The old value did: it claimed 20 ms where the harness measured
+// ~10.7 ms end to end, which is the shape of a budget padded by a term that does
+// not exist.
+func TestTheEstimateDoesNotExceedTheMeasuredApplianceFloor(t *testing.T) {
+	// §11.4 on this host: 10 ms of structural framing + 651 µs measured p95.
+	const measuredApplianceFloorMS = 11
+	got := EncoderPathLatencyMS(10, encode.DefaultOpusParams().FrameMS)
+	if got > measuredApplianceFloorMS {
+		t.Fatalf("the structural estimate is %d ms; §11.4 measured the whole appliance path at ~10.7 ms",
+			got)
 	}
 }
 

@@ -1,5 +1,11 @@
 package model
 
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
 // FirewallProfile is one of the four shipping firewall/deployment postures
 // (§9.2 / §12). These are configuration, sharing one codebase.
 type FirewallProfile string
@@ -59,10 +65,27 @@ const (
 // mapping, server identity, and wrong-room safeguards — but NO caption text,
 // audio, or title-bearing show data.
 type AuditoriumProfile struct {
-	AuditoriumID   string `json:"auditorium_id"`
+	AuditoriumID string `json:"auditorium_id"`
+	// InputDeviceID is the capture device for every single-device mapping — the
+	// mono and stereo modes of §6.5, where ChannelMapping says how that one
+	// device's channels are split between the named streams.
 	InputDeviceID  string `json:"input_device_id"`
 	ChannelMapping string `json:"channel_mapping"` // e.g. "stereo:L=HI,R=VI-N"
-	GainNotes      string `json:"gain_notes"`
+	// StreamDevices names the capture device for EACH stream, for §6.5's
+	// "Multiple USB inputs: Device A = HI, Device B = VI-N".
+	//
+	// It exists because a room wired that way could not previously be
+	// CONFIGURED at all: the mapper implemented multi-device, the calibration
+	// wizard offered it, and then the profile had one device field to save it
+	// into — so the wizard refused the pairing rather than record half of it.
+	// Refusing was the right call while the record could not hold the answer;
+	// this is the record holding the answer.
+	//
+	// Empty for every single-device mapping. When it is populated, InputDeviceID
+	// is whichever device the operator calibrated first, and is not authoritative
+	// on its own — ValidateInputs is.
+	StreamDevices map[StreamType]string `json:"stream_devices,omitempty"`
+	GainNotes     string                `json:"gain_notes"`
 	// LastQualification is the last saved verdict for the input (§6.4 step 9).
 	LastQualification QualifierState `json:"last_qualification"`
 	CinemaServerIP    string         `json:"cinema_server_ip"`
@@ -90,3 +113,67 @@ const (
 	IdentityServerID       = "server_id"
 	IdentityComposite      = "composite" // IP + family + screen name; not a security property
 )
+
+// ValidateInputs checks that the profile's device assignment is coherent for its
+// mapping mode (§6.5). It returns nil when the profile is usable.
+//
+// The three ways a multi-device room can be recorded wrongly, each of which
+// would otherwise become a fault during a show rather than before one:
+//
+//   - a stream with no device, so nothing feeds it and a patron who selects that
+//     feed hears nothing;
+//   - both streams on the SAME device, which is not multi-device at all — it is a
+//     channel mapping, and recording it this way hides which channel each stream
+//     is really taking;
+//   - devices listed for a mapping that is not multi-device, where they would be
+//     silently ignored and the room would run on a mapping nobody chose.
+//
+// It does NOT judge an empty single-device InputDeviceID: on this build that is
+// a real state (no device chosen, so the synthetic stand-in feeds the streams)
+// and this type cannot tell it apart from a half-finished configuration.
+//
+// mode is the parsed §6.5 mapping (mapper.Mode.String()); streams are the named
+// streams this auditorium serves.
+func (p AuditoriumProfile) ValidateInputs(multiDevice bool, streams []StreamType) error {
+	if !multiDevice {
+		if len(p.StreamDevices) > 0 {
+			return fmt.Errorf("channel mapping %q is a single-device mapping, but the profile lists "+
+				"per-stream devices (%d); they would be ignored", p.ChannelMapping, len(p.StreamDevices))
+		}
+		// An EMPTY InputDeviceID is deliberately not an error here. On this build
+		// it is a real and useful state — no device chosen, so the synthetic
+		// stand-in feeds the streams — and this type cannot tell that apart from a
+		// half-finished configuration. Whichever caller knows the difference
+		// decides; cmd/captionbridge-media does.
+		return nil
+	}
+	if len(streams) == 0 {
+		return errors.New("multi-device mapping: no named streams to assign devices to")
+	}
+	seen := map[string]StreamType{}
+	for _, st := range streams {
+		dev := strings.TrimSpace(p.StreamDevices[st])
+		if dev == "" {
+			return fmt.Errorf("multi-device mapping: no capture device is assigned to %s, so nothing would feed it", st)
+		}
+		if other, dup := seen[dev]; dup {
+			return fmt.Errorf("multi-device mapping: %s and %s are both assigned device %q; "+
+				"two streams on one device is a channel mapping, not a multi-device pairing (§6.5)",
+				other, st, dev)
+		}
+		seen[dev] = st
+	}
+	return nil
+}
+
+// InputDeviceFor returns the capture device that feeds one named stream, and
+// whether the profile assigns one at all.
+func (p AuditoriumProfile) InputDeviceFor(stream StreamType) (string, bool) {
+	if dev, ok := p.StreamDevices[stream]; ok && strings.TrimSpace(dev) != "" {
+		return strings.TrimSpace(dev), true
+	}
+	if strings.TrimSpace(p.InputDeviceID) != "" {
+		return strings.TrimSpace(p.InputDeviceID), true
+	}
+	return "", false
+}

@@ -199,6 +199,31 @@ func (m *manager) handle(msg ipc.Message) *ipc.Message {
 	}
 }
 
+// servedStreams is the named streams a mapping mode feeds. Multi-device serves
+// both; every other mode's streams come out of the plan, but the plan needs a
+// channel count that multi-device does not constrain, so the two streams are
+// named directly here.
+func servedStreams(mode mapper.Mode) []model.StreamType {
+	if mode == mapper.MultiDevice {
+		return []model.StreamType{model.StreamHI, model.StreamVIN}
+	}
+	if plan, err := mapper.PlanFor(mode, 1); err == nil {
+		return streamsOf(plan)
+	}
+	if plan, err := mapper.PlanFor(mode, 2); err == nil {
+		return streamsOf(plan)
+	}
+	return nil
+}
+
+func streamsOf(plan mapper.Plan) []model.StreamType {
+	var out []model.StreamType
+	for _, sm := range plan.Maps {
+		out = append(out, sm.Stream)
+	}
+	return out
+}
+
 // configure applies an auditorium input profile (§10.5): it parses the stored
 // channel_mapping into the per-stream source channels (§6.5) and rebuilds the
 // streams around them.
@@ -228,10 +253,28 @@ func (m *manager) configure(prof model.AuditoriumProfile) model.MediaCommandResu
 			Error: "no capture backend for a real input device in this build (BLOCKERS B3/B4); refusing to substitute a synthetic source",
 		}
 	}
-	if !isSyntheticDeviceID(prof.InputDeviceID) {
-		return model.MediaCommandResult{
-			Error: "no capture backend for input device " + prof.InputDeviceID +
-				" in this build (BLOCKERS B3/B4); refusing to report a synthetic tone as that device",
+	// §6.5's device assignment has to be COHERENT before anything is started. A
+	// stream with no device feeds nothing (a patron selecting that feed hears
+	// silence), and two streams sharing one device is a channel mapping recorded
+	// as a pairing, which hides which channel each stream really takes. Both are
+	// configuration faults, and §6.5 says a mapping the hardware cannot satisfy
+	// is surfaced BEFORE a show rather than as a silent fault during one.
+	multi := mode == mapper.MultiDevice
+	if err := prof.ValidateInputs(multi, servedStreams(mode)); err != nil {
+		return model.MediaCommandResult{Error: err.Error()}
+	}
+	// The ONLY device this build can open is the synthetic stand-in — for EVERY
+	// device the profile names, not just the first. A multi-device room that
+	// named one synthetic and one real device would otherwise have had half its
+	// pairing served by a tone under the real device's identity.
+	for _, st := range servedStreams(mode) {
+		dev, _ := prof.InputDeviceFor(st)
+		if !isSyntheticDeviceID(dev) {
+			return model.MediaCommandResult{
+				Error: "no capture backend for input device " + dev +
+					" (feeding " + string(st) + ") in this build (BLOCKERS B3/B4); " +
+					"refusing to report a synthetic tone as that device",
+			}
 		}
 	}
 	// The mapping decides the shape the input must present, and the mapper is what
@@ -263,8 +306,11 @@ func (m *manager) configure(prof model.AuditoriumProfile) model.MediaCommandResu
 	}
 	for _, sm := range plan.Maps {
 		tone := tones[sm.Stream]
-		deviceID := prof.InputDeviceID
-		if deviceID == "" {
+		// Per stream (§6.5): a multi-device room has a different capture device
+		// behind each named stream, and the qualifier's verdict must be attributed
+		// to the device it was actually measured from.
+		deviceID, ok := prof.InputDeviceFor(sm.Stream)
+		if !ok {
 			deviceID = syntheticDevicePrefix + string(sm.Stream)
 		}
 		m.order = append(m.order, sm.Stream)
