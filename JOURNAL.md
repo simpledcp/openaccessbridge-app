@@ -576,3 +576,83 @@ a hub scoped to a missing interface answer successfully — with nothing in it).
 package half of this work protects nobody unless core actually pushes the
 interface, and that push is now pinned by source text with the load-bearing
 literals named in the test's own comment.
+
+## The §10.4 QR, and how an unreadable artifact was made checkable (D29)
+
+Two earlier passes declined to render a QR, and left the reason in the code:
+"rendering a QR that no offline tool on this build host can decode would be an
+artifact nobody has verified scans". That was the right call on the facts
+available. This pass changed the facts rather than the standard.
+
+**The build host can now decode.** `zxing-cpp` — the C++ ZXing engine behind a
+great many phone scanner apps — installs as a self-contained wheel, and
+`python-qrcode` and `segno` provide encoders with no relationship to this repo.
+That makes an independent oracle available for both directions: something that
+produces reference symbols, and something that reads ours back.
+
+**What is verified, and how far it goes.** Every module of every symbol is
+compared against python-qrcode references — all eight data masks for a corpus of
+boundary cases, and **all 160 version/correction-level combinations at their
+exact byte capacity**, so the ECC block tables are pinned rather than
+spot-checked (the capacities themselves are bisected out of the oracle rather
+than copied from the table under test). Every reference was decoded by zxing-cpp
+before it was committed. And `make qr-verify` decodes the PNGs the appliance
+really serves, at the scales it serves them: 42/42.
+
+**Three implementations were needed, because two disagreed.** The first fixtures
+came from segno, and this encoder disagreed with it on every case — always in the
+padding, always by exactly one codeword. Rather than "fix" our code to match, the
+codeword streams were de-interleaved and compared: segno emits an extra `0x00`
+before the pad codewords. Its `write_padding_bits` extends by `8 - (length % 8)`
+with no outer `% 8`, so a stream that already ends on a codeword boundary — which
+in byte mode it always does — gets a whole extra byte. ISO §7.4.10, quoted
+verbatim in segno's own docstring immediately above that line, adds padding bits
+only when the stream does not end on a boundary. python-qrcode then agreed with
+this package module-for-module and disagreed with segno by 146 modules on the
+same input. The deviation is harmless — both decode — but the episode is the
+reason the fixture generator names three implementations and records which one is
+the authority.
+
+**Mask selection is where implementations legitimately differ**, and the fixtures
+are shaped around that rather than papering over it. The penalty rules rest on
+things the standard leaves open: whether the quiet zone supplies the light margin
+for a finder-lookalike at the symbol edge, and whether the format information is
+in place while masks are being scored (python-qrcode blanks it during evaluation;
+ZXing and Nayuki do not). So the fixtures pin ALL EIGHT masks per case, and the
+guarantee became: whichever mask this encoder picks, its output is byte-identical
+to a symbol an independent decoder has already read. That is the property that
+matters at a door, and it needs no agreement about aesthetics.
+
+**A number, not an adjective, for the printed size.** A longer join URL needs a
+larger version, more modules, and therefore a physically BIGGER card to stay
+scannable — a relationship that is invisible on a screen, which is exactly where
+a booth would get it wrong. `RecommendedPrintWidthMM` derives a minimum width
+from the symbol actually being printed and the admin page prints it beside the
+code: for a typical join URL, 46 mm.
+
+**On the operator surface**, the QR is served only from the admin listener (it is
+a bearer credential for the show — anything that can read it can join), with
+`no-store`, because a cached per-show QR is precisely §8.5's stale-code failure
+and it fails in the worst way available: the scan succeeds and the patron lands
+in the wrong room. With no live show the route is a 404 rather than a blank
+image, so an operator holding a card to a phone can tell "no session" from "a QR
+that will not scan". The typed join code is rendered at least as prominently as
+the image: not every patron can scan, and the code is the accessible path rather
+than the fallback.
+
+Verified live: with the three processes running, issuing a show and fetching
+`/api/admin/session/qr.png` returns a 456x456 PNG that zxing-cpp reads back as
+the exact join URL, with `Cache-Control: no-store`.
+
+Four behaviours were mutation-confirmed (reverted, watched fail, restored): the
+ECC-level format bits (numeric order instead of the spec's L=01/M=00/Q=11/H=10
+broke 18 of the fixture comparisons); the `no-store` header; and encoding the
+short join code instead of the full join URL. The fourth mutation is the useful
+one, because it found a defect in the TEST rather than the code: removing the
+quiet zone did not fail, because the test measured the margin against the very
+constant it was policing. It now asserts against the literal 4 the standard
+requires, and fails as it should.
+
+**What this does not clear.** B2. No phone camera, no venue lighting, no printed
+card, no lobby. A scanner library reading a PNG on a build host is not a patron
+scanning a card in a dark foyer, and nothing on either surface says otherwise.

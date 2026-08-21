@@ -133,6 +133,30 @@ func TestInvariant_PatronScopeReachesTheMediaPeer(t *testing.T) {
 	}
 }
 
+// TestInvariant_TheQREncoderHasAProductionCaller: internal/qr is verified to the
+// module against independent implementations, which protects nobody if the only
+// thing that ever calls it is its own test. §10.4 and §7.2 want a per-show QR on
+// the operator surface, and the encoder existing is not the same as an operator
+// being able to hold one up to a patron's phone.
+//
+// The literals below are LOAD-BEARING; a refactor that renames them updates this
+// test rather than deleting it.
+func TestInvariant_TheQREncoderHasAProductionCaller(t *testing.T) {
+	src := readFile(t, filepath.Join(repoRoot(t), "internal", "web", "session_admin.go"))
+	if !strings.Contains(src, "qr.Encode(") {
+		t.Errorf("nothing in the admin surface encodes a QR: §10.4's per-show code is typed, not scanned")
+	}
+	if !strings.Contains(src, `"/api/admin/session/qr.png"`) {
+		t.Errorf("the QR image has no route, so an operator has no way to show one")
+	}
+	// The image is a bearer credential for the show. It must be registered on the
+	// admin surface behind requireAdmin, never on the patron mux (§8.4).
+	patron := readFile(t, filepath.Join(repoRoot(t), "internal", "web", "patron.go"))
+	if strings.Contains(patron, "qr.png") {
+		t.Errorf("the patron listener references the QR image: anything that can read it can join this show")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

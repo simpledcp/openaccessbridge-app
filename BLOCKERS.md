@@ -27,6 +27,15 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
 - **Seam in code:** WebRTC signaling/transport is behind the media encode seam;
   secure-context strategy is configurable (D12). Patron page handles tap-to-start.
 - **Clears:** primary audio path proof, secure-context decision (Phase 7), G3.
+- **Workaround in place for QR onboarding (2026-08-21), which does NOT clear
+  this blocker:** the appliance now renders a real per-show QR (`internal/qr`,
+  DECISIONS D29), verified module-for-module against independent implementations
+  and decoded by zxing-cpp — the ZXing engine many phone scanner apps are built
+  on — including the actual PNGs the admin surface serves. That establishes the
+  IMAGE is a valid QR carrying the right payload. It establishes nothing about a
+  patron's phone: no iOS or Android camera, no lobby lighting, no printed card,
+  no autofocus at arm's length, no cracked screen. §13 Phase 0B's "QR onboarding"
+  scope item is unchanged and still needs real devices.
 - **What the §6.7 build DID prove here (2026-08-20):** the appliance now really
   serves Opus over WebRTC. A Go subscriber speaking the same protocol as
   `assets/patron.js` joins the running three-process appliance, offers, applies

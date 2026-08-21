@@ -1,6 +1,10 @@
 /* CaptionBridge admin dashboard (§8.2 rows, §8.3 loud warnings, §8.4 banner,
  * §10.6 two independent verdicts). Vanilla JS, embedded, no framework, no build
- * step, no network fetch beyond this appliance's own /api/admin/status (D4).
+ * step, and no network fetch beyond this appliance's own /api/admin/status and
+ * /api/admin/session (D4). The second endpoint is the §10.4 per-show session:
+ * it is polled separately because issuing or ending a show is an OPERATOR
+ * action, not a measurement, and folding it into the status document would put a
+ * bearer credential for the show inside the poll every dashboard makes.
  *
  * THE RULE THIS FILE EXISTS TO KEEP: a fact the appliance did not measure is
  * rendered as "not measured". Never a number, never a tick, never a soothing
@@ -603,6 +607,81 @@
     return row("Audio device profile", id, null);
   }
 
+  /* §10.4: the per-show join artifacts. Two things are deliberate here.
+   *
+   * The QR image is fetched with a cache-busting parameter on every refresh, and
+   * the server sends no-store: a browser holding yesterday's QR is precisely the
+   * stale-code failure §8.5 names, and it fails in the worst possible way — the
+   * scan succeeds and the patron lands in the wrong room.
+   *
+   * The typed code is shown at least as prominently as the QR. Not every patron
+   * can scan: a cracked camera, a phone held by someone with a tremor, a lobby
+   * too dark to focus. The code is the accessible path, not the fallback. */
+  function renderSession(sess) {
+    var wrap = el("session-qr-wrap"), img = el("session-qr"), note = el("session-note");
+    if (!sess || !sess.active) {
+      wrap.hidden = true;
+      img.removeAttribute("src");
+      dl(el("session-detail"), [
+        row("Show session", "none — patrons cannot join", STATE_WARN,
+          sess && !sess.per_show_token_required
+            ? "this profile does not require a per-show token, so the patron page is open without one"
+            : "start a show to issue a join code")
+      ]);
+      note.textContent = "";
+      return;
+    }
+    var rows = [
+      row("Join code", sess.join_code || "not issued", sess.join_code ? STATE_OK : STATE_WARN,
+        "for a patron who cannot scan — read it out, it is unambiguous by design"),
+      row("Join URL", sess.join_url || "not issued", null),
+      row("Expires", sess.expires_at ? new Date(sess.expires_at).toLocaleString() : "not set",
+        sess.expires_at ? null : STATE_WARN),
+      row("Auditorium", sess.auditorium_id || "not set", sess.auditorium_id ? null : STATE_WARN,
+        "the code is bound to this room and is refused in any other (§8.5)")
+    ];
+    if (sess.qr) {
+      wrap.hidden = false;
+      img.src = sess.qr.url + "?t=" + Date.now();
+      rows.push(row("QR symbol",
+        "version " + sess.qr.version + " · " + sess.qr.modules + " modules · level " + sess.qr.ecc, null));
+      note.textContent = "Print this QR at least " + sess.qr.print_width_mm +
+        " mm wide. Below that, a phone at arm's length in lobby light may not read it — " +
+        "and a longer join URL needs a bigger card, not a smaller one.";
+    } else {
+      wrap.hidden = true;
+      img.removeAttribute("src");
+      rows.push(row("QR symbol", "could not be encoded", STATE_BAD,
+        "hand out the join code instead"));
+      note.textContent = "";
+    }
+    dl(el("session-detail"), rows);
+  }
+
+  function refreshSession() {
+    fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("status " + r.status);
+        return r.json();
+      })
+      .then(renderSession)
+      .catch(function () {
+        dl(el("session-detail"), [
+          row("Show session", "not answering", STATE_BAD,
+            "this panel is stale; check captionbridge-core")
+        ]);
+      });
+  }
+
+  function sessionAction(path, body) {
+    fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: body
+    }).then(refreshSession).catch(refreshSession);
+  }
+
   function render(s) {
     // §8.5: name the room this page describes. A tech with two booth laptops
     // open should never have to guess which auditorium they are looking at.
@@ -643,4 +722,16 @@
   }
   refresh();
   setInterval(refresh, 3000);
+
+  /* §10.4. Polled far more slowly than the status rows: a show session changes
+   * when an operator changes it, not continuously, and each poll re-fetches a
+   * QR that is a bearer credential for the show. */
+  el("session-issue").addEventListener("click", function () {
+    sessionAction("/api/admin/session", "{}");
+  });
+  el("session-end").addEventListener("click", function () {
+    sessionAction("/api/admin/session/end", "{}");
+  });
+  refreshSession();
+  setInterval(refreshSession, 15000);
 })();

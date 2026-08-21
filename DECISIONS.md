@@ -308,3 +308,74 @@ run gathers on everything, as before, and says so on the dashboard with the
 networks named. Silence there would let the mechanism's existence read as
 confinement.
 
+
+### D29. The QR encoder is in-tree and pure Go, and it is verified against implementations that are not ours [§10.4, §7.2, §9.5]
+§7.2 wants a per-show QR so a patron joins in one scan. Two earlier passes
+declined to render one, and the recorded reason was right: a QR is an artifact
+nobody on the build team can read, so a bitmap with a bug in it looks exactly
+like a bitmap without one — square, three corners, and a silent failure at the
+auditorium door in a patron's hands. Shipping one unverified would have been a
+fabricated result.
+
+**Why in-tree rather than a module.** The appliance ships as one static binary
+with no cgo (D2, D4) and is deliberately offline. QR Model 2 is a closed, frozen,
+fully specified format that will never need updating, so the choice was a few
+hundred lines of arithmetic against a permanent supply-chain surface on a box
+whose whole security posture is that nothing reaches it.
+
+**How the objection was answered rather than waived.** Nothing in
+`internal/qr` is checked against our own reading of ISO/IEC 18004:
+
+- Every module of every symbol is compared against references from
+  **python-qrcode**, an unrelated implementation — across all 8 data masks for a
+  corpus of boundary cases, and across **all 160 version/correction-level
+  combinations at their exact byte capacity**, so the spec tables are pinned
+  rather than spot-checked. The capacities themselves come from bisecting the
+  oracle, not from copying the table under test.
+- Every reference was decoded by **zxing-cpp**, the C++ ZXing engine behind a
+  great many phone scanner apps, which had to return the exact payload before the
+  fixture was committed.
+- `make qr-verify` decodes the **PNGs this appliance actually serves**, at the
+  scales it serves them, with the same decoder. 42/42 at the time of writing.
+  It lives outside CI because CI has no Python and must not need any; the
+  committed fixtures carry the load there.
+
+**Fixtures are indexed by MASK, and that is a finding, not a detail.**
+Implementations genuinely disagree about which of the eight data masks to pick,
+because the penalty rules rest on things the standard leaves open — whether the
+quiet zone supplies the light margin for a finder-lookalike at the symbol edge,
+and whether the format information is in place while masks are scored
+(python-qrcode blanks it; ZXing and Nayuki do not). None of it affects
+readability: the chosen mask is recorded in the format information, so a scanner
+reads our answer rather than reproducing our reasoning. So the fixtures pin all
+eight masks, and the guarantee is that WHATEVER mask is chosen, the output is
+byte-identical to a symbol an independent decoder has already read.
+
+**A third implementation was needed to settle the first disagreement.** The first
+fixtures came from segno, and our encoder disagreed with it on every case, always
+in the padding, always by one codeword. segno's `write_padding_bits` extends by
+`8 - (length % 8)` with no outer `% 8`, so a bit stream that already ends on a
+codeword boundary — which in byte mode it always does — gets an extra `0x00`.
+ISO §7.4.10, quoted verbatim in segno's own docstring directly above that line,
+adds padding bits only when the stream does NOT end on a boundary. python-qrcode
+agrees with this package module-for-module and disagrees with segno by 146
+modules on the same input. Two implementations and the spec text against one.
+The deviation is harmless — both symbols decode — but the episode is why the
+generator names three implementations instead of trusting one.
+
+**ECC level M by default.** Not because more correction is worse, but because a
+higher level needs a higher version, which means more and smaller modules at a
+given printed size — and what defeats scans at a cinema door is small modules in
+bad light, not codeword corruption. A typical §10.4 join URL is 53x53 modules at
+M and 61x61 at Q.
+
+**The physical size is computed, not guessed.** `RecommendedPrintWidthMM` derives
+a minimum card width from the symbol actually being printed (0.8 mm per module),
+because a longer join URL means a larger version, more modules, and a card that
+must be physically BIGGER — a relationship that is invisible on a screen and is
+exactly where a booth would get it wrong. The admin page prints that number
+beside the code.
+
+**What this does NOT clear: B2.** No phone camera, no venue lighting, no lobby.
+Local decoding by a scanner library is not a patron scanning a printed card in a
+dark foyer, and nothing on the operator surface claims otherwise.

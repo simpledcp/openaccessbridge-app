@@ -9,25 +9,32 @@ package web
 // requireAdmin, same security headers — and keeps the patron-session surface in
 // one file with the store that backs it.
 //
-// The QR IMAGE is deliberately not generated here. Rendering a QR that no offline
-// tool on this build host can decode would be an artifact nobody has verified
-// scans, which is exactly the fabricated result the house rules forbid (and a QR
-// that fails at the auditorium door fails silently, from the patron's side). What
-// this endpoint returns instead is the exact payload a QR must carry — the join
-// URL — plus a short typed code that works today. Rendering the payload as a QR is
-// a seam for whoever owns the admin page, and validating a real phone camera scan
-// is BLOCKER B2 regardless.
+// The QR IMAGE was deliberately not generated here for two passes, and the reason
+// was right at the time: rendering a QR that nothing on this build host could
+// decode would have been an artifact nobody had verified scans, and a QR that
+// fails at the auditorium door fails silently, from the patron's side.
+//
+// That objection is now answered rather than waived. internal/qr is checked
+// module-for-module against an unrelated encoder across all 160 version/level
+// combinations, every reference symbol was read back by zxing-cpp — the decoder
+// engine behind many phone scanner apps — and `make qr-verify` decodes the actual
+// PNGs this endpoint serves. What is STILL not proven, and is not claimed
+// anywhere on this surface, is a real phone camera in real venue lighting: that
+// is BLOCKER B2 and no amount of local decoding clears it.
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/captionbridge/internal/qr"
 )
 
 // adminSurface is the admin listener's handler: the session/QR routes plus
@@ -36,6 +43,7 @@ func (s *Server) adminSurface() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/admin/session", s.requireAdmin(s.handleAdminSession))
 	mux.HandleFunc("/api/admin/session/end", s.requireAdmin(postOnly(s.handleAdminSessionEnd)))
+	mux.HandleFunc("/api/admin/session/qr.png", s.requireAdmin(s.handleAdminSessionQR))
 	mux.Handle("/", s.adminMux())
 	return securityHeaders(mux)
 }
@@ -53,6 +61,29 @@ type SessionResponse struct {
 	// PerShowTokenRequired mirrors the active profile, so the operator can see
 	// whether patrons actually need this code at all.
 	PerShowTokenRequired bool `json:"per_show_token_required"`
+	// QR describes the scannable form of JoinURL (§10.4, §7.2). The image itself
+	// is served separately, because a PNG does not belong inside a JSON status
+	// document that the admin page polls.
+	QR *QRInfo `json:"qr,omitempty"`
+}
+
+// QRInfo is what the operator surface needs to render and, more importantly, to
+// PRINT a per-show QR.
+type QRInfo struct {
+	// URL is the admin route serving the image for the CURRENT session.
+	URL string `json:"url"`
+	// Version and Modules describe the symbol: 4*Version+17 modules plus the
+	// quiet zone on each side.
+	Version int `json:"version"`
+	Modules int `json:"modules"`
+	// ECC is the correction level the symbol carries.
+	ECC string `json:"ecc"`
+	// PrintWidthMM is the smallest width this symbol should be printed at to
+	// stay scannable by a phone at arm's length in poor light. It is derived
+	// from THIS symbol, because a longer join URL means a larger version, more
+	// modules, and a card that must be physically bigger — a relationship that
+	// is invisible on a screen and is exactly where a booth would get it wrong.
+	PrintWidthMM int `json:"print_width_mm"`
 }
 
 func (s *Server) handleAdminSession(w http.ResponseWriter, r *http.Request) {
@@ -117,14 +148,90 @@ func (s *Server) sessionResponse(r *http.Request, issued IssuedSession) SessionR
 	if s.deps.Hub != nil {
 		sess.ClientCountCaption = s.deps.Hub.ClientCount()
 	}
+	joinURL := s.joinURL(r, issued.Token)
 	return SessionResponse{
 		Active:               true,
 		PatronSession:        sess,
 		JoinCode:             issued.JoinCode,
-		JoinURL:              s.joinURL(r, issued.Token),
+		JoinURL:              joinURL,
 		PerShowTokenRequired: s.cfg.PerShowToken,
+		QR:                   qrInfo(joinURL),
 	}
 }
+
+// qrInfo describes the symbol for a join URL, or nil if it cannot be encoded at
+// all. Nil rather than a zero struct: an operator must see "no QR" and reach for
+// the typed code, not a set of zeroes that reads like a symbol.
+func qrInfo(joinURL string) *QRInfo {
+	sym, err := qr.Encode([]byte(joinURL), qr.DefaultECC)
+	if err != nil {
+		return nil
+	}
+	return &QRInfo{
+		URL:          "/api/admin/session/qr.png",
+		Version:      sym.Version,
+		Modules:      sym.Modules(),
+		ECC:          sym.ECC.String(),
+		PrintWidthMM: sym.RecommendedPrintWidthMM(),
+	}
+}
+
+// handleAdminSessionQR serves the current show's join URL as a PNG (§10.4,
+// §7.2 "a per-show QR encodes the local URL + session token").
+//
+// Three properties this handler exists to hold:
+//
+//   - It is on the ADMIN listener only. The image is a bearer credential for the
+//     show — anything that can read it can join — so it is served where an
+//     operator authenticates, never on the patron network (§8.4).
+//   - It is never cached. A per-show QR that a browser or proxy kept would let
+//     yesterday's code admit patrons to today's wrong room, which is the §8.5
+//     failure mode this whole session model exists to prevent.
+//   - With no live show it is a 404, not a blank image. An operator holding a
+//     card up to a phone must be able to tell "no session" from "a QR that will
+//     not scan".
+func (s *Server) handleAdminSessionQR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cur, ok := s.sessions.Current()
+	if !ok {
+		http.Error(w, "no show session is live: issue one first", http.StatusNotFound)
+		return
+	}
+	scale := qrDefaultScale
+	if v := strings.TrimSpace(r.URL.Query().Get("scale")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > qr.MaxScale {
+			http.Error(w, "scale must be 1-"+strconv.Itoa(qr.MaxScale), http.StatusBadRequest)
+			return
+		}
+		scale = n
+	}
+	sym, err := qr.Encode([]byte(s.joinURL(r, cur.Token)), qr.DefaultECC)
+	if err != nil {
+		// Refused rather than approximated: a truncated join URL would produce a
+		// QR that scans perfectly and sends a patron nowhere.
+		http.Error(w, "this join URL cannot be encoded as a QR", http.StatusInternalServerError)
+		return
+	}
+	var buf bytes.Buffer
+	if err := sym.PNG(&buf, scale); err != nil {
+		http.Error(w, "could not render the QR", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	_, _ = w.Write(buf.Bytes())
+}
+
+// qrDefaultScale is the pixels-per-module the admin page gets without asking.
+// At a typical join URL (version 9, 61 modules with its quiet zone) that is a
+// 488 px image: large enough to scan straight off a booth monitor, small enough
+// to sit in a dashboard tile.
+const qrDefaultScale = 8
 
 // joinURL builds the address a patron's phone should open. It points at the
 // PATRON bind address, never the admin one the operator is currently talking to.

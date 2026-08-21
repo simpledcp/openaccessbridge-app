@@ -62,6 +62,20 @@
       <h2>Appliance <span class="muted small">(§10.8)</span></h2>
       <dl id="version-detail"></dl>
     </div>
+    <!-- §10.4 per-show patron access. The QR is a bearer credential for the
+         show, which is why it only ever appears on this listener (§8.4). -->
+    <div class="tile">
+      <h2>This show's patron access <span class="muted small">(§10.4)</span></h2>
+      <div id="session-qr-wrap" hidden>
+        <img id="session-qr" alt="QR code a patron scans to join this show" width="244" height="244">
+      </div>
+      <dl id="session-detail"></dl>
+      <div class="session-actions">
+        <button type="button" id="session-issue">Start a new show</button>
+        <button type="button" id="session-end">End the show</button>
+      </div>
+      <p class="muted small" id="session-note"></p>
+    </div>
   </section>
 
   <footer class="foot">
