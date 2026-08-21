@@ -704,3 +704,37 @@ and never loads a ruleset. That is the same class as the three
 readers-without-writers the previous review found, and it is now the thing to
 look for first: not "is the code right" but "is the code reachable, with the
 values a real installation has".
+
+### D37. The SSH row is MEASURED from a listening socket, and an unmeasured one is neither answer [§9.1, §9.3]
+The §9.3 row an operator reads as "SSH disabled" was derived from the config
+setting `ssh_enabled` — which nothing in the tree ever wrote. Absent, it read
+false, `checkSSH` returned correct, and the dashboard printed "SSH disabled:
+yes". On an appliance where sshd was genuinely running it said the opposite of
+the truth, with no warning. That is fail-WRONG on a security row, and it is
+exactly the defect the firewall row had already fixed (D17).
+
+**Demonstrated, not argued.** This build host runs sshd. The pre-fix binary,
+built from the same tree and run against the same machine, reports
+`ssh_disabled: true` and no warnings. The fixed one reports
+`ssh_disabled: false`, `ssh_introspected: true`, `ssh_network_reachable: true`
+and raises `ssh_enabled_outside_support`.
+
+**What is measured: a listening socket.** Not a unit file and not a process
+name. The question §9.1 is asking is "is there a way in", and a disabled unit
+with a running daemon is still a way in while an enabled unit that failed to
+start is not. `/proc/net/tcp` and `/proc/net/tcp6` are readable without
+privilege, so — unlike the ruleset — this row is answerable by core's fallback
+pass exactly as well as by the privileged helper.
+
+**Loopback is distinguished from a network.** §9.2 permits local SSH in the Lab
+profile, and an appliance reachable only from its own console is not the
+re-entry path §9.4 replaces. The measurement carries both facts.
+
+**An unmeasured state is neither answer.** If the tables cannot be read, the row
+is `ssh_introspected: false`, `SSHCorrect` is false regardless of profile, and a
+distinct `ssh_state_not_verified` warning is raised — never
+`ssh_enabled_outside_support`, because asserting SSH is OPEN on no evidence is
+the mirror image of the defect this replaced. A mutation found that the guard
+making `SSHCorrect` depend on introspection is load-bearing ONLY on profiles
+that permit SSH (elsewhere the profile rule already fails), which is precisely
+where an unmeasured state is most dangerous; there is now a test for that case.

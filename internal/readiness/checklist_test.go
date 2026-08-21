@@ -15,6 +15,8 @@ func healthy() model.SystemReadiness {
 		ForwardingDisabled:   true,
 		FirewallActive:       true,
 		FirewallIntrospected: true,
+		SSHDisabled:          true,
+		SSHIntrospected:      true,
 		AdminOnPatronNet:     model.TriNo,
 		DefaultCreds:         false,
 		IdentityCheck:        "match",

@@ -214,7 +214,9 @@ func TestRun(t *testing.T) {
 				FirewallActive:           tc.firewall,
 				AdminReachableFromPatron: tc.adminPatron,
 				DefaultCredentials:       tc.defCreds,
-				SSHEnabledOutsideSupport: tc.ssh,
+				// The §9.3 row is MEASURED now: supply the observation this case
+				// wants rather than the old caller-asserted fact.
+				SSH: StaticSSHReader(SSHStatus{Listening: tc.ssh, NetworkReachable: tc.ssh, Port: DefaultSSHPort}, nil),
 			}
 			rep := Run(cfg)
 
@@ -262,7 +264,7 @@ func TestSeverities(t *testing.T) {
 		FirewallActive:           false,
 		AdminReachableFromPatron: true,
 		DefaultCredentials:       true,
-		SSHEnabledOutsideSupport: true,
+		SSH:                      sshOnANetwork(),
 	}
 	rep := Run(cfg)
 
@@ -299,7 +301,7 @@ func TestForwardingV4MissingFailsLoud(t *testing.T) {
 	}
 	mustMkdir(t, p.SysClassNet)
 
-	rep := Run(Config{Paths: p, Profile: model.ProfileLab, FirewallActive: true})
+	rep := Run(Config{Paths: p, Profile: model.ProfileLab, FirewallActive: true, SSH: noSSH()})
 	if rep.ForwardingDisabledV4 {
 		t.Error("missing IPv4 ip_forward should NOT be reported as disabled")
 	}
@@ -324,7 +326,7 @@ func TestForwardingV6MissingIsSecure(t *testing.T) {
 	mustWrite(t, filepath.Join(proc, "ipv4", "ip_forward"), "0")
 	// Deliberately do NOT create the ipv6 forwarding file.
 
-	rep := Run(Config{Paths: Paths{ProcSysNet: proc, SysClassNet: sys}, Profile: model.ProfilePatronFacing, FirewallActive: true})
+	rep := Run(Config{Paths: Paths{ProcSysNet: proc, SysClassNet: sys}, Profile: model.ProfilePatronFacing, FirewallActive: true, SSH: noSSH()})
 	if !rep.ForwardingDisabledV4 || !rep.ForwardingDisabledV6 {
 		t.Errorf("v4=0 and v6-absent should both be disabled: v4=%v v6=%v", rep.ForwardingDisabledV4, rep.ForwardingDisabledV6)
 	}
@@ -337,6 +339,7 @@ func TestForwardingV6MissingIsSecure(t *testing.T) {
 // profile must not silently permit admin-on-patron.
 func TestUnknownProfileRequiresAdminIsolation(t *testing.T) {
 	rep := Run(Config{
+		SSH:                      noSSH(),
 		Paths:                    fixture(t, "0", "0", false),
 		Profile:                  model.FirewallProfile("mystery"),
 		FirewallActive:           true,
@@ -372,7 +375,7 @@ func TestBridgesMissingSysDir(t *testing.T) {
 	mustWrite(t, filepath.Join(proc, "ipv6", "conf", "all", "forwarding"), "0")
 	p := Paths{ProcSysNet: proc, SysClassNet: filepath.Join(root, "sys", "class", "net")}
 
-	rep := Run(Config{Paths: p, Profile: model.ProfileLab, FirewallActive: true})
+	rep := Run(Config{Paths: p, Profile: model.ProfileLab, FirewallActive: true, SSH: noSSH()})
 	if rep.BridgesPresent {
 		t.Error("BridgesPresent should not claim a bridge when the scan could not run")
 	}
@@ -411,10 +414,21 @@ func TestDefaultPaths(t *testing.T) {
 // DefaultPaths rather than building relative paths. We only assert it does not
 // panic and returns a populated report; values depend on the host kernel.
 func TestEmptyPathsFallBackToDefaults(t *testing.T) {
-	rep := Run(Config{Profile: model.ProfileLab, FirewallActive: true})
+	rep := Run(Config{Profile: model.ProfileLab, FirewallActive: true, SSH: noSSH()})
 	// Pass is host-dependent, but the call must complete and the firewall fact
 	// must round-trip regardless of the kernel state.
 	if !rep.FirewallActive {
 		t.Error("FirewallActive should round-trip from Config")
 	}
+}
+
+// noSSH is the observation every test here predates: SSH measured, and nothing
+// listening. Before the §9.3 row became a measurement these tests asserted that
+// state by omission; now they say it.
+func noSSH() SSHReader { return StaticSSHReader(SSHStatus{Port: DefaultSSHPort}, nil) }
+
+// sshOnANetwork is SSH measured and reachable from somewhere other than this
+// machine's console — the state the profile rules are about.
+func sshOnANetwork() SSHReader {
+	return StaticSSHReader(SSHStatus{Listening: true, NetworkReachable: true, Port: DefaultSSHPort}, nil)
 }

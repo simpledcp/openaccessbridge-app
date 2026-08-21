@@ -146,7 +146,28 @@ func securityChecks(st model.SystemReadiness) []model.PreShowCheck {
 		creds.Detail = "no default credential"
 	}
 
-	return []model.PreShowCheck{firewall, forwarding, admin, creds}
+	ssh := model.PreShowCheck{
+		ID: "ssh_closed", Title: "SSH is not a way into this appliance", Section: "§9.1, §9.3",
+		Source: model.SourceMeasured, Blocking: st.DeploymentProfile.Production(),
+		Remedy: "Disable sshd on this appliance (§9.1 makes support mode the only re-entry path). " +
+			"If it must stay on for an install, close it before the house opens.",
+	}
+	switch {
+	case !st.SSHIntrospected:
+		// D17/D37: an unmeasured way in is neither open nor closed, and this row
+		// used to claim closed on exactly this evidence.
+		ssh.State = model.CheckNotRun
+		ssh.Detail = "nothing could measure whether SSH is listening, so it is unknown whether this " +
+			"appliance can still be reached over SSH"
+	case st.SSHNetworkReachable:
+		ssh.State = model.CheckFail
+		ssh.Detail = "sshd is accepting connections from the network"
+	default:
+		ssh.State = model.CheckPass
+		ssh.Detail = "nothing is listening for SSH on a network"
+	}
+
+	return []model.PreShowCheck{firewall, forwarding, admin, creds, ssh}
 }
 
 func captionChecks(st model.SystemReadiness) []model.PreShowCheck {

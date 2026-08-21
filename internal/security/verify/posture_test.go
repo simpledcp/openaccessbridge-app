@@ -104,6 +104,7 @@ func TestForwarding_PerInterfaceAndDefaultKnobs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rep := Run(Config{
+				SSH:            noSSH(),
 				Paths:          forwardingFixture(t, tc.knobs...),
 				Profile:        model.ProfileBoothDiagnostic,
 				FirewallActive: true,
@@ -185,6 +186,7 @@ func assertKnobSet(t *testing.T, label, root string, got, want []string) {
 // (D17). It must not raise a false critical on a hardened appliance.
 func TestForwarding_MissingIPv6TreeStaysSecure(t *testing.T) {
 	rep := Run(Config{
+		SSH: noSSH(),
 		Paths: forwardingFixture(t,
 			knob{"ipv4/ip_forward", "0"},
 			knob{"ipv4/conf/all/forwarding", "0"},
@@ -255,6 +257,7 @@ func TestBlockingCodes(t *testing.T) {
 // it — the check §9.3 requires before an install may leave setup.
 func TestRefusesSetupCompletion_EndToEnd(t *testing.T) {
 	rep := Run(Config{
+		SSH: noSSH(),
 		Paths: forwardingFixture(t,
 			knob{"ipv4/ip_forward", "1"},
 			knob{"ipv6/conf/all/forwarding", "0"},

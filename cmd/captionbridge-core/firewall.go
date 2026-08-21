@@ -148,6 +148,9 @@ func (c *firewallClient) verifyPosture(facts model.PostureFacts) verify.Report {
 		AdminReachableFromPatron: facts.AdminReachableFromPatron,
 		DefaultCredentials:       facts.DefaultCredentials,
 		SSHEnabledOutsideSupport: facts.SSHEnabledOutsideSupport,
+		// SSH is measurable without privilege, so the fallback pass answers this
+		// row exactly as well as the helper's does.
+		SSH: verify.ProcSSHReader(verify.DefaultSSHPort),
 	})
 	c.mu.Lock()
 	c.report = rep

@@ -85,6 +85,18 @@ type Config struct {
 	Paths   Paths
 	Profile model.FirewallProfile
 
+	// SSH observes whether anything is LISTENING for SSH connections (§9.1, §9.3).
+	// When it is set, its observation decides the SSH row and
+	// SSHEnabledOutsideSupport below is ignored — a way into the appliance is
+	// proven or disproven, never asserted. Use ProcSSHReader(port) in production.
+	//
+	// When it is nil, or when it fails, the pass marks Report.SSHIntrospected
+	// false and refuses to report the row as correct: an unmeasured way in is not
+	// a closed one (D17, fail-loud never fail-wrong).
+	SSH SSHReader
+	// SSHPort is the port ProcSSHReader measures; zero means DefaultSSHPort.
+	SSHPort int
+
 	// Ruleset introspects the loaded nftables table (§9.3 "default-deny active
 	// with no forward-accepts"). When it is set, its OBSERVATION decides
 	// Report.FirewallActive and FirewallActive below is ignored — a posture is
@@ -163,7 +175,23 @@ type Report struct {
 	DNSContained bool `json:"dns_contained"`
 
 	NoDefaultCreds bool `json:"no_default_credentials"`
-	SSHCorrect     bool `json:"ssh_correct"`
+	// SSHCorrect: SSH's state matches what this profile requires.
+	//
+	// It is meaningful ONLY when SSHIntrospected is true. This row used to be
+	// derived from a configuration setting nothing ever wrote, so an appliance
+	// with sshd genuinely running reported "SSH disabled" — fail-wrong on a
+	// security row. A dashboard must read the pair, exactly as it does for
+	// FirewallActive/FirewallIntrospected (D17).
+	SSHCorrect bool `json:"ssh_correct"`
+	// SSHIntrospected is true when SSH's state was MEASURED — a listening socket
+	// observed — rather than taken from configuration.
+	SSHIntrospected bool `json:"ssh_introspected"`
+	// SSHListening and SSHNetworkReachable are the measurement itself. Listening
+	// on loopback only is not the same as listening on a network: §9.2 permits
+	// local SSH in the Lab profile, and an appliance reachable only from its own
+	// console is not the re-entry path §9.4 is about.
+	SSHListening        bool `json:"ssh_listening"`
+	SSHNetworkReachable bool `json:"ssh_network_reachable"`
 
 	Warnings []model.Warning `json:"warnings"`
 	Pass     bool            `json:"pass"`
@@ -186,7 +214,8 @@ func Run(cfg Config) Report {
 	requiresIsolation := adminIsolationRequired(cfg.Profile)
 	adminIsolated := !requiresIsolation || !cfg.AdminReachableFromPatron
 
-	sshCorrect, sshSeverity := checkSSH(cfg.Profile, cfg.SSHEnabledOutsideSupport)
+	ssh := observeSSH(cfg)
+	sshCorrect, sshSeverity := checkSSH(cfg.Profile, ssh.enabledOnANetwork())
 
 	rep := Report{
 		ForwardingDisabledV4:      fwd.disabledV4,
@@ -204,7 +233,10 @@ func Run(cfg Config) Report {
 		TheaterScopeIntrospected:  rt.scopeChecked,
 		DNSContained:              rt.dnsChecked && rt.dnsContained,
 		NoDefaultCreds:            !cfg.DefaultCredentials,
-		SSHCorrect:                sshCorrect,
+		SSHCorrect:                sshCorrect && ssh.introspected,
+		SSHIntrospected:           ssh.introspected,
+		SSHListening:              ssh.status.Listening,
+		SSHNetworkReachable:       ssh.status.NetworkReachable,
 	}
 
 	// Severity of the profile-scoped assertions: a locked (production) profile
@@ -303,7 +335,19 @@ func Run(cfg Config) Report {
 			Severity: model.SeverityCritical,
 		})
 	}
-	if !sshCorrect {
+	if !ssh.introspected {
+		// D17's rule applied to SSH: an unmeasured way in is not a closed one, and
+		// it is not an OPEN one either. Saying "SSH is enabled" here would assert
+		// something nothing looked at — the mirror image of the defect this
+		// replaced. The row reads unverified, and it blocks exactly as the
+		// firewall's unverified row does.
+		warnings = append(warnings, model.Warning{
+			Code: model.WarnSSHUnverified,
+			Message: "SSH's state could not be measured, so it is unknown whether this appliance " +
+				"can still be reached over SSH; support mode is meant to be the only way in (§9.1)",
+			Severity: profileSeverity,
+		})
+	} else if !sshCorrect {
 		warnings = append(warnings, model.Warning{
 			Code:     model.WarnSSHEnabled,
 			Message:  sshMessage(cfg.Profile),
@@ -596,6 +640,41 @@ func checkSSH(p model.FirewallProfile, enabled bool) (correct bool, severity str
 		}
 	}
 	return false, model.SeverityCritical
+}
+
+// sshObservation is what the pass learned about SSH.
+type sshObservation struct {
+	status       SSHStatus
+	introspected bool
+}
+
+// enabledOnANetwork is the fact checkSSH judges: SSH reachable from somewhere
+// other than this machine's own console. An unmeasured state is reported as
+// enabled so that checkSSH cannot return "correct" by default — the caller then
+// sees SSHIntrospected false and renders it as unverified rather than as a pass.
+func (o sshObservation) enabledOnANetwork() bool {
+	if !o.introspected {
+		return true
+	}
+	return o.status.NetworkReachable
+}
+
+// observeSSH measures SSH's state, or records that it could not be measured.
+func observeSSH(cfg Config) sshObservation {
+	reader := cfg.SSH
+	if reader == nil {
+		// No reader wired: the legacy caller-asserted fact is the only thing
+		// available, and it is explicitly NOT a measurement.
+		return sshObservation{
+			status:       SSHStatus{NetworkReachable: cfg.SSHEnabledOutsideSupport, Listening: cfg.SSHEnabledOutsideSupport},
+			introspected: false,
+		}
+	}
+	st, err := reader()
+	if err != nil {
+		return sshObservation{introspected: false}
+	}
+	return sshObservation{status: st, introspected: true}
 }
 
 // sshMessage names the profile's expectation so the operator knows why it is a

@@ -52,6 +52,12 @@ const (
 	// is running — whatever else the audio inputs happen to report.
 	WarnAudioInputProfileRejected = "audio_input_profile_rejected"
 
+	// WarnSSHUnverified is the SSH half of the "asserted but never measured" case.
+	// The §9.3 row used to be derived from a configuration setting nothing wrote,
+	// so an appliance with sshd genuinely running reported "SSH disabled" —
+	// fail-wrong on a security row. An unmeasured SSH state now says so instead
+	// of claiming either answer (§9.1, §9.3, D17, D37).
+	WarnSSHUnverified = "ssh_state_not_verified"
 	// WarnFirewallUnverified is the "asserted but never measured" case §9.3
 	// leaves open. Reusing WarnFirewallInactive would tell an operator the
 	// firewall is DOWN when it may well be up; this says only that nothing read
@@ -259,6 +265,15 @@ type SystemReadiness struct {
 	AdminIsolated        bool `json:"admin_isolated"`
 	DefaultCreds         bool `json:"default_credentials_present"`
 	SSHDisabled          bool `json:"ssh_disabled"`
+	// SSHIntrospected reports whether SSHDisabled was MEASURED — a listening
+	// socket observed — or merely taken from configuration. The pair is read
+	// exactly like FirewallActive/FirewallIntrospected: this row used to be
+	// derived from a setting nothing wrote, so an appliance with sshd running
+	// reported "SSH disabled" (D37).
+	SSHIntrospected bool `json:"ssh_introspected"`
+	// SSHNetworkReachable is the measurement itself: SSH accepting connections
+	// from somewhere other than this machine's own console.
+	SSHNetworkReachable bool `json:"ssh_network_reachable"`
 
 	TheaterInterface string `json:"theater_interface"`
 	ClientInterface  string `json:"client_interface"`

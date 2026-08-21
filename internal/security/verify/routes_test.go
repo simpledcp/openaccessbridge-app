@@ -76,6 +76,7 @@ func routeCfg(t *testing.T, procNet, resolv string, allowlist []string) Config {
 	p.ProcNet = procNet
 	p.ResolvConf = resolv
 	return Config{
+		SSH:              noSSH(),
 		Paths:            p,
 		Profile:          model.ProfilePatronFacing,
 		Ruleset:          parseReader(t, compliant()),
@@ -303,6 +304,7 @@ func TestRoutes_ScopeSeverityByProfile(t *testing.T) {
 // route posture it never checked.
 func TestRoutes_SkippedBeforeInterfacesAreAssigned(t *testing.T) {
 	rep := Run(Config{
+		SSH:     noSSH(),
 		Paths:   fixture(t, "0", "0", false),
 		Profile: model.ProfilePatronFacing,
 		Ruleset: parseReader(t, compliant()),

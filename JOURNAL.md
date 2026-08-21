@@ -1077,3 +1077,35 @@ The remaining 36 gaps are recorded in STATUS as the next backlog. The lesson for
 working through them is the one D36 ends on: the question that finds this class
 is not "is the code right" but "is it reachable, with the values a real
 installation has".
+
+## §9.3's SSH row: the one that said the opposite of the truth (D37)
+
+The audit called this the sharpest item in the backlog and it was right. The row
+an operator reads as "SSH disabled" came from a config setting nothing in the
+tree ever wrote — so it read false, `checkSSH` returned correct, and the
+dashboard printed a reassuring answer nobody had checked.
+
+This build host runs sshd on a network. Building the pre-fix code from HEAD and
+running it here reports `ssh_disabled: true` with no warnings; the fixed build,
+same host, same daemon, reports `ssh_disabled: false`,
+`ssh_network_reachable: true` and raises the warning. That contrast is the whole
+finding, and it was worth demonstrating rather than arguing — it is the same
+before/after a booth would have got.
+
+**A listening socket is the right thing to measure.** Not a unit file, not a
+process name: a disabled unit with a running daemon is still a way in, and an
+enabled unit that failed to start is not. `/proc/net/tcp` is readable without
+privilege, which makes this row unusual — core's fallback pass answers it exactly
+as well as the privileged helper does, where for the ruleset it cannot.
+
+Loopback is kept distinct from a network, because §9.2 permits local SSH in Lab
+and an appliance reachable only from its own console is not the re-entry path
+§9.4 exists to replace.
+
+**And an unmeasured state is neither answer.** Reporting "SSH is enabled" when
+nothing looked would be the mirror image of the defect being fixed, so it reads
+`ssh_state_not_verified` and does not pass. A mutation showed the guard that ties
+`SSHCorrect` to introspection only bites on profiles that PERMIT SSH — everywhere
+else the profile rule already fails — which is exactly where an unmeasured state
+is most dangerous, and the case my first tests missed. Four behaviours
+mutation-confirmed once that gap was closed.

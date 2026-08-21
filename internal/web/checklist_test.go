@@ -34,6 +34,9 @@ func serverWithStatus(t *testing.T, st model.SystemReadiness) *Server {
 func goodStatus() model.SystemReadiness {
 	return model.SystemReadiness{
 		ForwardingDisabled: true, FirewallActive: true, FirewallIntrospected: true,
+		// Measured, and nothing listening: the state a healthy appliance is in
+		// (§9.3/D37 — an UNMEASURED SSH row now blocks, as it should).
+		SSHDisabled: true, SSHIntrospected: true,
 		AdminOnPatronNet: model.TriNo, IdentityCheck: "match",
 		DeploymentProfile: model.ProfilePatronFacing,
 		CaptionLink: model.CaptionLinkState{

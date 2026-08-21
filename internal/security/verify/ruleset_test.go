@@ -210,6 +210,7 @@ func TestRun_FirewallIntrospection(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rep := Run(Config{
+				SSH:     noSSH(),
 				Paths:   fixture(t, "0", "0", false),
 				Profile: model.ProfilePatronFacing,
 				// The caller asserts the firewall is active; introspection must
@@ -237,7 +238,8 @@ func TestRun_FirewallIntrospection(t *testing.T) {
 // the caller's assertion is used, and the report says plainly that the posture
 // was NOT introspected so a dashboard cannot present it as verified.
 func TestRun_NoReaderLeavesFirewallUnproven(t *testing.T) {
-	rep := Run(Config{Paths: fixture(t, "0", "0", false), Profile: model.ProfileLab, FirewallActive: true})
+	rep := Run(Config{
+		SSH: noSSH(), Paths: fixture(t, "0", "0", false), Profile: model.ProfileLab, FirewallActive: true})
 	if !rep.FirewallActive {
 		t.Error("the caller-supplied fact should still be honored when no reader is configured")
 	}

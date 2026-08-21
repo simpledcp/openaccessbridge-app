@@ -228,6 +228,11 @@ func (h *helper) verifyConfig(f model.PostureFacts) verify.Config {
 		AdminReachableFromPatron: f.AdminReachableFromPatron,
 		DefaultCredentials:       f.DefaultCredentials,
 		SSHEnabledOutsideSupport: f.SSHEnabledOutsideSupport,
+		// §9.3's SSH row, MEASURED. Reading a listening socket needs no
+		// privilege, so unlike the ruleset this is not the helper's special
+		// ability — but it belongs in every pass, and the watchdog runs through
+		// here too so it can never check less than core asked for.
+		SSH: verify.ProcSSHReader(verify.DefaultSSHPort),
 	}
 }
 

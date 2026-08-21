@@ -143,6 +143,8 @@ func Assemble(in Inputs) model.SystemReadiness {
 		AdminIsolated:        rep.AdminIsolated,
 		DefaultCreds:         !rep.NoDefaultCreds,
 		SSHDisabled:          rep.SSHCorrect,
+		SSHIntrospected:      rep.SSHIntrospected,
+		SSHNetworkReachable:  rep.SSHNetworkReachable,
 
 		TheaterInterface: in.Network.TheaterInterface,
 		ClientInterface:  in.Network.ClientInterface,

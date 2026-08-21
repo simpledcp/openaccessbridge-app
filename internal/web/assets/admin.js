@@ -468,7 +468,14 @@
           : ""),
       ynRow("Admin binding meets profile", s.admin_isolated, true),
       ynRow("Default credentials", s.default_credentials_present, false),
-      ynRow("SSH disabled", s.ssh_disabled, true),
+      /* §9.3/D37: measured or not. This row used to be derived from a config
+       * setting nothing wrote, so an appliance with sshd running reported "SSH
+       * disabled". Unmeasured must never render as the reassuring answer. */
+      s.ssh_introspected
+        ? ynRow("SSH disabled", s.ssh_disabled, true,
+            s.ssh_network_reachable ? "sshd is accepting connections from the network" : "")
+        : row("SSH disabled", "NOT MEASURED", STATE_WARN,
+            "nothing could read this host's listening sockets, so it is unknown whether SSH is a way in"),
       row("Theater interface", s.theater_interface || "not configured", s.theater_interface ? null : STATE_WARN),
       row("Client interface", s.client_interface || "not configured", s.client_interface ? null : STATE_WARN),
       // §6.7 / D27. Two different facts, deliberately in one row: which network

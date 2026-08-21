@@ -85,6 +85,7 @@ func TestDashboardRendersTheFactsTheAPIAlreadyMeasured(t *testing.T) {
 		"trusted_keys",                // §9.4 an appliance with none can verify nothing
 		"password_set",                // §9.5 a passphrase is on file, not what it is
 		"hex_ambiguity",               // §9.5 a value some scanners misread
+		"ssh_introspected",            // §9.3 measured vs merely configured
 	} {
 		if !strings.Contains(script, field) {
 			t.Errorf("admin.js never reads %q — the fact is measured and invisible", field)
