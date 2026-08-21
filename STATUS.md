@@ -3,7 +3,7 @@
 CaptionBridge is built as far as it can go in software on this dev machine.
 Everything hardware-gated is behind a seam and recorded in `BLOCKERS.md`.
 
-- **31 packages · 472 tests · race-clean · ~82% coverage · ~36K LOC of Go.**
+- **36 packages · 639 tests · race-clean · ~82% coverage · ~49K LOC of Go.**
 - **32 ACSP scenarios** (`./bin/acsp-simulator`) as the caption-path regression backbone.
 - A **soak layer** (§11.6): 1500 show cycles with reconnects and language
   switches, retention flat, content purged at every show boundary.
@@ -43,6 +43,19 @@ RT=/tmp/cb; mkdir -p $RT
 make soak         # §11.6 long soak (default 2000 show cycles)
 make latency      # §11.4 appliance-side latency pass (default 60 s sampling window)
 ```
+
+**Verified live (all three processes, 2026-08-21):** the five newest slices were
+each exercised against the running appliance, not only in tests. Configuring the
+patron interface through the setup API confined the WebRTC answer to that one
+interface (it had offered five, including both Tailscale addresses); issuing a
+show returned a join code and a QR whose PNG an independent decoder read back as
+the exact join URL; the §11.5 sheet printed with the firewall row reading NOT
+CHECKED (no root, B5) and IP forwarding reading FAIL, which is what this dev host
+honestly is; opening a support session produced a five-minute window with
+`tunnel_established:false` and an audit line carrying a hashed grantee and
+`reason_len:11` — with the reason text appearing in zero log files; and the
+update surface reported `trusted_keys:0` and `ab_supported:false` with the reason
+named.
 
 **Verified live (all three processes):** captions `PLAYING` (lease active, RPL
 loaded, languages en + es-419) AND audio HI/VI-N `excellent` over loopback IPC
