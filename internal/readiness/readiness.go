@@ -6,6 +6,7 @@
 package readiness
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/simpledcp/captionbridge/internal/model"
@@ -103,6 +104,11 @@ type Inputs struct {
 	// hub. VISIBILITY ONLY: the cue text never leaves the hub for a diagnostic
 	// surface, a log or a persisted record (§9.4 caption.cue.visible_no_text).
 	CueVisible model.Tri
+	// ICEScope is the media process's measured account of the WebRTC candidates
+	// it handed the last patron (§6.7, D27). It is reported rather than derived:
+	// core configures a patron interface, but only the peer knows what gathering
+	// actually produced, and the two disagreeing is the fault worth seeing.
+	ICEScope model.ICEScopeReport
 	// Discovery and Support are §8.2's last two rows. Both are Tri so an
 	// un-observed one renders "not measured" rather than a reassuring "Off".
 	Discovery model.Tri
@@ -140,6 +146,7 @@ func Assemble(in Inputs) model.SystemReadiness {
 
 		TheaterInterface: in.Network.TheaterInterface,
 		ClientInterface:  in.Network.ClientInterface,
+		ICEScope:         in.ICEScope,
 		AllowedServer:    in.Network.AllowedServer,
 		ConnectedServer:  in.Network.ConnectedServer,
 		IdentityStrength: in.Network.IdentityStrength,
@@ -177,6 +184,7 @@ func Assemble(in Inputs) model.SystemReadiness {
 	warnings = append(warnings, audioWarnings(in.Audio, budgets)...)
 	warnings = append(warnings, processWarnings(in.Processes)...)
 	warnings = append(warnings, supportWarnings(in.Support)...)
+	warnings = append(warnings, iceScopeWarnings(in.ICEScope)...)
 	r.Warnings = warnings
 	return r
 }
@@ -205,6 +213,27 @@ func deploymentBanner(d Deploy) string {
 	}
 	return title + " profile: diagnostic posture, not a public install. " +
 		"Switch to Patron-Facing or Low-Cost Replacement before serving an audience."
+}
+
+// iceScopeWarnings raises the §9.1/D27 condition: a patron was handed candidates
+// for networks that are not the patron LAN.
+//
+// It is raised from the MEASUREMENT (what the last answer carried), never from
+// the configuration, and it stays silent until an answer has actually been
+// produced — an appliance nobody has joined yet has not offered anything, and
+// saying otherwise would be a verdict on an event that never happened.
+func iceScopeWarnings(sc model.ICEScopeReport) []model.Warning {
+	if !sc.Answered || len(sc.OfferedInterfaces) < 2 {
+		return nil
+	}
+	return []model.Warning{{
+		Code: model.WarnICEScopeUnconfined,
+		Message: "Patrons are being offered audio connections on " +
+			strconv.Itoa(len(sc.OfferedInterfaces)) + " of this appliance's networks (" +
+			strings.Join(sc.OfferedInterfaces, ", ") + "). Set the patron interface so phones " +
+			"stop spending their join time on networks they cannot reach.",
+		Severity: model.SeverityWarning,
+	}}
 }
 
 // supportWarnings raises §8.3's last condition — "debug capture / support mode

@@ -81,6 +81,7 @@ green.
 | 18 | §6.4 audio calibration engine: feasibility, verdict, plain-language summary, concrete tier-aware fixes, saved auditorium profile | `internal/audio/calibration` |
 | 19 | §11.6 soak/reliability layer: retention must be FLAT across many shows | `internal/soak` |
 | 20 | §6.7 audio delivery, end to end: streaming Opus/RTP encode per named stream, a Pion peer hub that fans ONE encoder out to N subscribers, the SDP/ICE relay across all three processes, and patron availability driven by a measured encoder state (D20) | `internal/audio/{encode,webrtcpeer,pipeline}`, `internal/web/audio.go`, `cmd/*` |
+| 21 | ICE gathering confined to the configured patron interface, refused by name when that interface is absent, and the networks a patron was really offered MEASURED off the emitted SDP and shown on the dashboard (§6.7, §9.1, §8.2, D28) | `internal/audio/webrtcpeer`, `internal/ipc/network.go`, `cmd/*` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -177,12 +178,11 @@ the audit lanes' own reports.
 - **§11.5 pre-show QA checklist** is not codified as a staff-facing procedure.
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
-- **WebRTC ICE gathers on every interface this host has.** Pion enumerates all
-  non-loopback interfaces, so on a multi-homed box the answer's host candidates
-  include docker/VPN/overlay addresses as well as the patron LAN's. It is not a
-  local-only violation (no STUN, no TURN, nothing leaves the LAN) and it is
-  harmless on an appliance with one patron NIC, but scoping gathering to the
-  configured patron interface is the right thing before a field pilot.
+- **The ICE scope row is as fresh as the last posture reconcile** (15 s), not as
+  fresh as the last patron's answer. That matches every other posture row on the
+  dashboard, but it means a booth watching the page sees a confinement change one
+  reconcile after it takes effect. The confinement itself applies to the very
+  next answer.
 - **§6.7's latency table now has an appliance-side floor and nothing else.**
   Rows 2 and 3 (analysis/map, Opus encode) are measured with distributions, and
   the appliance's own transport leg is measured. Rows 1, 4, 5 and 6 — ALSA

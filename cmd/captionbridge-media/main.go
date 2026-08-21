@@ -190,6 +190,10 @@ func (m *manager) handle(msg ipc.Message) *ipc.Message {
 	case ipc.TypeMediaDevices, ipc.TypeMediaCalibrate, ipc.TypeMediaCalibrateStop:
 		// §6.4 calibration wizard (calibration.go).
 		return m.handleCalibration(msg)
+	case ipc.TypeMediaNetwork:
+		// §9.1 / D27: confine ICE gathering to the patron interface core has on
+		// file. Deliberately NOT part of media.configure — see internal/ipc/network.go.
+		return m.handleNetwork(msg)
 	default:
 		return &ipc.Message{Type: "unsupported", ID: msg.ID}
 	}

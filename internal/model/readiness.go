@@ -63,6 +63,17 @@ const (
 	// posture that still passes is exactly the silent degradation guardrail #7
 	// forbids (§9.1).
 	WarnFirewallApplyRefused = "firewall_ruleset_not_applied"
+	// WarnPatronInterfaceUnusable: the interface a patron's phone must reach the
+	// appliance on cannot be gathered on — it is missing, down, or unaddressed.
+	// The audio inputs go on qualifying perfectly while no patron can subscribe
+	// to any of them, so this cannot be inferred from the stream states (§9.1,
+	// D27).
+	WarnPatronInterfaceUnusable = "patron_interface_unusable"
+	// WarnICEScopeUnconfined: the appliance offered patrons candidates on more
+	// than one of its networks. Not a local-only violation (no STUN, no TURN),
+	// but every extra candidate is join time a phone spends timing out, and it
+	// publishes the venue's private topology to the patron LAN (D27).
+	WarnICEScopeUnconfined = "ice_candidates_not_confined_to_patron_network"
 	// WarnProcessUnreachable covers §3.5's supervised-process liveness: core
 	// supervises the media and firewall helpers and reports each one's liveness,
 	// so a crashed helper must not read as "silent inputs" or "firewall down".
@@ -110,6 +121,36 @@ func (t Tri) Label() string {
 	default:
 		return "not measured"
 	}
+}
+
+// ICEScopeReport is what the dashboard is allowed to say about ICE scoping (§8.2).
+//
+// Configured/InForce describe INTENT and MECHANISM. Offered* are MEASUREMENTS,
+// read back out of the last answer this hub actually produced. A booth that sees
+// "confined: yes" alongside two offered interfaces is looking at a bug, and the
+// point of reporting both is that such a disagreement is visible rather than
+// hidden behind whichever one the code trusted.
+type ICEScopeReport struct {
+	// Configured: an operator chose a patron interface.
+	Configured bool `json:"configured"`
+	// Interface is that choice, echoed back so the dashboard names it.
+	Interface string `json:"interface,omitempty"`
+	// InForce: the gathering filter is installed and the interface was usable at
+	// the last check.
+	InForce bool `json:"in_force"`
+	// Unusable is the reason gathering cannot happen on the configured
+	// interface, if that is the case. Empty when there is no fault.
+	Unusable string `json:"unusable,omitempty"`
+	// Answered reports whether an answer has been produced at all. Without it,
+	// the two counts below are zero because nothing has been measured — never
+	// because a patron was offered nothing.
+	Answered bool `json:"answered"`
+	// OfferedInterfaces are the interfaces whose addresses appeared in the last
+	// answer, sorted. More than one means a patron was told to try more than one
+	// of this appliance's networks.
+	OfferedInterfaces []string `json:"offered_interfaces,omitempty"`
+	// OfferedCandidates counts the host candidates in that answer.
+	OfferedCandidates int `json:"offered_candidates"`
 }
 
 // AudioStreamSummary is one §8.2 audio row derived from the media process's
@@ -221,6 +262,11 @@ type SystemReadiness struct {
 
 	TheaterInterface string `json:"theater_interface"`
 	ClientInterface  string `json:"client_interface"`
+	// ICEScope is what the WebRTC peer actually offered the last patron who
+	// joined (§6.7, D27). It sits beside ClientInterface deliberately: that field
+	// is the interface an operator CONFIGURED, this one is the set of networks a
+	// phone was really told to try, and the two can disagree.
+	ICEScope ICEScopeReport `json:"ice_scope"`
 	// AllowedServer is the CONFIGURED cinema server for this auditorium — the
 	// allowlist entry pinned at setup (§8.2 "Allowed cinema server", §10.5). It is
 	// deliberately NOT the connected server's self-reported identity: a wrong-room

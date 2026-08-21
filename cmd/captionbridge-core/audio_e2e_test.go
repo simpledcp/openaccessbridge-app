@@ -182,6 +182,55 @@ func TestAudioPathEndToEndAcrossTheThreeProcesses(t *testing.T) {
 		t.Fatalf("the media process never reported more than %d connected listeners: the §6.6 count is not coming from real peers", peak)
 	}
 
+	// 4b. §9.1 / D28: what did the appliance actually TELL those phones to try?
+	//     The scope is configured in core's store, applied in the media process,
+	//     and measured off the SDP the peer emitted — three processes, and the
+	//     only way to know the chain holds is to read the answer back from the
+	//     dashboard after a real patron has joined.
+	adminBase := fmt.Sprintf("http://127.0.0.1:%d", adminPort)
+	scope := waitForScope(t, adminBase, 45*time.Second, func(sc model.ICEScopeReport) bool {
+		return sc.Answered
+	})
+	if scope.OfferedCandidates == 0 {
+		t.Fatal("patrons have been receiving Opus and the appliance reports offering them no candidates at all")
+	}
+	// Unconfigured here (this appliance never ran the setup wizard), so the
+	// honest report is "not confined" — and it must say so rather than let the
+	// mechanism's existence read as confinement.
+	if scope.Configured || scope.InForce {
+		t.Fatalf("no patron interface was ever configured, yet the dashboard reports %+v", scope)
+	}
+
+	// Now configure one, exactly as the setup wizard does, and require that the
+	// next patron's answer is confined to it. This is the whole slice end to end:
+	// a setting in core's SQLite store changes which addresses a phone is handed
+	// by a different process.
+	patronIface := firstRoutableIface(t)
+	setupNetwork(t, adminBase, patronIface)
+	confined := waitForScope(t, adminBase, 60*time.Second, func(sc model.ICEScopeReport) bool {
+		return sc.InForce && sc.Interface == patronIface
+	})
+	if !confined.InForce {
+		t.Fatalf("the configured patron interface never reached the media peer: %+v", confined)
+	}
+	late := joinAsPatron(t, ctx, patronPort, model.StreamHI)
+	late.waitForOpus(t, 10)
+	// The dashboard's copy of this measurement is refreshed by core's posture
+	// reconciliation, not by the join, so it is at most one reconcile interval
+	// behind the answer it describes — the same freshness every other posture row
+	// on that page has. Allow several intervals rather than assuming the first
+	// read is the new one: the failure this guards against is a CONFINED
+	// appliance, and reading the pre-configuration measurement would report it as
+	// unconfined.
+	after4b := waitForScope(t, adminBase, 90*time.Second, func(sc model.ICEScopeReport) bool {
+		return len(sc.OfferedInterfaces) == 1 && sc.OfferedInterfaces[0] == patronIface
+	})
+	if len(after4b.OfferedInterfaces) != 1 || after4b.OfferedInterfaces[0] != patronIface {
+		t.Fatalf("with %q configured as the patron interface, the last patron was offered %v",
+			patronIface, after4b.OfferedInterfaces)
+	}
+	late.close()
+
 	// 5. And stopping the streams must take the encoders with them rather than
 	//    orphaning a gst-launch child per named stream for the life of the host.
 	first.close()
@@ -625,4 +674,70 @@ func requireRoutableInterface(t *testing.T) {
 		}
 	}
 	t.Skip("no non-loopback interface: the appliance and a local subscriber have no host candidate to meet on")
+}
+
+// waitForScope polls the admin status until the ICE scope satisfies cond, and
+// returns it. It reads the DASHBOARD rather than the media process directly:
+// the point of the assertion is that the measurement survives all three hops.
+func waitForScope(t *testing.T, adminBase string, within time.Duration, cond func(model.ICEScopeReport) bool) model.ICEScopeReport {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	var last model.ICEScopeReport
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(adminBase + "/api/admin/status")
+		if err == nil {
+			var doc model.SystemReadiness
+			derr := json.NewDecoder(resp.Body).Decode(&doc)
+			_ = resp.Body.Close()
+			if derr == nil {
+				last = doc.ICEScope
+				if cond(last) {
+					return last
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("the ICE scope never satisfied the condition within %s; last was %+v", within, last)
+	return last
+}
+
+// setupNetwork records the patron interface through the operator's own API, so
+// the test drives the same path a booth tech does rather than writing to the
+// store behind the product's back.
+func setupNetwork(t *testing.T, adminBase, clientIface string) {
+	t.Helper()
+	theater := "lo"
+	if clientIface == theater {
+		t.Skip("the only routable interface is the loopback stand-in")
+	}
+	body := fmt.Sprintf(`{"TheaterIface":%q,"ClientIface":%q}`, theater, clientIface)
+	resp, err := http.Post(adminBase+"/api/admin/setup/network", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("configuring the patron interface: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("configuring the patron interface: %s: %s", resp.Status, b)
+	}
+}
+
+// firstRoutableIface is the interface this test treats as the patron LAN.
+func firstRoutableIface(t *testing.T) string {
+	t.Helper()
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Skipf("cannot enumerate interfaces: %v", err)
+	}
+	for _, i := range ifaces {
+		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if addrs, aerr := i.Addrs(); aerr == nil && len(addrs) > 0 {
+			return i.Name
+		}
+	}
+	t.Skip("no non-loopback interface to stand in for the patron LAN")
+	return ""
 }

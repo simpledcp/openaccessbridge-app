@@ -506,3 +506,73 @@ ordinal resync after a sequence gap; the negative-transit refusal; the pre-skip
 guard that claims nothing from a ragged RTP clock; the Summary headline that
 bounds the claim; and the `dur(0)` rendering that makes an unmeasured stage read
 as "-" rather than as 0 ms.
+
+## Confining ICE gathering to the patron's network (§6.7, §9.1, D28)
+
+D27 recorded a known limit and left it: pion gathers on every non-loopback
+interface, so the SDP answer handed to a patron carried a host candidate for each
+one. The reason it survived two passes is that it violates nothing — no STUN, no
+TURN, nothing leaves the venue — and on a single-NIC appliance it is invisible.
+
+The first thing done was to stop describing it and measure it. On this build host
+the appliance answered a patron with **16 candidates across 5 networks**: the LAN
+NIC and its eight IPv6 privacy addresses, a WireGuard address, BOTH Tailscale
+addresses, `docker0`, and a docker bridge. Written down that way the cost stops
+being hygiene. ICE tries the pairs it is given; a candidate on a network the
+phone cannot route to does not fail fast, it fails on a timeout — and it fails
+for every phone in the room during the ninety seconds when an auditorium's
+patrons all scan the code at once. §6.7 spends its whole budget on milliseconds,
+and §11.4 has just finished proving the appliance's own transit is under one. The
+second cost is that the answer describes the venue's private topology to anything
+on the patron LAN.
+
+**What it is scoped to, and why a name.** `config.SettingClientInterface` — the
+interface the setup wizard already records — pushed core → media over a new
+`media.network` message. A NAME rather than an address, because a patron NIC
+renumbers without becoming a different NIC. It is deliberately not folded into
+`media.configure`, which carries the §10.5 audio profile: correcting a network
+setting must not restart the room's audio.
+
+**The failure mode this could have introduced, and what was done about it.**
+Filtering to an interface that is absent or down does not produce an error — it
+produces an answer with no host candidate in it, which a phone cannot tell apart
+from a dead network. The patron gets a spinner and the booth gets nothing. So the
+interface is re-checked on EVERY answer, not only when the scope is set (it is a
+physical thing that can be unplugged between one patron and the next), the offer
+is refused by name, and core raises it as a critical dashboard warning. A rejected
+scope also does not take hold: the appliance keeps gathering the way it did rather
+than silently serving nobody.
+
+**Three facts, kept apart.** Configured, in force, and — the only measurement of
+the three — the interfaces that appeared in the last answer this appliance really
+emitted, read back out of that SDP. Deriving the third from the first is exactly
+how a broken appliance would look identical to a working one, which is the shape
+this repo has already caught twice. An appliance nobody has joined yet reports
+"nothing offered to measure" rather than a verdict on an offer never made, and an
+appliance with no configured interface reports "not confined" with the networks
+named, so the mechanism's existence can never read as confinement.
+
+**Proven end to end, not in-package.** `TestAudioPathEndToEndAcrossTheThreeProcesses`
+now drives the whole chain with the real three processes: with no setup run, a
+patron receives Opus and the dashboard reports **5 networks offered, not
+confined**; the test then configures the patron interface through the operator's
+own setup API, and the next patron's answer carries candidates on **exactly that
+one interface**. Writing that test found a real property worth stating: the
+dashboard's copy of the measurement is refreshed by the 15 s posture reconcile,
+not by the join, so the row is one reconcile behind the answer it describes —
+the same freshness every other posture row has. The confinement itself applies to
+the very next answer. That is now in STATUS's remaining-work list in its own
+words rather than being smoothed over in the test.
+
+Three behaviours were mutation-confirmed (reverted, watched fail, restored): the
+gathering filter itself (removing it put `wg0` back in a scoped answer and took
+the post-startup narrowing from 1 interface back to 5); the report reading the
+emitted SDP rather than the configured intent (reporting intent made a hub that
+had answered nobody claim it had offered `eno1`, and made an unconfined hub that
+really offered 5 report 0); and the per-answer usability check (dropping it made
+a hub scoped to a missing interface answer successfully — with nothing in it).
+
+`internal/invariants` gained the wiring assertion the house rule requires: the
+package half of this work protects nobody unless core actually pushes the
+interface, and that push is now pinned by source text with the load-bearing
+literals named in the test's own comment.

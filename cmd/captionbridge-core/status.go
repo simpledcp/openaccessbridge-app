@@ -134,7 +134,12 @@ func (s *supervisor) reconcile(ctx context.Context) {
 		SSHEnabledOutsideSupport: sshOn == "true",
 	})
 
-	// 3. Media: push the §10.5 input profile, then read back the stream states.
+	// 3. Media: confine the WebRTC peer's ICE gathering to the §9.1 client
+	//    interface, push the §10.5 input profile, then read back the stream
+	//    states. The scope goes first: it costs one loopback round trip and it
+	//    decides which addresses the next patron to join is told to try, so it
+	//    should not wait behind an audio reconfiguration (D27).
+	s.media.applyPatronScope(client)
 	reconfigured := s.media.configure(aud, hasProfile)
 	s.media.poll()
 
@@ -207,6 +212,10 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 			// Lab and Booth Diagnostic impose none.
 			AdminOnPatronNet: model.TriOf(web.AdminReachableFromPatron(s.patronBind, s.adminBind)),
 		},
+		// D27: the media peer's own account of what it offered the last patron.
+		// It is a MEASUREMENT taken in the other process, so core passes it
+		// through rather than deriving it from the interface it configured.
+		ICEScope:      s.media.iceScope(),
 		Timeline:      s.ctrl.Timeline(),
 		CueVisible:    triIfKnown(cueVisible, cueKnown),
 		DriftBudgetMS: s.ctrl.WarnBudgetMS(),

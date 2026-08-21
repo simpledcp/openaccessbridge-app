@@ -110,6 +110,29 @@ func TestInvariant_ProcessLivenessIsReported(t *testing.T) {
 	}
 }
 
+// TestInvariant_PatronScopeReachesTheMediaPeer: the ICE gathering scope is only
+// worth having if core actually pushes it. internal/audio/webrtcpeer can confine
+// gathering and cmd/captionbridge-media can apply what it is told, but neither
+// knows which interface is the patron's — that lives in the config store, which
+// only core reads. Without the push, an appliance ships with the mechanism
+// present, the dashboard row rendering, and every patron still being offered the
+// venue's docker bridges (§9.1, §6.7, DECISIONS D28).
+//
+// The two literals below are LOAD-BEARING: they are what makes this assertion
+// mean anything, so a refactor that renames them must update this test rather
+// than delete it.
+func TestInvariant_PatronScopeReachesTheMediaPeer(t *testing.T) {
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "status.go"))
+	if !strings.Contains(src, "s.media.applyPatronScope(client)") {
+		t.Errorf("core never pushes the configured client interface to the media peer: " +
+			"ICE gathering stays unconfined however complete internal/audio/webrtcpeer is (D28)")
+	}
+	if !strings.Contains(src, "ICEScope:") {
+		t.Errorf("the peer's measured gathering report never reaches readiness.Inputs, " +
+			"so the dashboard cannot show which networks a patron was offered (§8.2)")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

@@ -27,7 +27,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/ice/v4"
@@ -65,19 +67,39 @@ type Options struct {
 	Log *logging.Logger
 	// GatherTimeout bounds ICE gathering for one answer (0 = 3 s).
 	GatherTimeout time.Duration
+	// Scope confines ICE gathering to the patron interface (scope.go). The zero
+	// value gathers on every interface — the behaviour D27 recorded as a known
+	// limit — and reports itself as unconfined rather than passing for scoped.
+	Scope PatronScope
 }
 
 // Hub owns the appliance's WebRTC peers and the per-stream RTP sources they are
 // fed from. It satisfies internal/audio/pipeline.DeliverySink, which is how a
 // running stream publishes its encoder and reads back its listener count.
 type Hub struct {
-	log     *logging.Logger
-	gather  time.Duration
-	api     *webrtc.API
+	log    *logging.Logger
+	gather time.Duration
+	api    *webrtc.API
+	// scope is read by the gathering filter, which pion calls on a goroutine of
+	// its own during an answer, so it is an atomic value rather than something
+	// guarded by h.mu: core can push a new patron interface (media.network)
+	// while an answer is being negotiated.
+	scope   atomic.Pointer[PatronScope]
 	mu      sync.Mutex
 	sources map[model.StreamType]*source
 	peers   map[string]*peer
 	closed  bool
+	// lastOffer is the MEASURED result of the most recent answer: which of this
+	// appliance's interfaces a patron was really told to try. It is written from
+	// the emitted SDP, never from the scope that was requested.
+	lastOffer offerMeasurement
+}
+
+// offerMeasurement is what was read back out of the last answer's SDP.
+type offerMeasurement struct {
+	answered   bool
+	interfaces []string
+	candidates int
 }
 
 // source is one named stream's single Opus/RTP encode plus the track every
@@ -141,17 +163,96 @@ func New(opts Options) (*Hub, error) {
 	// LAN.
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
 
-	return &Hub{
-		log:    log,
-		gather: gather,
-		api: webrtc.NewAPI(
-			webrtc.WithMediaEngine(m),
-			webrtc.WithInterceptorRegistry(ir),
-			webrtc.WithSettingEngine(se),
-		),
+	h := &Hub{
+		log:     log,
+		gather:  gather,
 		sources: map[model.StreamType]*source{},
 		peers:   map[string]*peer{},
-	}, nil
+	}
+	scope := opts.Scope
+	h.scope.Store(&scope)
+	// The filter closes over the HUB, not over the scope it was built with, so a
+	// patron interface pushed down later (media.network) takes effect on the very
+	// next answer without rebuilding the API — and so a scope can never be
+	// reported as in force by one part of this process while gathering still uses
+	// another (scope.go).
+	se.SetInterfaceFilter(func(name string) bool { return h.patronScope().allowInterface(name) })
+
+	h.api = webrtc.NewAPI(
+		webrtc.WithMediaEngine(m),
+		webrtc.WithInterceptorRegistry(ir),
+		webrtc.WithSettingEngine(se),
+	)
+	return h, nil
+}
+
+// patronScope reads the scope currently in force.
+func (h *Hub) patronScope() PatronScope {
+	if s := h.scope.Load(); s != nil {
+		return *s
+	}
+	return PatronScope{}
+}
+
+// SetPatronScope confines ICE gathering to one interface, or (with an empty
+// scope) removes the confinement. It is how core pushes the §9.1 client
+// interface down after the setup wizard records it.
+//
+// An unusable interface is REJECTED and the previous scope is left in force:
+// silently accepting it would mean the next patron's answer had no host
+// candidate at all, and the phone would spin on a network fault that was really
+// a configuration fault. The error names which of the two it is.
+func (h *Hub) SetPatronScope(s PatronScope) error {
+	if err := s.usable(); err != nil {
+		return err
+	}
+	h.scope.Store(&s)
+	h.log.Info(logging.EvStateTransition,
+		logging.Field("phase", "webrtc_patron_scope"),
+		logging.Field("interface", s.name()),
+		logging.Field("confined", s.Configured()))
+	return nil
+}
+
+// ScopeReport is the dashboard's view of ICE scoping: what was configured, what
+// is in force, and — the only measurement of the three — which interfaces the
+// last patron was actually offered.
+func (h *Hub) ScopeReport() model.ICEScopeReport {
+	s := h.patronScope()
+	rep := model.ICEScopeReport{Configured: s.Configured(), Interface: s.name()}
+	if err := s.usable(); err != nil {
+		rep.Unusable = err.Error()
+	} else {
+		rep.InForce = s.Configured()
+	}
+	h.mu.Lock()
+	m := h.lastOffer
+	h.mu.Unlock()
+	rep.Answered = m.answered
+	rep.OfferedInterfaces = append([]string(nil), m.interfaces...)
+	rep.OfferedCandidates = m.candidates
+	return rep
+}
+
+// recordOffer measures an emitted answer: how many host candidates it carries and
+// which of this host's interfaces they belong to. An address that maps to no
+// interface is recorded under the empty name rather than dropped, so a candidate
+// this appliance cannot account for still shows up as one it offered.
+func (h *Hub) recordOffer(sdp string) {
+	seen := map[string]bool{}
+	var names []string
+	addrs := candidateAddrs(sdp)
+	for _, ip := range addrs {
+		name := interfaceOfAddr(ip)
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	h.mu.Lock()
+	h.lastOffer = offerMeasurement{answered: true, interfaces: names, candidates: len(addrs)}
+	h.mu.Unlock()
 }
 
 // Publish installs the single RTP source for a named stream and starts the one
@@ -257,6 +358,14 @@ func (h *Hub) Answer(ctx context.Context, peerID string, stream model.StreamType
 	if src == nil {
 		return "", ErrNoSource
 	}
+	// Checked per answer, not only when the scope was set: the patron interface
+	// is a physical thing that can be unplugged between one patron joining and
+	// the next. Gathering with the filter on a missing interface yields an answer
+	// with no host candidate, which a phone experiences as an unexplained
+	// failure to connect — so the fault is named here instead (scope.go).
+	if err := h.patronScope().usable(); err != nil {
+		return "", err
+	}
 
 	pc, err := h.api.NewPeerConnection(webrtc.Configuration{
 		// §6.7: "no internet STUN/TURN is expected or permitted in the
@@ -361,6 +470,9 @@ func (h *Hub) Answer(ctx context.Context, peerID string, stream model.StreamType
 		// a track that no longer produces audio.
 		return fail(ErrNoSource)
 	}
+	// Measured from the SDP that is about to leave this process — the only
+	// artifact that says what the phone was really told to try.
+	h.recordOffer(local.SDP)
 	return local.SDP, nil
 }
 

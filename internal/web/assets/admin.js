@@ -467,6 +467,12 @@
       ynRow("SSH disabled", s.ssh_disabled, true),
       row("Theater interface", s.theater_interface || "not configured", s.theater_interface ? null : STATE_WARN),
       row("Client interface", s.client_interface || "not configured", s.client_interface ? null : STATE_WARN),
+      // §6.7 / D27. Two different facts, deliberately in one row: which network
+      // ICE gathering is CONFINED to, and which networks the last patron to join
+      // was really offered. A phone told to try an address it cannot route to
+      // does not fail fast — it fails on a timeout, during the ninety seconds an
+      // auditorium's patrons all join at once.
+      iceScopeRow(s.ice_scope),
       // §8.2's last two rows read "Off" when healthy, so they are rendered as
       // on/off rather than run through the yes/no helper — flipping the WORD to
       // suit the colour would print "yes" for a service that is switched off.
@@ -482,6 +488,29 @@
   /* offOnRow renders a Tri whose healthy answer is "no" as Off/ON, colouring ON
    * as a warning. Unknown stays "not measured": a switch nothing could read is
    * not the same as a switch that is off. */
+  // Renders §8.2's patron-candidate row from the media peer's MEASURED report.
+  // "not measured" is spelled out whenever no patron has joined: this row must
+  // never read as a verdict on an offer that was never made.
+  function iceScopeRow(sc) {
+    if (!sc) return row("Patron audio candidates", "not measured", STATE_UNKNOWN);
+    if (sc.unusable) {
+      return row("Patron audio candidates", "cannot gather on " + (sc.interface || "the configured interface"),
+        STATE_BAD, "no patron can start audio until this interface is present (§9.1)");
+    }
+    var confined = sc.in_force
+      ? "confined to " + sc.interface
+      : "not confined (every interface on this appliance)";
+    if (!sc.answered) {
+      return row("Patron audio candidates", confined, sc.in_force ? null : STATE_WARN,
+        "no patron has joined yet, so nothing has been offered to measure");
+    }
+    var offered = sc.offered_interfaces || [];
+    var state = offered.length > 1 ? STATE_WARN : (sc.in_force ? STATE_OK : STATE_WARN);
+    return row("Patron audio candidates", confined, state,
+      "last patron was offered " + sc.offered_candidates + " candidate(s) on " +
+      (offered.length ? offered.join(", ") : "no interface this appliance recognises"));
+  }
+
   function offOnRow(label, v, note) {
     if (v !== "yes" && v !== "no") return row(label, "not measured", STATE_UNKNOWN, note);
     return row(label, v === "yes" ? "ON" : "off", v === "yes" ? STATE_WARN : STATE_OK, note);

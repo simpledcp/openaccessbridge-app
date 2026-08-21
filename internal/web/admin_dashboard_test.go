@@ -74,6 +74,7 @@ func TestDashboardRendersTheFactsTheAPIAlreadyMeasured(t *testing.T) {
 		"support_session",             // §8.2
 		"deployment_banner",           // §8.4
 		"admin_reachable_from_patron", // §8.4's raw condition, not the profile verdict
+		"ice_scope",                   // §6.7/D27 which networks a patron was really offered
 	} {
 		if !strings.Contains(script, field) {
 			t.Errorf("admin.js never reads %q — the fact is measured and invisible", field)

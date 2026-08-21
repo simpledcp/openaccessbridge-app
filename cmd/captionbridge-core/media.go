@@ -33,6 +33,12 @@ type mediaClient struct {
 	// own defaults) is re-configured rather than assumed to remember.
 	configuredKey string
 	configureErr  string
+	// scope is the media process's OWN account of its ICE gathering, refreshed on
+	// every push. Core does not remember what it sent: a media process that
+	// restarted came back unconfined, and an appliance that trusted its own last
+	// write would keep reporting a confinement that had gone away (§8.3).
+	scope    model.ICEScopeReport
+	scopeErr string
 }
 
 func newMediaClient(sockPath string, log *logging.Logger) *mediaClient {
@@ -97,6 +103,50 @@ func (c *mediaClient) configure(prof model.AuditoriumProfile, ok bool) (reconfig
 	return true
 }
 
+// applyPatronScope pushes the §9.1 client interface down to the media process,
+// which confines ICE gathering to it (DECISIONS D27, internal/audio/webrtcpeer).
+//
+// It is pushed on EVERY cycle rather than only on change, and the reply's report
+// is what core keeps. Pushing once and remembering the answer would survive
+// exactly until the media process restarted: it would come back gathering on
+// every interface while the dashboard went on saying "confined".
+//
+// An empty name is a legitimate state — the setup wizard has not run — and is
+// pushed as "unconfined" rather than skipped, so the appliance cannot end up in
+// a scope no operator chose.
+func (c *mediaClient) applyPatronScope(iface string) {
+	payload, err := json.Marshal(ipc.MediaNetworkScope{PatronInterface: iface})
+	if err != nil {
+		return
+	}
+	resp, err := c.request(ipc.Message{Type: ipc.TypeMediaNetwork, ID: "network", Payload: payload})
+	if err != nil {
+		c.noteDown(err.Error())
+		return
+	}
+	var res ipc.MediaNetworkResult
+	_ = json.Unmarshal(resp.Payload, &res)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Logged on the TRANSITION into refusal, not on every cycle: this runs on the
+	// dashboard's poll interval, and a persistent misconfiguration would
+	// otherwise fill the log with one line per tick for the length of a show.
+	if res.Error != "" && c.scopeErr != res.Error {
+		c.log.Error(logging.EvProcessUnhealthy,
+			logging.Field("phase", "patron_scope_refused"),
+			logging.Field("interface", iface))
+	}
+	c.scope, c.scopeErr = res.Report, res.Error
+}
+
+// iceScope is the media peer's measured gathering report, for the dashboard.
+func (c *mediaClient) iceScope() model.ICEScopeReport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scope
+}
+
 // poll refreshes the per-stream audio state and the helper's liveness.
 func (c *mediaClient) poll() {
 	resp, err := c.request(ipc.Message{Type: ipc.TypeMediaStatus, ID: "status"})
@@ -134,6 +184,9 @@ func (c *mediaClient) noteDown(detail string) {
 			logging.Field("reason", "loopback_request_failed"))
 	}
 	c.latest, c.alive, c.configuredKey = nil, false, ""
+	// The scope report goes with it: a report from a process that is no longer
+	// answering describes an appliance that may not be gathering at all.
+	c.scope, c.scopeErr = model.ICEScopeReport{}, ""
 	c.detail = "request_failed"
 	_ = detail // the transport error text is not surfaced: it can name paths (§9.4)
 }
@@ -157,12 +210,24 @@ func (c *mediaClient) liveness() model.ProcessLiveness {
 func (c *mediaClient) warnings() []model.Warning {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.configureErr == "" {
-		return nil
+	var out []model.Warning
+	if c.configureErr != "" {
+		out = append(out, model.Warning{
+			Code:     model.WarnAudioInputProfileRejected,
+			Message:  "The media process refused this auditorium's configured audio input: " + c.configureErr,
+			Severity: model.SeverityCritical,
+		})
 	}
-	return []model.Warning{{
-		Code:     model.WarnAudioInputProfileRejected,
-		Message:  "The media process refused this auditorium's configured audio input: " + c.configureErr,
-		Severity: model.SeverityCritical,
-	}}
+	if c.scopeErr != "" {
+		// The patron interface on file cannot be gathered on, so every patron who
+		// tries to listen is refused. That is a show-stopping condition for audio
+		// and it is invisible from the stream states, which go on qualifying an
+		// input nobody can reach (guardrail #7).
+		out = append(out, model.Warning{
+			Code:     model.WarnPatronInterfaceUnusable,
+			Message:  "Patron audio cannot be served: " + c.scopeErr,
+			Severity: model.SeverityCritical,
+		})
+	}
+	return out
 }

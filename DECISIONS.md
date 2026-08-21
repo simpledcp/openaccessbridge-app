@@ -259,8 +259,52 @@ takes them; pion's default mDNS mode (query-only) is set EXPLICITLY so §6.7's
 `*.local` gotcha is a decision rather than an inherited default — the appliance
 resolves the browser's mDNS candidates and advertises none of its own.
 
-**Known limit:** pion gathers on every non-loopback interface. On a multi-homed
-box that includes docker/VPN addresses. It is not a local-only violation (no
-STUN, no TURN, nothing leaves the LAN), but scoping gathering to the configured
-patron interface belongs on the pre-pilot list (STATUS "Known remaining work").
+**Known limit — CLOSED by D28.** pion gathered on every non-loopback interface,
+so on a multi-homed box the answer carried docker/VPN addresses. Gathering is now
+confined to the configured patron interface; see D28 for what that measured.
+
+### D28. ICE gathering is confined to the configured patron interface, and what a patron was offered is MEASURED [§6.7, §9.1, §8.2]
+D27 left pion enumerating every interface. Measured on the build host, the
+appliance answered a patron with **16 candidates across 5 networks**: the patron
+LAN NIC and its 8 IPv6 privacy addresses, a WireGuard address, BOTH Tailscale
+addresses, `docker0`, and a docker bridge.
+
+Two costs, and the first is the one that matters at showtime. ICE tries the pairs
+it is given, and a candidate on a network the phone cannot route to does not fail
+fast — it fails on a timeout, for every phone in the room, during the ninety
+seconds in which an auditorium's patrons all scan the code at once. §6.7 spends
+its entire budget on milliseconds. The second is that an SDP answer naming the
+venue's overlay subnets is a description of its private topology handed to
+anything on the patron LAN. Neither is a local-only violation — there is still no
+STUN, no TURN, and nothing leaves the venue — which is exactly why this sat
+unfixed: it was invisible.
+
+**The scope is an interface NAME, not an address.** A patron NIC renumbers (DHCP
+lease, IPv6 privacy rotation) without becoming a different NIC, and the question
+ICE has to answer is which wire, not which address today. It comes from
+`config.SettingClientInterface` — the interface the setup wizard already records
+— pushed core → media over a new `media.network` message. Deliberately NOT folded
+into `media.configure`: that carries the §10.5 AUDIO profile, and correcting a
+network setting must not restart the room's audio.
+
+**A missing patron interface is refused, not absorbed.** Gathering with the filter
+on an interface that is absent or down yields an answer with no host candidate at
+all, which a phone cannot tell apart from a dead network: the patron gets a
+spinner and the booth gets nothing. So the interface is re-checked on every
+answer — it is a physical thing that can be unplugged between one patron and the
+next — and a fault is returned by name and raised as a critical dashboard warning.
+
+**Three separate facts, and the dashboard shows all three.** Configured (an
+operator chose one), in force (the filter is installed and the interface is
+usable), and — the only measurement of the three — the interfaces that appeared
+in the last answer this appliance actually emitted. They are reported separately
+because a disagreement between them is precisely the bug worth seeing, and
+because deriving the third from the first is how a broken appliance would look
+identical to a working one. An appliance nobody has joined yet reports "nothing
+offered to measure" rather than a verdict on an offer that was never made.
+
+**Not confined is a legitimate state.** An appliance whose setup wizard has not
+run gathers on everything, as before, and says so on the dashboard with the
+networks named. Silence there would let the mechanism's existence read as
+confinement.
 
