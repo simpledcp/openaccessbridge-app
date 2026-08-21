@@ -3,6 +3,7 @@ package readiness
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simpledcp/captionbridge/internal/model"
 )
@@ -74,4 +75,95 @@ func findWarning(ws []model.Warning, code string) *model.Warning {
 		}
 	}
 	return nil
+}
+
+// The comparison this pair of fields exists to make. An appliance confined to
+// one interface on paper, offering a different one in fact, is a bug — and it
+// used to be silent, because one interface is "fewer than two".
+func TestConfinedOnPaperButOfferingSomethingElseIsCritical(t *testing.T) {
+	r := Assemble(Inputs{Verify: cleanVerify(), ICEScope: model.ICEScopeReport{
+		Configured: true, Interface: "wlan0", InForce: true,
+		Answered: true, OfferedInterfaces: []string{"eth0"}, OfferedCandidates: 2,
+	}})
+	w := findWarning(r.Warnings, model.WarnICEScopeUnconfined)
+	if w == nil {
+		t.Fatal("the appliance is confined to wlan0 and offering eth0, and nothing was raised")
+	}
+	if w.Severity != model.SeverityCritical {
+		t.Fatalf("severity %q for a confinement that is not doing what it says", w.Severity)
+	}
+}
+
+// An answer that carried nothing at all is the worst outcome on this path: the
+// patron gets a spinner and nobody is told why. It must be loud.
+func TestAnAnswerWithNoCandidatesAtAllIsCritical(t *testing.T) {
+	r := Assemble(Inputs{Verify: cleanVerify(), ICEScope: model.ICEScopeReport{
+		Configured: true, Interface: "wlan0", InForce: true,
+		Answered: true, OfferedInterfaces: nil, OfferedCandidates: 0,
+	}})
+	w := findWarning(r.Warnings, model.WarnICEScopeUnconfined)
+	if w == nil {
+		t.Fatal("a patron was offered nothing and the dashboard said nothing")
+	}
+	if w.Severity != model.SeverityCritical {
+		t.Fatalf("severity %q for a patron who could not connect at all", w.Severity)
+	}
+}
+
+// The §11.5 item is labelled "measured", so it must read the measurement.
+func TestTheChecklistScopeItemReadsTheMeasurementNotTheIntent(t *testing.T) {
+	facts := ChecklistFacts{Auditorium: "Auditorium 3", Now: func() time.Time { return time.Unix(0, 0) }}
+
+	mismatch := BuildChecklist(model.SystemReadiness{ICEScope: model.ICEScopeReport{
+		Configured: true, Interface: "wlan0", InForce: true,
+		Answered: true, OfferedInterfaces: []string{"eth0"}, OfferedCandidates: 2,
+	}}, facts)
+	if c := findCheck(t, mismatch, "patron_network_scoped"); c.State != model.CheckFail {
+		t.Fatalf("confined to wlan0, offering eth0, reports %q", c.State)
+	}
+
+	none := BuildChecklist(model.SystemReadiness{ICEScope: model.ICEScopeReport{
+		Configured: true, Interface: "wlan0", InForce: true, Answered: true, OfferedCandidates: 0,
+	}}, facts)
+	if c := findCheck(t, none, "patron_network_scoped"); c.State != model.CheckFail || !c.Blocking {
+		t.Fatalf("a patron offered nothing reports %q blocking=%v", c.State, c.Blocking)
+	}
+
+	good := BuildChecklist(model.SystemReadiness{ICEScope: model.ICEScopeReport{
+		Configured: true, Interface: "wlan0", InForce: true,
+		Answered: true, OfferedInterfaces: []string{"wlan0"}, OfferedCandidates: 2,
+	}}, facts)
+	if c := findCheck(t, good, "patron_network_scoped"); c.State != model.CheckPass {
+		t.Fatalf("a genuinely confined appliance reports %q", c.State)
+	}
+}
+
+// §11.5 names this item "within the §6.7 budget", so a measured figure must be
+// judged against that budget. Anything above zero passing would print PASS beside
+// a four-second latency.
+func TestAMeasuredLatencyIsJudgedAgainstTheBudget(t *testing.T) {
+	facts := ChecklistFacts{Auditorium: "A", Now: func() time.Time { return time.Unix(0, 0) }}
+	over := BuildChecklist(model.SystemReadiness{AudioStreams: []model.AudioStreamSummary{
+		{StreamType: model.StreamHI, LatencyMeasured: true, LatencyMS: 4000},
+	}}, facts)
+	if c := findCheck(t, over, "audio_latency_within_budget"); c.State != model.CheckFail {
+		t.Fatalf("4000 ms against a %d ms budget reports %q", DefaultLatencyBudgets().HIMaxMS, c.State)
+	}
+	under := BuildChecklist(model.SystemReadiness{AudioStreams: []model.AudioStreamSummary{
+		{StreamType: model.StreamHI, LatencyMeasured: true, LatencyMS: 90},
+	}}, facts)
+	if c := findCheck(t, under, "audio_latency_within_budget"); c.State != model.CheckPass {
+		t.Fatalf("90 ms reports %q", c.State)
+	}
+}
+
+func findCheck(t *testing.T, cl model.PreShowChecklist, id string) model.PreShowCheck {
+	t.Helper()
+	for _, c := range cl.Checks {
+		if c.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("no item %q", id)
+	return model.PreShowCheck{}
 }

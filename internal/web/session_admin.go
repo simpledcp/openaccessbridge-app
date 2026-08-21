@@ -49,6 +49,7 @@ func (s *Server) adminSurface() http.Handler {
 	// §9.4 support sessions (support.go): the only way back in once SSH is off.
 	mux.HandleFunc("/api/admin/support", s.requireAdmin(s.handleAdminSupport))
 	mux.HandleFunc("/api/admin/support/close", s.requireAdmin(postOnly(s.handleAdminSupportClose)))
+	mux.HandleFunc("/api/admin/support/endpoint", s.requireAdmin(postOnly(s.handleAdminSupportEndpoint)))
 	// §9.4 signed offline updates (update.go). Verify only on this image: there
 	// are no A/B slots to install into (BLOCKERS B8).
 	mux.HandleFunc("/api/admin/update", s.requireAdmin(s.handleAdminUpdate))

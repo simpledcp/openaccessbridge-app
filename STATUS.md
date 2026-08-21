@@ -179,6 +179,13 @@ failed feed raises a critical warning); nothing sensitive in logs (redaction).
 Recorded honestly rather than closed off. Fullest detail is in JOURNAL.md and in
 the audit lanes' own reports.
 
+An adversarial review of the five slices above (2026-08-21) confirmed 17 defects
+and refuted 2. They are fixed; the three worth carrying forward as a LESSON are
+recorded in JOURNAL.md, because they were all the same shape: a feature that
+could not be reached on an appliance an operator had actually set up. The
+`internal/invariants` suite now asserts that a setting with a reader has a
+writer, and that the build number is stamped.
+
 - **The §6.4 wizard has no hardware path to measure.** `calibration.SourceHardware`
   is implemented and tested, but nothing on this image can emit it — the single
   line that becomes a real-device open is the synthetic-device-id refusal (B3/B4).

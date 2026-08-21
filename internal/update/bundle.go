@@ -72,6 +72,16 @@ var (
 	ErrTooLarge        = errors.New("update: the bundle declares a length this appliance will not read")
 	ErrNoTrustedKeys   = errors.New("update: this appliance holds no trusted update keys, so no update can be verified")
 	ErrUnsupportedTier = errors.New("update: this bundle targets a hardware tier this appliance is not")
+	// ErrUnknownBuild: this appliance does not know its own build number, so it
+	// cannot tell an upgrade from a replay. Refusing beats picking a direction:
+	// treating an unknown build as zero installs every downgrade silently, and
+	// treating it as enormous installs nothing. Both are verdicts derived from an
+	// absence.
+	ErrUnknownBuild = errors.New("update: this appliance does not know its own build number, so it cannot tell an upgrade from a replay")
+	// ErrUnknownTier: the bundle targets a specific hardware tier and this
+	// appliance has not been told which tier it is. An untargeted bundle still
+	// installs anywhere; only a targeted one needs the answer.
+	ErrUnknownTier = errors.New("update: this bundle targets a hardware tier and this appliance has not been told which tier it is")
 )
 
 // Product is the only product string this appliance will install.
@@ -260,8 +270,13 @@ func Parse(raw []byte) (*Bundle, error) {
 
 // Current describes what is installed, for the upgrade check.
 type Current struct {
-	Build int64
-	Tier  string
+	// Build is the installed build number, and BuildKnown says whether this
+	// appliance knows it at all. They are separate because "build 0" and "we do
+	// not know our build" lead to opposite decisions, and only one of them is a
+	// fact.
+	Build      int64
+	BuildKnown bool
+	Tier       string
 	// AllowDowngrade lets an operator install an older build deliberately. It is
 	// off by default and is never inferred: a downgrade re-introduces every fault
 	// the newer build fixed, so it has to be a decision somebody made.
@@ -317,9 +332,17 @@ func Verify(b *Bundle, ts *TrustStore, cur Current) (VerifiedBundle, error) {
 			ErrPayloadMismatch, hex.EncodeToString(sum[:]), m.PayloadSHA256)
 	}
 
-	if m.Tier != "" && cur.Tier != "" && !strings.EqualFold(m.Tier, cur.Tier) {
-		return VerifiedBundle{}, fmt.Errorf("%w: bundle targets %q, this appliance is %q",
-			ErrUnsupportedTier, m.Tier, cur.Tier)
+	if m.Tier != "" {
+		switch {
+		case cur.Tier == "":
+			return VerifiedBundle{}, fmt.Errorf("%w: bundle targets %q", ErrUnknownTier, m.Tier)
+		case !strings.EqualFold(m.Tier, cur.Tier):
+			return VerifiedBundle{}, fmt.Errorf("%w: bundle targets %q, this appliance is %q",
+				ErrUnsupportedTier, m.Tier, cur.Tier)
+		}
+	}
+	if !cur.BuildKnown && !cur.AllowDowngrade {
+		return VerifiedBundle{}, ErrUnknownBuild
 	}
 	if m.Build <= cur.Build && !cur.AllowDowngrade {
 		return VerifiedBundle{}, fmt.Errorf("%w: bundle build %d, installed build %d",

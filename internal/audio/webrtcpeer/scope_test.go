@@ -10,12 +10,15 @@ import (
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
-// gatherable returns the interfaces pion would gather host candidates on: up,
-// not loopback, holding at least one routable address. The scope tests assert
-// against this host's real network rather than a fixture, because the defect
-// this file exists for — candidates for networks a patron cannot reach — only
-// exists on a real multi-homed host.
-func gatherable(t *testing.T) []string {
+// gatherableIfaces returns the interfaces pion would gather host candidates on:
+// up, not loopback, holding at least one address that can BECOME a candidate.
+//
+// It uses the package's own `gatherable` predicate deliberately. An earlier
+// version of this helper had its own copy of the rule, which meant the helper
+// could not expose a blind spot in the rule it was standing in for — and there
+// was one: an interface holding only an IPv6 link-local address passed, and then
+// gathered nothing (RFC 8445 §5.1.1.1).
+func gatherableIfaces(t *testing.T) []string {
 	t.Helper()
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -31,7 +34,7 @@ func gatherable(t *testing.T) []string {
 			continue
 		}
 		for _, a := range addrs {
-			if ip := addrIP(a); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+			if gatherable(addrIP(a)) {
 				out = append(out, iface.Name)
 				break
 			}
@@ -86,7 +89,7 @@ func interfacesIn(t *testing.T, sdp string) []string {
 // interfaces — two VPN overlays, two docker bridges and the LAN NIC — and a
 // phone would have spent its join time timing out against four of them.
 func TestAnAnswerOffersOnlyThePatronInterface(t *testing.T) {
-	ifaces := gatherable(t)
+	ifaces := gatherableIfaces(t)
 	if len(ifaces) == 0 {
 		t.Skip("no gatherable interface on this host")
 	}
@@ -130,9 +133,9 @@ func TestAnUnscopedHubReportsThatItIsUnconfined(t *testing.T) {
 	if got, want := len(rep.OfferedInterfaces), len(interfacesIn(t, answer)); got != want {
 		t.Fatalf("report names %d offered interfaces, the answer carries %d", got, want)
 	}
-	if len(gatherable(t)) > 1 && len(rep.OfferedInterfaces) < 2 {
+	if len(gatherableIfaces(t)) > 1 && len(rep.OfferedInterfaces) < 2 {
 		t.Fatalf("this host has %d gatherable interfaces but the unscoped hub reported offering %v — "+
-			"the report is describing intent, not the answer", len(gatherable(t)), rep.OfferedInterfaces)
+			"the report is describing intent, not the answer", len(gatherableIfaces(t)), rep.OfferedInterfaces)
 	}
 }
 
@@ -141,7 +144,7 @@ func TestAnUnscopedHubReportsThatItIsUnconfined(t *testing.T) {
 // fabrication on a broken one — which is exactly the class of green-looking lie
 // the §6.7 review pass caught twice.
 func TestTheScopeReportMeasuresTheAnswerAndNotTheIntent(t *testing.T) {
-	ifaces := gatherable(t)
+	ifaces := gatherableIfaces(t)
 	if len(ifaces) == 0 {
 		t.Skip("no gatherable interface on this host")
 	}
@@ -214,7 +217,7 @@ func TestAMissingPatronInterfaceIsRefusedRatherThanAnsweredEmpty(t *testing.T) {
 // apply to the NEXT answer without rebuilding the peer API — otherwise the
 // appliance would have to be restarted to stop advertising the operator's VPN.
 func TestAScopePushedAfterStartupAppliesToTheNextAnswer(t *testing.T) {
-	ifaces := gatherable(t)
+	ifaces := gatherableIfaces(t)
 	if len(ifaces) < 2 {
 		t.Skip("this host has fewer than two gatherable interfaces: nothing to narrow")
 	}
@@ -236,7 +239,7 @@ func TestAScopePushedAfterStartupAppliesToTheNextAnswer(t *testing.T) {
 // Scoping added a log line, so it gets the same check the rest of the package
 // has: the interface NAME is operational fact, an address is not.
 func TestScopingLogsTheInterfaceAndNeverAnAddress(t *testing.T) {
-	ifaces := gatherable(t)
+	ifaces := gatherableIfaces(t)
 	if len(ifaces) == 0 {
 		t.Skip("no gatherable interface on this host")
 	}

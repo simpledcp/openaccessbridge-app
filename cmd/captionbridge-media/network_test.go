@@ -114,12 +114,54 @@ func TestAPatronInterfaceCanBeCorrectedWithoutARestart(t *testing.T) {
 
 // §9.4: the media process must not log addresses. The refusal path names the
 // interface (operational fact) and the reason class, and that is all.
+//
+// Both halves are asserted. An earlier version of this test checked only that
+// SOMETHING was logged, which is the weaker half of its own name — it would have
+// passed with every local address in the line.
 func TestARefusedScopeLogsTheInterfaceNotAnAddress(t *testing.T) {
 	logs := &syncBuffer{}
 	m := newLoggedManager(t, logs)
+	iface := firstRoutableInterface(t)
+
+	// A successful scope first, so there are real addresses in play that COULD
+	// have leaked, then the refusal this test is about.
+	pushScope(t, m, iface)
 	pushScope(t, m, "cb-not-an-interface0")
 	out := logs.String()
+
 	if !strings.Contains(out, "webrtc_patron_scope_refused") {
 		t.Fatalf("a refused patron interface was not logged:\n%s", out)
 	}
+	if !strings.Contains(out, "cb-not-an-interface0") {
+		t.Fatalf("the log does not name the interface that was refused:\n%s", out)
+	}
+	// The second half: no address of this host may appear anywhere in the log.
+	for _, addr := range localAddrs(t) {
+		if strings.Contains(out, addr) {
+			t.Fatalf("the local address %s reached the log:\n%s", addr, out)
+		}
+	}
+}
+
+// localAddrs is every address this host holds, so the assertion is about real
+// values rather than a pattern that might not match.
+func localAddrs(t *testing.T) []string {
+	t.Helper()
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				out = append(out, ipnet.IP.String())
+			}
+		}
+	}
+	return out
 }

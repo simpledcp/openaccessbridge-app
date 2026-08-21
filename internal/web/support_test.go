@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/simpledcp/captionbridge/internal/config"
 
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
 	"github.com/simpledcp/captionbridge/internal/model"
@@ -29,6 +33,48 @@ func (m *memTrail) RecordSupportClose(id string, _ model.SupportSessionState, _ 
 }
 
 func (m *memTrail) OpenSupportSessions() ([]model.SupportSession, error) { return nil, nil }
+
+// newTestStore is a real config store: these tests are about the write→read
+// path, so a stub would test nothing.
+func newTestStore(t *testing.T) *config.SQLiteStore {
+	t.Helper()
+	store, err := config.OpenSQLite(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+// supportServerWithStore wires the manager to the SAME store the admin handler
+// writes to, so the endpoint an operator configures is the one a session uses.
+func supportServerWithStore(t *testing.T, store *config.SQLiteStore) (*Server, *support.Manager) {
+	t.Helper()
+	trail := &memTrail{}
+	mgr := support.New(support.Options{
+		Store: trail,
+		Endpoint: func() support.Endpoint {
+			host, _, _ := store.GetSetting(config.SettingSupportEndpointHost)
+			iface, _, _ := store.GetSetting(config.SettingSupportEgressIface)
+			portStr, _, _ := store.GetSetting(config.SettingSupportEndpointPort)
+			port, _ := strconv.Atoi(strings.TrimSpace(portStr))
+			return support.Endpoint{
+				Iface: strings.TrimSpace(iface), Host: strings.TrimSpace(host), Port: port,
+			}
+		},
+	})
+	s, err := NewServer(Config{
+		Profile: model.ProfilePatronFacing, PatronBind: "192.168.44.1:8080",
+		AdminBind: "127.0.0.1:0", Auditorium: "Auditorium 3", DefaultLanguage: "en",
+	}, Deps{
+		Hub: fanout.NewHub(fanout.Options{}), Support: mgr, Store: store,
+		SupportTrail: func(int) ([]model.SupportSession, error) { return trail.opened, nil },
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	return s, mgr
+}
 
 func supportServer(t *testing.T, ep support.Endpoint) (*Server, *memTrail) {
 	t.Helper()
@@ -194,5 +240,45 @@ func TestWithNoManagerTheSurfaceSaysUnavailable(t *testing.T) {
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/admin/support", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("got %d, want 503", rec.Code)
+	}
+}
+
+// The endpoint needs a writer an operator can reach. Without one, support mode
+// could be opened only on an appliance whose database somebody had edited by
+// hand — which is how this was found: the live check had to write the settings
+// with sqlite3.
+func TestTheSupportEndpointCanBeConfiguredThroughTheAdminAPI(t *testing.T) {
+	store := newTestStore(t)
+	s, mgr := supportServerWithStore(t, store)
+
+	// Nothing configured: opening must be refused.
+	if rec := supportPost(t, s, "/api/admin/support", `{"reason":"before"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("opening with no endpoint returned %d", rec.Code)
+	}
+
+	rec := supportPost(t, s, "/api/admin/support/endpoint",
+		`{"host":"203.0.113.10","port":443,"iface":"eth0"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("configuring the endpoint: %d %s", rec.Code, rec.Body.String())
+	}
+	// And now a session opens, through the same manager the appliance uses.
+	if _, err := mgr.Open(support.OpenRequest{Reason: "after", AdminUser: "tech"}); err != nil {
+		t.Fatalf("a configured endpoint still refused a session: %v", err)
+	}
+}
+
+// A hostname is refused where an IP is required: resolving one needs DNS from an
+// appliance whose §9.1 checks exist to catch DNS leaks, and a name that resolves
+// differently tomorrow is a rule that quietly changes what it permits.
+func TestTheSupportEndpointRefusesAHostname(t *testing.T) {
+	s, _ := supportServerWithStore(t, newTestStore(t))
+	for _, body := range []string{
+		`{"host":"support.example.com","port":443,"iface":"eth0"}`,
+		`{"host":"203.0.113.10","port":0,"iface":"eth0"}`,
+		`{"host":"203.0.113.10","port":443}`,
+	} {
+		if rec := supportPost(t, s, "/api/admin/support/endpoint", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s was accepted (%d)", body, rec.Code)
+		}
 	}
 }

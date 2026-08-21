@@ -47,6 +47,7 @@ jobs:
 
       - name: Build all binaries
         run: |
-          for b in captionbridge-core captionbridge-media captionbridge-firewall acsp-simulator; do
-            go build -o "bin/$b" "./cmd/$b"
-          done
+          # Build through make so the §9.4 build number is stamped in. A binary
+          # built without it refuses to judge an update rather than guessing
+          # which way to fail (D32, buildinfo.BuildNumber).
+          make build

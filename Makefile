@@ -9,7 +9,13 @@ export GOTOOLCHAIN
 
 BIN := bin
 BINARIES := captionbridge-core captionbridge-media captionbridge-firewall acsp-simulator
-LDFLAGS := -X github.com/simpledcp/captionbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
+# BUILD_NUMBER is the monotonic ordering the §9.4 update path compares (D32). The
+# commit count is monotonic on this repo's linear history; a release process with
+# its own numbering overrides it. A binary built WITHOUT it refuses to judge an
+# update rather than guessing — see buildinfo.BuildNumber.
+BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
+LDFLAGS := -X github.com/simpledcp/captionbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev) \
+           -X github.com/simpledcp/captionbridge/internal/buildinfo.Build=$(BUILD_NUMBER)
 
 .PHONY: all build test vet race cover sim soak latency qr-verify clean tidy fmt check
 

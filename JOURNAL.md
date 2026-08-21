@@ -850,3 +850,76 @@ Five behaviours were mutation-confirmed in total: byte-exact verification (after
 the fix above); trusting a key the appliance does not hold; the downgrade and
 replay refusals; the old image confirming the new one's health; and "verified"
 being reported as "installable".
+
+## The review pass on those five slices: 17 confirmed, and one lesson repeated three times
+
+Five reviewers, one per slice, each finding then independently refuted by a
+skeptic told to default to "not a defect". 19 findings, 17 confirmed, 2 refuted.
+The refutations were as useful as the confirmations: a missing audio row IS
+honestly a blocking "not checked" (the reviewer wanted it non-blocking), and the
+missing `Cache-Control` on `/api/admin/session` really is cosmetic, because the
+QR route that serves the same token already forbids caching.
+
+**Three of the confirmed defects were the same defect.** Support mode's endpoint
+had three settings with a reader and no writer, so no operator could open a
+session on an appliance they had actually set up — I proved that myself during
+the live check and did not notice, because I reached for `sqlite3` to write the
+settings by hand and treated that as a test-harness detail rather than as the
+finding it was. The update path's build number was never stamped by any build, so
+`Current.Build` was always 0 and the downgrade refusal was dead code. And
+`Current.Tier` was hardcoded empty, so the tier gate could never fire and a
+hardened-tier bundle verified anywhere.
+
+All three are this repo's own rule — "a capability with no production caller
+protects nobody" — pointed at CONFIGURATION rather than at code, which is where I
+had not thought to point it. `internal/invariants` now asserts that the support
+endpoint settings have a writer and a route, and that the Makefile and CI stamp
+the build number.
+
+Fixing the build number surfaced a second decision. A binary that does not know
+its own build cannot tell an upgrade from a replay, and both defaults are wrong
+in the way this repo cares about: treating it as 0 makes every bundle look newer
+(a downgrade to a version with a known fault installs silently), and treating it
+as enormous makes nothing install (and an operator who cannot verify is tempted
+to install unverified). It now REFUSES with that reason. The same applies to an
+unset hardware tier: a bundle that targets one is refused rather than accepted on
+a guess.
+
+**Three findings were tests that did not test their own names.**
+`TestTheRequestedCorrectionLevelIsTheOneEncoded` compared a struct field against
+the argument that set it — it passed with `formatBits()` stubbed to a constant,
+which would have announced the wrong error-correction level to every phone that
+scanned. It now reads the format information out of the rendered matrix, where a
+scanner reads it, against literals rather than against the function under test.
+The mask-selection logic could be deleted entirely and everything stayed green,
+because the only test of the choice compared the encoder against its own scoring
+function; the penalty rules are now checked against hand-built lines with known
+scores, and the selection against a mask it rejected. And the media
+scope-refusal log test asserted neither half of its name — it now requires the
+interface to appear and every local address to be absent.
+
+**The sharpest single finding.** `PatronScope.usable()` accepted any interface
+holding a non-loopback address — but RFC 8445 §5.1.1.1 forbids gathering host
+candidates for IPv6 link-local addresses, and pion enforces it. An interface that
+is UP with only an `fe80::` address (a patron NIC between `netplan apply` and its
+DHCP lease landing) passed the check and then gathered NOTHING, and the patron
+was handed an SDP with no host candidate — the exact artifact the whole
+`ErrPatronInterfaceUnusable` machinery exists to prevent. Worse, every reporting
+layer then painted it green: the warning fired only on "more than one interface",
+so zero was as quiet as one; the §11.5 item read the intent flag rather than the
+measurement it was labelled `SourceMeasured` from; the dashboard row computed
+STATE_OK. The skeptic demonstrated it against a real interface on this host
+rather than a fixture.
+
+Three fixes: `usable()` rejects link-local-only interfaces, `Answer` refuses an
+SDP that carries no host candidate instead of shipping it, and all three
+reporting layers now COMPARE the measurement to the scope in force — which is
+what `model.ICEScopeReport`'s own documentation said the pair existed to do, and
+what the first implementation did not do.
+
+Two smaller ones worth naming: a support session whose endpoint was reconfigured
+under it moved the firewall rule while the trail, the log and the dashboard went
+on naming the old address — it now ends the session instead, because moving the
+window is a new decision that deserves its own audit row. And `SetPatronScope`
+logged a state transition on every one of core's fifteen-second pushes, filling
+the log a review reads with events that did not happen.

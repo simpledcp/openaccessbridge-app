@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/simpledcp/captionbridge/internal/buildinfo"
 	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/update"
@@ -76,7 +77,7 @@ func updateSlotStatus(store *config.SQLiteStore) update.SlotStatus {
 }
 
 // newUpdateService builds the service the admin surface uses.
-func newUpdateService(store *config.SQLiteStore, log *logging.Logger, buildNum int64) *update.Service {
+func newUpdateService(store *config.SQLiteStore, log *logging.Logger) *update.Service {
 	mediaDir, _, _ := store.GetSetting(config.SettingUpdateMediaDir)
 	return update.NewService(update.Options{
 		Trust:    updateTrustStore(store, log),
@@ -84,7 +85,13 @@ func newUpdateService(store *config.SQLiteStore, log *logging.Logger, buildNum i
 		// No Platform: this image has no A/B slots, and UnsupportedPlatform
 		// refuses rather than pretending (BLOCKERS B8).
 		Current: func() update.Current {
-			return update.Current{Build: buildNum, Tier: ""}
+			// Read on every call so an operator correcting the tier does not need
+			// a restart. Build and BuildKnown are carried separately: an appliance
+			// that does not know its own build refuses to judge an update rather
+			// than treating the absence as "everything is newer" (D32).
+			tier, _, _ := store.GetSetting(config.SettingApplianceTier)
+			build, known := buildinfo.BuildNumber()
+			return update.Current{Build: build, BuildKnown: known, Tier: strings.TrimSpace(tier)}
 		},
 		Status: func() update.SlotStatus { return updateSlotStatus(store) },
 	})

@@ -76,7 +76,7 @@ func parse(t *testing.T, raw []byte) *Bundle {
 	return b
 }
 
-var installed = Current{Build: 1000, Tier: ""}
+var installed = Current{Build: 1000, BuildKnown: true, Tier: ""}
 
 // The happy path, so every refusal below is known to be refusing something that
 // would otherwise have worked.
@@ -223,11 +223,11 @@ func TestADowngradeIsRefusedUnlessItIsAsked(t *testing.T) {
 	s := newSigner(t, "vendor-2026")
 	raw := s.bundle(t, []byte("older image"), func(m *Manifest) { m.Build = 900 })
 
-	_, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1000})
+	_, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1000, BuildKnown: true})
 	if !errors.Is(err, ErrNotAnUpgrade) {
 		t.Fatalf("an older build installed itself silently: %v", err)
 	}
-	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1000, AllowDowngrade: true}); err != nil {
+	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1000, BuildKnown: true, AllowDowngrade: true}); err != nil {
 		t.Fatalf("a deliberate downgrade was refused: %v", err)
 	}
 }
@@ -237,7 +237,7 @@ func TestADowngradeIsRefusedUnlessItIsAsked(t *testing.T) {
 func TestReinstallingTheSameBuildIsRefused(t *testing.T) {
 	s := newSigner(t, "vendor-2026")
 	raw := s.bundle(t, []byte("image"), func(m *Manifest) { m.Build = 1000 })
-	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1000}); !errors.Is(err, ErrNotAnUpgrade) {
+	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1000, BuildKnown: true}); !errors.Is(err, ErrNotAnUpgrade) {
 		t.Fatalf("the installed build re-installed itself: %v", err)
 	}
 }
@@ -321,12 +321,12 @@ func TestATrustStoreRefusesDuplicateKeyIDs(t *testing.T) {
 func TestABundleForAnotherTierIsRefused(t *testing.T) {
 	s := newSigner(t, "vendor-2026")
 	raw := s.bundle(t, []byte("image"), func(m *Manifest) { m.Tier = "hardened" })
-	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1, Tier: "standard"}); !errors.Is(err, ErrUnsupportedTier) {
+	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1, BuildKnown: true, Tier: "standard"}); !errors.Is(err, ErrUnsupportedTier) {
 		t.Fatalf("got %v, want ErrUnsupportedTier", err)
 	}
 	// And a bundle with no tier restriction installs anywhere.
 	any := s.bundle(t, []byte("image"), nil)
-	if _, err := Verify(parse(t, any), trust(t, s), Current{Build: 1, Tier: "standard"}); err != nil {
+	if _, err := Verify(parse(t, any), trust(t, s), Current{Build: 1, BuildKnown: true, Tier: "standard"}); err != nil {
 		t.Fatalf("an untargeted bundle was refused: %v", err)
 	}
 }
@@ -343,4 +343,37 @@ func mustSigBytes(t *testing.T, raw []byte) []byte {
 	t.Helper()
 	b := parse(t, raw)
 	return b.signature
+}
+
+// An appliance that does not know its own build cannot tell an upgrade from a
+// replay, and must REFUSE rather than pick a direction.
+//
+// The two directions are both wrong in the way this repo cares about. Treating
+// an unknown build as zero makes every bundle look newer, so a downgrade to a
+// version with a known fault installs silently. Treating it as enormous makes
+// every bundle look older, so nothing installs and an operator who cannot verify
+// is tempted to install unverified. Both are a verdict derived from an absence.
+func TestAnApplianceThatDoesNotKnowItsBuildRefusesToJudge(t *testing.T) {
+	s := newSigner(t, "vendor-2026")
+	raw := s.bundle(t, []byte("image"), nil)
+
+	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 0, BuildKnown: false}); !errors.Is(err, ErrUnknownBuild) {
+		t.Fatalf("an appliance with no build number accepted an update: %v", err)
+	}
+	// An operator who explicitly asks can still install: that is a decision
+	// somebody made, which is the whole distinction.
+	if _, err := Verify(parse(t, raw), trust(t, s), Current{BuildKnown: false, AllowDowngrade: true}); err != nil {
+		t.Fatalf("a deliberate install on an unknown build was refused: %v", err)
+	}
+}
+
+// A bundle that targets a hardware tier must not install on an appliance that
+// has not been told which tier it is. Falling through to accept would make the
+// tier field decoration.
+func TestATargetedBundleIsRefusedWhenTheTierIsUnknown(t *testing.T) {
+	s := newSigner(t, "vendor-2026")
+	raw := s.bundle(t, []byte("image"), func(m *Manifest) { m.Tier = "hardened" })
+	if _, err := Verify(parse(t, raw), trust(t, s), Current{Build: 1, BuildKnown: true}); !errors.Is(err, ErrUnknownTier) {
+		t.Fatalf("a hardened-tier bundle installed on an appliance of unknown tier: %v", err)
+	}
 }

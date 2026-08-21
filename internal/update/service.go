@@ -82,6 +82,17 @@ type Report struct {
 	MediaDir string `json:"media_dir,omitempty"`
 	// Bundles are the candidate files on that media.
 	Bundles []string `json:"bundles,omitempty"`
+	// MediaReadable says whether the media directory could be read at all. An
+	// unplugged stick, a bad mount or a permissions problem is NOT the same fact
+	// as "there are no bundles here", and an operator who has just inserted media
+	// needs to be able to tell them apart.
+	//
+	// It is false when no directory is CONFIGURED too — a third state — so
+	// MediaError always says which of the three this is rather than leaving a
+	// bare false to be read as "the media is broken".
+	MediaReadable bool `json:"media_readable"`
+	// MediaError is why it could not be read, or that none is configured.
+	MediaError string `json:"media_error,omitempty"`
 	// Slots is the A/B state.
 	Slots SlotStatus `json:"slots"`
 	// ABSupported: this machine can actually stage an image into a second slot
@@ -106,8 +117,14 @@ func (s *Service) Status() Report {
 			"installed, and nothing can be rolled back. Installing updates needs an image built with " +
 			"two slots and a bootloader that honours them (BLOCKERS B8)."
 	}
-	if s.mediaDir != "" {
-		if entries, err := os.ReadDir(s.mediaDir); err == nil {
+	if s.mediaDir == "" {
+		rep.MediaError = "no update media directory is configured, so no bundle can be read"
+	} else {
+		entries, err := os.ReadDir(s.mediaDir)
+		if err != nil {
+			rep.MediaError = err.Error()
+		} else {
+			rep.MediaReadable = true
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(e.Name(), ".cbupd") {
 					rep.Bundles = append(rep.Bundles, e.Name())

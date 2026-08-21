@@ -102,15 +102,34 @@ func (s PatronScope) usable() error {
 		return fmt.Errorf("%w: %q addresses unreadable: %v", ErrPatronInterfaceUnusable, s.name(), err)
 	}
 	for _, a := range addrs {
-		ip := addrIP(a)
-		// Loopback and unspecified addresses are not a patron path, and pion
-		// excludes loopback from gathering anyway — an interface holding nothing
-		// else is an interface no phone can reach.
-		if ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+		if gatherable(addrIP(a)) {
 			return nil
 		}
 	}
 	return fmt.Errorf("%w: %q holds no address a patron could reach", ErrPatronInterfaceUnusable, s.name())
+}
+
+// gatherable reports whether an address could become a host candidate.
+//
+// The link-local exclusion is the subtle one, and it was found by an adversarial
+// review rather than by reasoning. RFC 8445 §5.1.1.1 forbids gathering host
+// candidates for IPv6 link-local addresses and pion enforces it, so an interface
+// that is UP and holds ONLY an `fe80::` address — precisely the state of a patron
+// NIC between `netplan apply` and its DHCP lease landing — would satisfy a naive
+// "has a non-loopback address" test, pass the usability check, and then gather
+// nothing at all. The patron would be handed an answer with no host candidate in
+// it, which is the exact artifact this whole check exists to prevent.
+//
+// IPv4 link-local (169.254/16) is excluded for the same practical reason: it is
+// what a NIC has when DHCP has failed, and it is not a patron path.
+func gatherable(ip net.IP) bool {
+	if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+		return false
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+	return true
 }
 
 func addrIP(a net.Addr) net.IP {
@@ -122,6 +141,29 @@ func addrIP(a net.Addr) net.IP {
 	default:
 		return nil
 	}
+}
+
+// interfaceIndex maps every local address to the interface holding it, in ONE
+// pass. recordOffer used to call interfaceOfAddr per candidate, which walked the
+// whole interface table each time — inside the patron's join path.
+func interfaceIndex() map[string]string {
+	out := map[string]string{}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ip := addrIP(a); ip != nil {
+				out[ip.String()] = iface.Name
+			}
+		}
+	}
+	return out
 }
 
 // interfaceOfAddr maps a candidate address back to the interface holding it, so

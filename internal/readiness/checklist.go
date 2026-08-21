@@ -58,7 +58,7 @@ func BuildChecklist(st model.SystemReadiness, facts ChecklistFacts) model.PreSho
 	checks := []model.PreShowCheck{}
 	checks = append(checks, securityChecks(st)...)
 	checks = append(checks, captionChecks(st)...)
-	checks = append(checks, audioChecks(st)...)
+	checks = append(checks, audioChecks(st, DefaultLatencyBudgets())...)
 	checks = append(checks, patronChecks(st, facts, now())...)
 	checks = append(checks, staffChecks(st)...)
 
@@ -219,7 +219,7 @@ func captionChecks(st model.SystemReadiness) []model.PreShowCheck {
 	return []model.PreShowCheck{connected, room, assets, lang}
 }
 
-func audioChecks(st model.SystemReadiness) []model.PreShowCheck {
+func audioChecks(st model.SystemReadiness, budgets LatencyBudgets) []model.PreShowCheck {
 	var out []model.PreShowCheck
 	wanted := []struct {
 		stream model.StreamType
@@ -283,10 +283,22 @@ func audioChecks(st model.SystemReadiness) []model.PreShowCheck {
 			"picture, that is a real report and not a misconfiguration — log it and escalate; it is the " +
 			"measurement §11.4 exists to take.",
 	}
+	// If a real end-to-end figure ever exists, judge it against the BUDGET this
+	// item's title names. The first version passed anything above zero, so a
+	// measured 4-second latency would have printed PASS beside the words "within
+	// the §6.7 budget" — a check that reads as the opposite of what it did.
 	for _, s := range st.AudioStreams {
-		if s.LatencyMeasured {
-			lat.State = passFail(s.LatencyMS > 0)
-			lat.Detail = fmt.Sprintf("measured %d ms", s.LatencyMS)
+		if !s.LatencyMeasured {
+			continue
+		}
+		budget := budgets.VINMaxMS
+		if s.StreamType == model.StreamHI {
+			budget = budgets.HIMaxMS
+		}
+		lat.State = passFail(s.LatencyMS > 0 && s.LatencyMS <= budget)
+		lat.Detail = fmt.Sprintf("%s measured at %d ms against a %d ms budget", s.StreamType, s.LatencyMS, budget)
+		if lat.State == model.CheckFail {
+			lat.Blocking = false // a real measurement over budget is a venue decision, not a refusal to open
 			break
 		}
 	}
@@ -325,15 +337,40 @@ func patronChecks(st model.SystemReadiness, facts ChecklistFacts, now time.Time)
 			"trying to reach this appliance on networks they cannot route to, which is slowest exactly " +
 			"when the whole house joins at once.",
 	}
+	// Read from the MEASUREMENT, not from the intent flag. This item is labelled
+	// SourceMeasured, and an earlier version passed on InForce alone — which
+	// meant it printed PASS for an appliance that was confined on paper and
+	// offering something else in fact, and for one whose last patron was offered
+	// nothing at all.
+	sc := st.ICEScope
 	switch {
-	case st.ICEScope.Unusable != "":
-		scope.State, scope.Detail = model.CheckFail, "the configured patron interface cannot be used: "+st.ICEScope.Unusable
+	case sc.Unusable != "":
+		scope.State, scope.Detail = model.CheckFail, "the configured patron interface cannot be used: "+sc.Unusable
 		scope.Blocking = true
-	case st.ICEScope.InForce:
-		scope.State, scope.Detail = model.CheckPass, "gathering is confined to "+st.ICEScope.Interface
+	case !sc.Answered:
+		scope.State = model.CheckNotRun
+		if sc.InForce {
+			scope.Detail = "gathering is set to " + sc.Interface +
+				", but no patron has joined yet, so nothing has been offered to measure"
+		} else {
+			scope.Detail = "no patron interface is configured, and no patron has joined yet"
+		}
+	case sc.OfferedCandidates == 0:
+		scope.State = model.CheckFail
+		scope.Detail = "the last patron was offered no way to connect at all"
+		scope.Blocking = true
+	case sc.InForce && len(sc.OfferedInterfaces) == 1 && sc.OfferedInterfaces[0] == sc.Interface:
+		scope.State = model.CheckPass
+		scope.Detail = "the last patron was offered " + sc.Interface + " only"
+	case sc.InForce:
+		scope.State = model.CheckFail
+		scope.Detail = "configured for " + sc.Interface + " but the last patron was offered " +
+			strings.Join(sc.OfferedInterfaces, ", ")
+		scope.Blocking = true
 	default:
 		scope.State = model.CheckNotRun
-		scope.Detail = "no patron interface is configured, so audio is offered on every network this appliance has"
+		scope.Detail = "no patron interface is configured; the last patron was offered " +
+			strings.Join(sc.OfferedInterfaces, ", ")
 	}
 
 	return []model.PreShowCheck{session, scope}

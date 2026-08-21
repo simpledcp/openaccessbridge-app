@@ -26,8 +26,8 @@ const QuietZone = 4
 
 // MaxScale bounds the module size so a malformed request cannot ask the
 // appliance to allocate an enormous image. At the top of the range a version 40
-// symbol is 6425 px square, which is already far past any screen or printer a
-// booth will use.
+// symbol (177 modules plus 4 of quiet zone on each side, so 185) is 5920 px
+// square — already far past any screen or printer a booth will use.
 const MaxScale = 32
 
 // Modules returns the width of the rendered symbol in modules, quiet zone

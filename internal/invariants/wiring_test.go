@@ -260,6 +260,52 @@ func TestInvariant_TheUpdateServiceHasAProductionCaller(t *testing.T) {
 	}
 }
 
+// TestInvariant_EverySettingWithAReaderHasAWriter: the sharpest defect an
+// adversarial review found in the last pass was three features that could not be
+// reached on a real appliance — support mode's endpoint had a reader and no
+// writer, so no operator could ever open a session, and the update path's build
+// number was never stamped by any build, so its downgrade refusal was dead code.
+//
+// Both are the house's own rule ("a capability with no production caller
+// protects nobody") pointed at configuration rather than at code. A setting the
+// appliance READS and nothing WRITES is a feature that works only for whoever
+// edits the database by hand.
+func TestInvariant_EverySettingWithAReaderHasAWriter(t *testing.T) {
+	root := repoRoot(t)
+	// The §9.4 support endpoint: three settings, one operator-facing writer.
+	web := readFile(t, filepath.Join(root, "internal", "web", "support.go"))
+	for _, setting := range []string{
+		"config.SettingSupportEndpointHost",
+		"config.SettingSupportEndpointPort",
+		"config.SettingSupportEgressIface",
+	} {
+		if !strings.Contains(web, setting) {
+			t.Errorf("%s has no production writer: support mode could not be opened on an appliance "+
+				"an operator had actually set up", setting)
+		}
+	}
+	if !strings.Contains(web, `"/api/admin/support/endpoint"`) &&
+		!strings.Contains(readFile(t, filepath.Join(root, "internal", "web", "session_admin.go")),
+			`"/api/admin/support/endpoint"`) {
+		t.Error("there is no route to configure the support endpoint")
+	}
+}
+
+// TestInvariant_TheBuildNumberIsStamped: §9.4's update path orders upgrades by a
+// monotonic build number, and a binary that does not carry one refuses to judge
+// an update at all. That refusal is correct — and it means an unstamped build
+// ships an update path that cannot be used.
+func TestInvariant_TheBuildNumberIsStamped(t *testing.T) {
+	mk := readFile(t, filepath.Join(repoRoot(t), "Makefile"))
+	if !strings.Contains(mk, "buildinfo.Build=") {
+		t.Error("the Makefile does not stamp the build number: every binary it produces refuses to judge an update (D32)")
+	}
+	ci := readFile(t, filepath.Join(repoRoot(t), ".github", "workflows", "ci.yml"))
+	if !strings.Contains(ci, "make build") {
+		t.Error("CI builds binaries without the Makefile's ldflags, so its artifacts carry no build number")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

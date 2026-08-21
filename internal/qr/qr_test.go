@@ -236,23 +236,141 @@ func TestAnOversizedPayloadIsRefusedRatherThanTruncated(t *testing.T) {
 	}
 }
 
-// The correction level a caller asks for is the level the symbol carries. The
-// level is encoded in the format information, so a mix-up here produces a symbol
-// that scans and reports the wrong redundancy — invisible without a decoder.
-func TestTheRequestedCorrectionLevelIsTheOneEncoded(t *testing.T) {
-	vf := loadVectors(t)
-	for _, v := range vf.Cases {
-		sym, err := Encode([]byte(v.Data), parseECC(t, v.ECC))
+// The correction level a caller asks for is the level the symbol carries.
+//
+// This reads the FORMAT INFORMATION out of the rendered matrix — where a scanner
+// reads it — rather than the ECC field on the returned struct. The struct field
+// is a copy of the argument, so checking it passed with formatBits() stubbed to a
+// constant: the symbol would have announced the wrong redundancy to every phone
+// that scanned it, and the test would have been green.
+func TestTheRequestedCorrectionLevelIsTheOneEncodedInTheSymbol(t *testing.T) {
+	// The two-bit ECC field as it appears in the format information. Written out
+	// here as literals rather than by calling formatBits(), so this test cannot
+	// agree with a broken implementation by construction.
+	want := map[ECC]int{ECCLow: 0b01, ECCMedium: 0b00, ECCQuartile: 0b11, ECCHigh: 0b10}
+	for ecc, bits := range want {
+		sym, err := Encode([]byte("http://192.168.44.1:8080/accessibility"), ecc)
 		if err != nil {
-			t.Fatalf("%s: %v", v.Name, err)
+			t.Fatalf("%s: %v", ecc, err)
 		}
-		if sym.ECC != parseECC(t, v.ECC) {
-			t.Fatalf("%s: asked for %s, symbol carries %s", v.Name, v.ECC, sym.ECC)
+		if got := readFormatECC(sym); got != bits {
+			t.Errorf("%s: the symbol announces ECC bits %02b, want %02b", ecc, got, bits)
+		}
+		if got := readFormatMask(sym); got != sym.Mask {
+			t.Errorf("%s: the symbol announces mask %d, the encoder chose %d", ecc, got, sym.Mask)
 		}
 	}
 }
 
-// Encoding is deterministic: the same payload must produce the same symbol every
+// readFormatECC and readFormatMask decode the 15-bit format field out of a
+// rendered symbol, the way a scanner does: undo the 0x5412 mask, then take the
+// five data bits from the top.
+func formatField(sym *Symbol) int {
+	field := 0
+	// Copy 1, beside the top-left finder: field bit i for i in 9..14 sits at
+	// (14-i, 8); bits 0..5 at (8, i).
+	for i := 0; i <= 5; i++ {
+		if sym.Dark(8, i) {
+			field |= 1 << i
+		}
+	}
+	if sym.Dark(8, 7) {
+		field |= 1 << 6
+	}
+	if sym.Dark(8, 8) {
+		field |= 1 << 7
+	}
+	if sym.Dark(7, 8) {
+		field |= 1 << 8
+	}
+	for i := 9; i < 15; i++ {
+		if sym.Dark(14-i, 8) {
+			field |= 1 << i
+		}
+	}
+	return field ^ 0x5412
+}
+
+func readFormatECC(sym *Symbol) int  { return (formatField(sym) >> 13) & 0b11 }
+func readFormatMask(sym *Symbol) int { return (formatField(sym) >> 10) & 0b111 }
+
+// The mask-selection rules must actually be doing something. Pinning eight
+// reference matrices by forced mask left the PENALTY logic untested: deleting it
+// entirely and always choosing mask 0 kept every other test green, because the
+// only test of the choice compared the encoder against its own scoring function.
+//
+// So this checks the rules against symbols with KNOWN properties rather than
+// against the implementation: the four penalties are exercised on hand-built
+// lines, and the selection is required to reject a mask that scores worse.
+func TestThePenaltyRulesScoreTheThingsTheStandardSaysTheyDo(t *testing.T) {
+	// Rule 1: a run of five costs 3, and each module past five costs one more.
+	if got := runPenalty(line("11111")); got != 3 {
+		t.Errorf("a run of five scored %d, want 3", got)
+	}
+	if got := runPenalty(line("1111111")); got != 5 {
+		t.Errorf("a run of seven scored %d, want 5", got)
+	}
+	if got := runPenalty(line("1111")); got != 0 {
+		t.Errorf("a run of four scored %d, want 0", got)
+	}
+	// Rule 3: the 1:1:3:1:1 finder lookalike with four light modules after it.
+	if got := countFinderLike(line("10111010000")); got != 1 {
+		t.Errorf("the finder pattern with a trailing light margin scored %d, want 1", got)
+	}
+	if got := countFinderLike(line("00001011101")); got != 1 {
+		t.Errorf("the finder pattern with a leading light margin scored %d, want 1", got)
+	}
+	// Without the four-module margin it is not the dangerous pattern.
+	if got := countFinderLike(line("10111010100")); got != 0 {
+		t.Errorf("a 1:1:3:1:1 without its light margin scored %d, want 0", got)
+	}
+}
+
+// And the selection must genuinely prefer the lower score: forcing the mask the
+// encoder rejected has to produce a symbol its own rules score worse.
+func TestTheChosenMaskScoresBetterThanTheOnesRejected(t *testing.T) {
+	vf := loadVectors(t)
+	improved := 0
+	for _, v := range vf.Cases {
+		ecc := parseECC(t, v.ECC)
+		chosen, err := Encode([]byte(v.Data), ecc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		chosenScore := chosen.penalty()
+		for m := 0; m < 8; m++ {
+			if m == chosen.Mask {
+				continue
+			}
+			other, err := encodeWithMask([]byte(v.Data), ecc, chosen.Version, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if other.penalty() < chosenScore {
+				t.Fatalf("%s: chose mask %d (%d) but mask %d scores %d",
+					v.Name, chosen.Mask, chosenScore, m, other.penalty())
+			}
+			if other.penalty() > chosenScore {
+				improved++
+			}
+		}
+	}
+	// If the scoring were inert every mask would tie, and the assertions above
+	// would hold vacuously.
+	if improved == 0 {
+		t.Fatal("every mask scored identically on every fixture: the penalty rules are not discriminating")
+	}
+}
+
+func line(bits string) []bool {
+	out := make([]bool, len(bits))
+	for i, c := range bits {
+		out[i] = c == '1'
+	}
+	return out
+}
+
+// Encoding is deterministic// Encoding is deterministic: the same payload must produce the same symbol every
 // time. A per-show QR that changed between the admin page and the printed card
 // would be a support call nobody could reproduce.
 func TestEncodingIsDeterministic(t *testing.T) {

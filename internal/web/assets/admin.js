@@ -509,10 +509,22 @@
         "no patron has joined yet, so nothing has been offered to measure");
     }
     var offered = sc.offered_interfaces || [];
-    var state = offered.length > 1 ? STATE_WARN : (sc.in_force ? STATE_OK : STATE_WARN);
+    /* The comparison, not the count. An answer that carried NOTHING, and one
+     * that carried a different interface from the configured one, are both
+     * plainly wrong and both used to read as green because they are "fewer than
+     * two". */
+    if (!sc.offered_candidates) {
+      return row("Patron audio candidates", "none offered", STATE_BAD,
+        "the last patron was answered with no way to connect at all — their phone cannot tell " +
+        "that apart from a dead network");
+    }
+    if (sc.in_force && (offered.length !== 1 || offered[0] !== sc.interface)) {
+      return row("Patron audio candidates", "NOT what is configured", STATE_BAD,
+        "set to " + sc.interface + " but the last patron was offered " + offered.join(", "));
+    }
+    var state = offered.length > 1 ? STATE_WARN : STATE_OK;
     return row("Patron audio candidates", confined, state,
-      "last patron was offered " + sc.offered_candidates + " candidate(s) on " +
-      (offered.length ? offered.join(", ") : "no interface this appliance recognises"));
+      "last patron was offered " + sc.offered_candidates + " candidate(s) on " + offered.join(", "));
   }
 
   function offOnRow(label, v, note) {
@@ -622,11 +634,16 @@
     if (!sess || !sess.active) {
       wrap.hidden = true;
       img.removeAttribute("src");
+      /* On a profile that requires no per-show token the patron page is open, so
+       * "patrons cannot join" would be simply false — and it is the sentence an
+       * operator would act on. */
+      var open = sess && !sess.per_show_token_required;
       dl(el("session-detail"), [
-        row("Show session", "none — patrons cannot join", STATE_WARN,
-          sess && !sess.per_show_token_required
-            ? "this profile does not require a per-show token, so the patron page is open without one"
-            : "start a show to issue a join code")
+        open
+          ? row("Show session", "none issued — the patron page is open without one", null,
+              "this deployment profile does not require a per-show token")
+          : row("Show session", "none — patrons cannot join", STATE_WARN,
+              "start a show to issue a join code")
       ]);
       note.textContent = "";
       return;
@@ -733,9 +750,14 @@
       row("Trusted signing keys", String(rep.trusted_keys || 0),
         (rep.trusted_keys || 0) > 0 ? null : STATE_WARN,
         (rep.trusted_keys || 0) > 0 ? "" : "no update bundle can be verified on this appliance"),
-      row("Update media", rep.media_dir || "not configured", rep.media_dir ? null : STATE_UNKNOWN),
-      row("Bundles found", rep.bundles ? String(rep.bundles.length) : "0", null,
-        (rep.bundles || []).join(", ")),
+      row("Update media", rep.media_dir || "not configured",
+        rep.media_dir ? (rep.media_readable ? null : STATE_BAD) : STATE_UNKNOWN,
+        rep.media_error || ""),
+      /* "cannot read the media" is not "there is nothing on it", and an operator
+       * who has just pushed a stick in needs to tell them apart. */
+      rep.media_readable
+        ? row("Bundles found", String((rep.bundles || []).length), null, (rep.bundles || []).join(", "))
+        : row("Bundles found", "not known", STATE_UNKNOWN, "the media could not be read"),
       row("A/B slots", rep.ab_supported ? "available" : "not on this appliance",
         rep.ab_supported ? STATE_OK : STATE_WARN)
     ];

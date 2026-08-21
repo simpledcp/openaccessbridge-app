@@ -62,6 +62,11 @@ const (
 	SettingUpdateTrustedKeys = "update_trusted_keys"
 	// SettingUpdateMediaDir is the mount point removable update media appears at.
 	SettingUpdateMediaDir = "update_media_dir"
+	// SettingApplianceTier is the §4.3 HARDWARE tier this appliance is —
+	// "standard" or "hardened" — which a §9.4 bundle may target. Empty means an
+	// operator has not said, and a bundle that targets a tier is then refused
+	// rather than installed on a guess.
+	SettingApplianceTier = "appliance_tier"
 	// SettingUpdateSlots holds the A/B state as JSON (update.SlotStatus). A
 	// settings key rather than a table: it is one small record with one writer.
 	SettingUpdateSlots = "update_slots"

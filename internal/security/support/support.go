@@ -183,6 +183,11 @@ func (m *Manager) Open(req OpenRequest) (model.SupportSession, error) {
 		m.mu.Unlock()
 		return model.SupportSession{}, ErrAlreadyOpen
 	}
+	// A session past its deadline that the timer has not serviced yet is FINISHED
+	// here rather than dropped. Overwriting m.current would leave the trail with a
+	// row that says "open" for a window that closed — and OpenSupportSessions,
+	// which startup uses to fail closed, would find it on every subsequent boot.
+	m.expireIfDueLocked()
 	sess := model.SupportSession{
 		ID:        newID(now),
 		State:     model.SupportOpen,
@@ -246,6 +251,18 @@ func (m *Manager) Close() error {
 func (m *Manager) Current() (model.SupportSession, bool) {
 	m.mu.Lock()
 	expired := m.expireIfDueLocked()
+	// A session whose endpoint has been reconfigured under it is ENDED, not
+	// quietly retargeted. The window an operator authorised was to one address;
+	// moving it is a new decision, and it should be made deliberately and get its
+	// own audit row.
+	if !expired && m.current != nil {
+		if ep := m.endpoint(); ep.String() != m.current.Endpoint {
+			m.log.Warn(logging.EvSupportSessionClosed,
+				logging.Field("phase", "endpoint_changed_under_session"))
+			m.finishLocked(model.SupportClosed, m.now())
+			expired = true
+		}
+	}
 	var sess model.SupportSession
 	ok := false
 	if m.current != nil {
@@ -266,11 +283,15 @@ func (m *Manager) Egress() *firewall.SupportEgress {
 		return nil
 	}
 	ep := m.endpoint()
-	if !ep.Configured() {
-		// The endpoint was reconfigured out from under an open session. Permit
-		// nothing rather than the old address: the rule must describe the
-		// configuration in force, and a window nobody can now name is one that
-		// should not be open.
+	// The window permits the endpoint the SESSION was opened for, not whatever is
+	// configured now. Reading the live setting here would silently move the hole
+	// to a new address while the audit trail, the log line and the dashboard all
+	// went on naming the old one — an operator reviewing the trail afterwards
+	// would be reading about a destination the appliance never used.
+	//
+	// So a changed endpoint CLOSES the session instead (see Current), and this
+	// only ever emits the recorded one.
+	if !ep.Configured() || ep.String() != sess.Endpoint {
 		return nil
 	}
 	return &firewall.SupportEgress{Iface: ep.Iface, Host: ep.Host, Port: ep.Port}

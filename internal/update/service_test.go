@@ -29,7 +29,7 @@ func TestAGoodBundleOnTheMediaVerifies(t *testing.T) {
 	s := newSigner(t, "vendor-2026")
 	writeBundle(t, dir, "cb-1.4.2.cbupd", s.bundle(t, []byte("image"), nil))
 
-	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000})
+	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000, BuildKnown: true})
 	res, err := svc.VerifyFile("cb-1.4.2.cbupd")
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestAValidBundleIsNotReportedAsInstallableWithoutSlots(t *testing.T) {
 	s := newSigner(t, "vendor-2026")
 	writeBundle(t, dir, "cb-1.4.2.cbupd", s.bundle(t, []byte("image"), nil))
 
-	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000})
+	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000, BuildKnown: true})
 	res, _ := svc.VerifyFile("cb-1.4.2.cbupd")
 	if !res.OK {
 		t.Fatalf("the bundle should verify: %s", res.Reason)
@@ -75,7 +75,7 @@ func TestAFailedVerificationStillNamesTheBuild(t *testing.T) {
 	real, other := newSigner(t, "vendor-2026"), newSigner(t, "vendor-2030")
 	writeBundle(t, dir, "hostile.cbupd", other.bundle(t, []byte("image"), nil))
 
-	svc := serviceWith(t, dir, trust(t, real), Current{Build: 1000})
+	svc := serviceWith(t, dir, trust(t, real), Current{Build: 1000, BuildKnown: true})
 	res, _ := svc.VerifyFile("hostile.cbupd")
 	if res.OK {
 		t.Fatal("a bundle signed by an untrusted key verified")
@@ -92,7 +92,7 @@ func TestAFailedVerificationStillNamesTheBuild(t *testing.T) {
 func TestABundleNameIsNeverAPath(t *testing.T) {
 	dir := t.TempDir()
 	s := newSigner(t, "vendor-2026")
-	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000})
+	svc := serviceWith(t, dir, trust(t, s), Current{Build: 1000, BuildKnown: true})
 
 	for _, name := range []string{
 		"../../etc/passwd",
@@ -114,7 +114,7 @@ func TestAnApplianceWithNoKeysSaysSoUpFront(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := serviceWith(t, t.TempDir(), empty, Current{})
+	svc := serviceWith(t, t.TempDir(), empty, Current{BuildKnown: true})
 	if rep := svc.Status(); rep.TrustedKeys != 0 {
 		t.Fatalf("reported %d trusted keys", rep.TrustedKeys)
 	}
@@ -127,8 +127,38 @@ func TestTheMediaListingShowsBundles(t *testing.T) {
 	writeBundle(t, dir, "cb-1.4.2.cbupd", s.bundle(t, []byte("image"), nil))
 	writeBundle(t, dir, "notes.txt", []byte("not a bundle"))
 
-	rep := serviceWith(t, dir, trust(t, s), Current{}).Status()
+	rep := serviceWith(t, dir, trust(t, s), Current{BuildKnown: true}).Status()
 	if len(rep.Bundles) != 1 || rep.Bundles[0] != "cb-1.4.2.cbupd" {
 		t.Fatalf("the listing is %v", rep.Bundles)
+	}
+}
+
+// Unreadable media is not the same fact as empty media. An operator who has just
+// pushed a stick in needs to tell "nothing on it" from "I cannot read it".
+func TestUnreadableMediaIsNotReportedAsEmpty(t *testing.T) {
+	s := newSigner(t, "vendor-2026")
+	svc := serviceWith(t, "/nonexistent/update/media", trust(t, s), Current{BuildKnown: true})
+	rep := svc.Status()
+	if rep.MediaReadable {
+		t.Fatal("a missing media directory reports as readable")
+	}
+	if rep.MediaError == "" {
+		t.Fatal("nothing says why the media could not be read")
+	}
+	if len(rep.Bundles) != 0 {
+		t.Fatalf("bundles listed from unreadable media: %v", rep.Bundles)
+	}
+
+	// No directory configured at all is a THIRD answer, not the same as broken
+	// media: a bare false would be read as "the stick is unreadable".
+	none := serviceWith(t, "", trust(t, s), Current{BuildKnown: true})
+	if rep := none.Status(); rep.MediaReadable || !strings.Contains(rep.MediaError, "no update media directory") {
+		t.Fatalf("unconfigured media reports readable=%v err=%q", rep.MediaReadable, rep.MediaError)
+	}
+
+	// And a genuinely empty, readable directory is a different answer.
+	empty := serviceWith(t, t.TempDir(), trust(t, s), Current{BuildKnown: true})
+	if rep := empty.Status(); !rep.MediaReadable || rep.MediaError != "" {
+		t.Fatalf("readable empty media reports readable=%v err=%q", rep.MediaReadable, rep.MediaError)
 	}
 }

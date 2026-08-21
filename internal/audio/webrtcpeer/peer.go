@@ -206,11 +206,25 @@ func (h *Hub) SetPatronScope(s PatronScope) error {
 	if err := s.usable(); err != nil {
 		return err
 	}
+	// Logged only when the scope actually CHANGES. Core re-pushes the configured
+	// interface on every posture pass, so an unconditional line here claimed a
+	// state transition every fifteen seconds for the life of the appliance —
+	// filling the log a review reads with events that did not happen.
+	changed := h.patronScope().name() != s.name()
 	h.scope.Store(&s)
-	h.log.Info(logging.EvStateTransition,
-		logging.Field("phase", "webrtc_patron_scope"),
-		logging.Field("interface", s.name()),
-		logging.Field("confined", s.Configured()))
+	if changed {
+		// The last answer described the OLD scope. Keeping it would leave the
+		// dashboard telling an operator to fix something they just fixed, until
+		// the next patron happens to join.
+		h.mu.Lock()
+		h.lastOffer = offerMeasurement{}
+		h.mu.Unlock()
+
+		h.log.Info(logging.EvStateTransition,
+			logging.Field("phase", "webrtc_patron_scope"),
+			logging.Field("interface", s.name()),
+			logging.Field("confined", s.Configured()))
+	}
 	return nil
 }
 
@@ -238,12 +252,18 @@ func (h *Hub) ScopeReport() model.ICEScopeReport {
 // which of this host's interfaces they belong to. An address that maps to no
 // interface is recorded under the empty name rather than dropped, so a candidate
 // this appliance cannot account for still shows up as one it offered.
-func (h *Hub) recordOffer(sdp string) {
+func (h *Hub) recordOffer(sdp string) int {
 	seen := map[string]bool{}
 	var names []string
 	addrs := candidateAddrs(sdp)
+	// The interface table is read ONCE per answer rather than once per candidate.
+	// A typical answer carries a dozen candidates and each lookup walked every
+	// interface and every address on the host, which measured at several
+	// milliseconds inside the patron's join path — the one place on this
+	// appliance where milliseconds were the whole point (§11.4).
+	byAddr := interfaceIndex()
 	for _, ip := range addrs {
-		name := interfaceOfAddr(ip)
+		name := byAddr[ip.String()]
 		if !seen[name] {
 			seen[name] = true
 			names = append(names, name)
@@ -253,6 +273,7 @@ func (h *Hub) recordOffer(sdp string) {
 	h.mu.Lock()
 	h.lastOffer = offerMeasurement{answered: true, interfaces: names, candidates: len(addrs)}
 	h.mu.Unlock()
+	return len(addrs)
 }
 
 // Publish installs the single RTP source for a named stream and starts the one
@@ -472,7 +493,17 @@ func (h *Hub) Answer(ctx context.Context, peerID string, stream model.StreamType
 	}
 	// Measured from the SDP that is about to leave this process — the only
 	// artifact that says what the phone was really told to try.
-	h.recordOffer(local.SDP)
+	offered := h.recordOffer(local.SDP)
+	if offered == 0 {
+		// Gathering produced nothing. The pre-check passed, so the interface was
+		// usable a moment ago; it can still happen (a NIC bounced mid-gather, or
+		// held only addresses that cannot become host candidates). An answer with
+		// no host candidate is indistinguishable from a dead network at the
+		// phone's end: it spins until ICE gives up and nobody is told why. Name
+		// the fault instead — the same refusal the pre-check would have given.
+		return fail(fmt.Errorf("%w: gathering on %q produced no host candidate",
+			ErrPatronInterfaceUnusable, h.patronScope().name()))
+	}
 	return local.SDP, nil
 }
 

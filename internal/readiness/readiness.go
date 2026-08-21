@@ -215,25 +215,55 @@ func deploymentBanner(d Deploy) string {
 		"Switch to Patron-Facing or Low-Cost Replacement before serving an audience."
 }
 
-// iceScopeWarnings raises the §9.1/D27 condition: a patron was handed candidates
-// for networks that are not the patron LAN.
+// iceScopeWarnings raises the §9.1/D27 conditions from the MEASUREMENT — what
+// the last patron was really offered — compared against the scope that was
+// supposed to be in force.
 //
-// It is raised from the MEASUREMENT (what the last answer carried), never from
-// the configuration, and it stays silent until an answer has actually been
-// produced — an appliance nobody has joined yet has not offered anything, and
-// saying otherwise would be a verdict on an event that never happened.
+// The comparison is the point, and the first version of this function missed it:
+// it warned only when more than one interface appeared, so two states that are
+// plainly wrong were silent. An answer that carried NO candidate at all (the
+// patron got a spinner and nobody was told why) counted as "fewer than two", and
+// so did an appliance confined to one interface while offering a different one.
+// model.ICEScopeReport's own documentation says a disagreement between intent
+// and measurement is the bug worth seeing; this now looks for it.
 func iceScopeWarnings(sc model.ICEScopeReport) []model.Warning {
-	if !sc.Answered || len(sc.OfferedInterfaces) < 2 {
+	if !sc.Answered {
+		// Nothing has been offered, so there is nothing to judge. Saying anything
+		// here would be a verdict on an event that never happened.
 		return nil
 	}
-	return []model.Warning{{
-		Code: model.WarnICEScopeUnconfined,
-		Message: "Patrons are being offered audio connections on " +
-			strconv.Itoa(len(sc.OfferedInterfaces)) + " of this appliance's networks (" +
-			strings.Join(sc.OfferedInterfaces, ", ") + "). Set the patron interface so phones " +
-			"stop spending their join time on networks they cannot reach.",
-		Severity: model.SeverityWarning,
-	}}
+	var out []model.Warning
+	if sc.OfferedCandidates == 0 {
+		out = append(out, model.Warning{
+			Code: model.WarnICEScopeUnconfined,
+			Message: "A patron was answered with no way to connect at all: the appliance offered zero " +
+				"audio candidates. Their phone cannot tell that apart from a dead network. Check that " +
+				"the configured patron interface is up and has an address.",
+			Severity: model.SeverityCritical,
+		})
+		return out
+	}
+	switch {
+	case sc.InForce && (len(sc.OfferedInterfaces) != 1 || sc.OfferedInterfaces[0] != sc.Interface):
+		// Confined on paper, offering something else in fact.
+		out = append(out, model.Warning{
+			Code: model.WarnICEScopeUnconfined,
+			Message: "Patron audio is configured to use " + sc.Interface + " only, but the last patron was " +
+				"offered connections on " + strings.Join(sc.OfferedInterfaces, ", ") +
+				". The confinement is not doing what the configuration says.",
+			Severity: model.SeverityCritical,
+		})
+	case len(sc.OfferedInterfaces) > 1:
+		out = append(out, model.Warning{
+			Code: model.WarnICEScopeUnconfined,
+			Message: "Patrons are being offered audio connections on " +
+				strconv.Itoa(len(sc.OfferedInterfaces)) + " of this appliance's networks (" +
+				strings.Join(sc.OfferedInterfaces, ", ") + "). Set the patron interface so phones " +
+				"stop spending their join time on networks they cannot reach.",
+			Severity: model.SeverityWarning,
+		})
+	}
+	return out
 }
 
 // supportWarnings raises §8.3's last condition — "debug capture / support mode
