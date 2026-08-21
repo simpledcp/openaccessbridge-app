@@ -81,6 +81,8 @@ func TestDashboardRendersTheFactsTheAPIAlreadyMeasured(t *testing.T) {
 		"staff_steps_outstanding",     // §11.5 the half the appliance cannot answer
 		"endpoint_configured",         // §9.4 whether the appliance can be re-entered at all
 		"tunnel_established",          // §9.4 a window is not a connection
+		"ab_supported",                // §9.4 verified is not the same as installable
+		"trusted_keys",                // §9.4 an appliance with none can verify nothing
 	} {
 		if !strings.Contains(script, field) {
 			t.Errorf("admin.js never reads %q — the fact is measured and invisible", field)

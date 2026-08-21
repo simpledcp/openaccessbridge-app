@@ -788,3 +788,65 @@ Five behaviours were mutation-confirmed: the duration clamp; sessions surviving 
 restart; the reason reaching the log; the egress rule moved into the INPUT chain;
 and the table delete removed — the last of which failed the two replacement tests
 and the wiring invariant together.
+
+## §9.4 signed offline updates: verifying what cannot yet be installed (D32, B8)
+
+The update path splits cleanly into two halves, and only one of them can exist
+on this image. Verifying a signed bundle is pure computation and is now complete.
+Installing one needs two system slots and a bootloader that honours a boot-target
+contract, and this image has neither — so nothing here stages, installs or rolls
+back, and the surfaces say so as a field rather than as prose that could be
+dropped.
+
+**The half that is real.** A bundle is a manifest and a payload; the signature
+covers the manifest and the manifest binds the payload by digest and size, so one
+signature covers both without the signer streaming the image. Verification is
+over the exact manifest BYTES that arrived, the key is looked up in the
+appliance's own store by the id the manifest names, and the payload is hashed
+only after the signature passes — so a bundle nobody trusts cannot make the
+appliance do work proportional to its size.
+
+The sharpest test in the package builds a bundle signed by an impostor **under
+the same key id as the real vendor**, checks that it verifies perfectly against
+the impostor's own key, and then requires the appliance to refuse it. A bundle
+that carries its own key and is checked against it is the commonest way a signed
+update path turns out not to be one.
+
+**Ordering is an integer.** Is "1.10" newer than "1.9"? The release process owns
+a monotonic build number. A downgrade re-introduces every fault the newer build
+fixed and a re-install is what a replay looks like on an offline path, so both
+are refused unless an operator explicitly asks.
+
+**Rollback is real only because the new image confirms ITSELF.** `ConfirmHealthy`
+takes the running slot and refuses if it is not the staged one, so the old image
+cannot bless the new one. An updater that marks its own work healthy has an
+automatic rollback that fires only when nothing ran at all — and the failure
+worth catching is the update that boots, comes up, and cannot reach the cinema
+server. Attempts are counted before the boot, so an image that hangs instantly
+still exhausts its tries. The limit is three rather than one: a single failed boot
+can be a power cut, and rolling back a good update because someone switched the
+rack off is its own outage.
+
+**Verified is not installable.** Both facts travel separately to the dashboard,
+which renders both, because letting "this bundle is good" read as "this update
+can be applied" would leave a booth waiting for something that cannot happen.
+What an operator gets today is still worth having: the failure this prevents is
+discovering at 19:45 that the stick they were sent is the wrong build, is for
+another tier, or was never signed by anyone this appliance trusts.
+
+**A mutation that did NOT fail, and what it changed.** Verifying over a
+re-serialised manifest instead of the raw bytes passed every test. Chasing that
+down, the comment justifying the raw-bytes choice turned out to be wrong: it
+claimed re-serialisation would let a signature pass over content nobody signed,
+and it would not — a canonical re-encoding of the parsed struct cannot change
+meaning. The real hazard is different and worse in a quieter way: re-encoding
+ties the appliance to one JSON encoder's field order, so a signer written in
+another language produces bundles this appliance rejects, reported as "bad
+signature" — the same words a tampered bundle gets. There is now a test with a
+hand-written manifest in a different key order, signed as written, which fails
+under exactly that mutation. The claim and the test now match.
+
+Five behaviours were mutation-confirmed in total: byte-exact verification (after
+the fix above); trusting a key the appliance does not hold; the downgrade and
+replay refusals; the old image confirming the new one's health; and "verified"
+being reported as "installable".

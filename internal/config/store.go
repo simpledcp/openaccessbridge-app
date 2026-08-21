@@ -56,7 +56,16 @@ const (
 	SettingAdminBindAddr    = "admin_bind_addr"
 	SettingPatronBindAddr   = "patron_bind_addr"
 	SettingSupportMode      = "support_mode"
-	SettingSSHEnabled       = "ssh_enabled"
+	// §9.4 signed offline updates. The trust store holds PUBLIC keys only, as
+	// "<id>:<base64 ed25519 public key>" entries separated by whitespace or
+	// commas — this appliance verifies signatures and can never make one.
+	SettingUpdateTrustedKeys = "update_trusted_keys"
+	// SettingUpdateMediaDir is the mount point removable update media appears at.
+	SettingUpdateMediaDir = "update_media_dir"
+	// SettingUpdateSlots holds the A/B state as JSON (update.SlotStatus). A
+	// settings key rather than a table: it is one small record with one writer.
+	SettingUpdateSlots = "update_slots"
+	SettingSSHEnabled  = "ssh_enabled"
 
 	// Caption-link tuning (§5.2). These have working defaults in
 	// internal/caption/acsp; the settings exist so a venue whose server has a

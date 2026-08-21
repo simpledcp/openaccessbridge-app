@@ -724,6 +724,56 @@
     }));
   }
 
+  /* §9.4. The two facts this renderer keeps apart: whether a bundle can be
+   * VERIFIED here (it can) and whether one can be INSTALLED here (it cannot —
+   * this image has no A/B slots). A page that showed only the first would leave
+   * a booth waiting for an install that is never going to happen. */
+  function renderUpdate(rep) {
+    var rows = [
+      row("Trusted signing keys", String(rep.trusted_keys || 0),
+        (rep.trusted_keys || 0) > 0 ? null : STATE_WARN,
+        (rep.trusted_keys || 0) > 0 ? "" : "no update bundle can be verified on this appliance"),
+      row("Update media", rep.media_dir || "not configured", rep.media_dir ? null : STATE_UNKNOWN),
+      row("Bundles found", rep.bundles ? String(rep.bundles.length) : "0", null,
+        (rep.bundles || []).join(", ")),
+      row("A/B slots", rep.ab_supported ? "available" : "not on this appliance",
+        rep.ab_supported ? STATE_OK : STATE_WARN)
+    ];
+    var slots = rep.slots || {};
+    if (slots.active) {
+      rows.push(row("Running slot", slots.active + (slots.active_version ? " · " + slots.active_version : ""), null));
+    }
+    if (slots.staged) {
+      rows.push(row("Staged", slots.staged + " · " + (slots.staged_version || "?"), STATE_WARN,
+        "boot attempts: " + (slots.boot_attempts || 0)));
+    }
+    if (slots.last_outcome) {
+      rows.push(row("Last update outcome", slots.last_outcome,
+        slots.last_outcome === "rolled_back" ? STATE_WARN : null));
+    }
+    dl(el("update-detail"), rows);
+    el("update-note").textContent = rep.ab_note || "";
+  }
+
+  function refreshUpdate() {
+    fetch("/api/admin/update", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 503) return null;
+        if (!r.ok) throw new Error("status " + r.status);
+        return r.json();
+      })
+      .then(function (rep) {
+        if (!rep) {
+          dl(el("update-detail"), [row("Software updates", "not available on this appliance", STATE_UNKNOWN)]);
+          return;
+        }
+        renderUpdate(rep);
+      })
+      .catch(function () {
+        dl(el("update-detail"), [row("Software updates", "not answering", STATE_BAD)]);
+      });
+  }
+
   function refreshSupport() {
     fetch("/api/admin/support", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) {
@@ -864,4 +914,9 @@
   });
   refreshSupport();
   setInterval(refreshSupport, 15000);
+
+  /* §9.4. Slowest cadence on the page: update state changes when media is
+   * inserted or an update is applied, not continuously. */
+  refreshUpdate();
+  setInterval(refreshUpdate, 60000);
 })();

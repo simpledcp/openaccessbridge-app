@@ -85,6 +85,7 @@ green.
 | 22 | §10.4 QR onboarding: an in-tree pure-Go QR encoder verified module-for-module against independent implementations across all 160 version/level combinations and decoded by zxing-cpp, served per-show on the admin surface with a computed minimum print size (D29) | `internal/qr`, `internal/web/session_admin.go` |
 | 23 | §11.5 pre-show QA checklist codified as a staff procedure: explicit three-state pass/fail per item, a remedy on every item, staff steps printed but never recorded, and a printable booth sheet (D30) | `internal/model/checklist.go`, `internal/readiness/checklist.go`, `internal/web/checklist.go` |
 | 24 | §9.4 support mode: a bounded, audited, outbound-only WINDOW with an absolute deadline that does not survive a restart, one scoped egress rule, an audit trail beside the switch — plus the fix for an nftables ruleset that could never remove a rule (D31, D31a) | `internal/security/support`, `internal/security/firewall`, `internal/config/support.go`, `cmd/captionbridge-core` |
+| 25 | §9.4 signed offline updates: a bundle format whose signature covers the bytes that arrived, a trust store the bundle cannot add to, refusal to downgrade or replay, and the full A/B rollback state machine in which the NEW image confirms its own health — verify-only on this image, and it says so (D32, B8) | `internal/update`, `internal/web/update.go`, `cmd/captionbridge-core/update.go` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -184,7 +185,15 @@ the audit lanes' own reports.
   append-vs-replace behaviour is established from nft's documented semantics and
   the fix is asserted in the generated script text. Confirm it against a real
   ruleset the first time the helper runs as root (D31a).
-- **Signed offline updates + A/B rollback (§9.4)** are not built.
+- **Updates can be VERIFIED here but not installed.** The signed-bundle format,
+  its verifier and the complete A/B state machine are built and tested; this
+  image has no A/B slots, no bootloader integration and no TPM, so nothing can be
+  staged, installed or rolled back (BLOCKERS B8). The operator surface carries
+  that as a field (`ab_supported: false`), not as prose.
+- **Update signing-key custody is unanswered.** The appliance holds public keys
+  only and can never sign (asserted in `internal/invariants`), but where the
+  private half lives, how it rotates, and what happens if it leaks are process
+  questions nobody has answered.
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
 - **The ICE scope row is as fresh as the last posture reconcile** (15 s), not as

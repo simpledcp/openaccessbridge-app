@@ -136,6 +136,11 @@ func main() {
 		// that makes its use reviewable.
 		Support:      sup.support,
 		SupportTrail: store.RecentSupportSessions,
+		// §9.4: verify-only on this image (no A/B slots, BLOCKERS B8). The build
+		// number orders upgrades; a build this appliance cannot parse is 0, which
+		// makes every signed bundle an upgrade rather than none — the safe
+		// direction when the alternative is refusing every legitimate update.
+		Update: newUpdateService(store, log, buildinfo.BuildNumber()),
 		// The §6.4 calibration wizard reaches captionbridge-media over the SAME
 		// loopback socket dir this process was given. Without it the wizard falls
 		// back to the default location and reports "the media process is not

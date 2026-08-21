@@ -214,6 +214,52 @@ func TestInvariant_TheSupportWindowIsOutboundOnlyAndReachesTheRuleset(t *testing
 	}
 }
 
+// TestInvariant_TheApplianceCanNeverSignItsOwnUpdates: §9.4's update path is
+// only signed if the appliance holds the VERIFYING half and nothing else. A box
+// that could sign an update it would then accept is one whose compromise is
+// permanent — one write to its trust store and every future update is whatever
+// the attacker wants.
+//
+// This asserts on source text across the whole update path, because the failure
+// is a single field or import added in good faith ("for the signing tool").
+func TestInvariant_TheApplianceCanNeverSignItsOwnUpdates(t *testing.T) {
+	root := repoRoot(t)
+	for _, rel := range []string{
+		filepath.Join("internal", "update", "bundle.go"),
+		filepath.Join("internal", "update", "service.go"),
+		filepath.Join("internal", "update", "slots.go"),
+		filepath.Join("cmd", "captionbridge-core", "update.go"),
+	} {
+		src := readFile(t, filepath.Join(root, rel))
+		for _, forbidden := range []string{"ed25519.Sign(", "ed25519.PrivateKey", "ed25519.GenerateKey"} {
+			if strings.Contains(src, forbidden) {
+				t.Errorf("%s contains %q: this appliance must verify signatures and never make them", rel, forbidden)
+			}
+		}
+	}
+	// And the trusted key must come from the appliance's own store, never from
+	// the bundle. A bundle checked against a key it carries verifies perfectly
+	// and proves nothing.
+	bundle := readFile(t, filepath.Join(root, "internal", "update", "bundle.go"))
+	if !strings.Contains(bundle, "ts.lookup(m.KeyID)") {
+		t.Error("the verifier does not look the key up in the appliance's trust store")
+	}
+}
+
+// TestInvariant_TheUpdateServiceHasAProductionCaller: a verifier nothing calls
+// protects nobody. §9.4's bundle path exists so a booth can tell a good stick
+// from a bad one BEFORE a show, which requires it to be reachable.
+func TestInvariant_TheUpdateServiceHasAProductionCaller(t *testing.T) {
+	main := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	if !strings.Contains(main, "Update: newUpdateService(") {
+		t.Error("core never builds an update service: the verifier is unreachable from the operator surface")
+	}
+	web := readFile(t, filepath.Join(repoRoot(t), "internal", "web", "session_admin.go"))
+	if !strings.Contains(web, `"/api/admin/update/verify"`) {
+		t.Error("there is no route to verify a bundle")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

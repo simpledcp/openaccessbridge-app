@@ -503,3 +503,61 @@ and this host has user namespaces disabled, so the behaviour is established from
 nft's documented semantics and the fix is asserted in the generated text. It
 should be confirmed against a real ruleset the first time the helper runs as root
 on an appliance.
+
+### D32. The appliance verifies updates and can never sign them; "verified" and "installable" are separate answers [§9.4, §4.3]
+§9.4: "The primary update path is signed and offline-capable … verified against a
+key held in the TPM/secure storage on the hardened tier … A/B partitions for
+atomic updates with automatic rollback on failed boot/health-check, so a bad
+update never bricks a booth appliance."
+
+**The appliance holds public keys only.** There is no field, no setting and no
+code path for a private key anywhere in the tree, and an invariant test asserts
+that across the whole update path — `ed25519.Sign`, `ed25519.PrivateKey` and
+`ed25519.GenerateKey` may not appear in any of it. An appliance that could sign
+an update it would then accept is one whose compromise is permanent: one write to
+its trust store and every future update is whatever the attacker wants.
+
+**The trusted key never comes from the bundle.** The manifest NAMES a key id; the
+key itself must already be in the appliance's store. A bundle checked against a
+key it carries verifies perfectly and proves nothing, which is the commonest way
+a signed update path turns out not to be one. A bundle naming a key this
+appliance does not hold is refused by name, so an operator is told which key was
+wanted rather than "bad signature".
+
+**The signature covers the bytes that arrived.** Verification is over the exact
+manifest bytes, not a re-serialisation of the parsed struct. Re-encoding would
+tie the appliance to one JSON encoder's field order and spacing: a signer written
+in another language would produce bundles this appliance rejected, reported as
+"bad signature" — the same words a tampered bundle gets. Being unable to tell a
+mis-encoded bundle from a hostile one is the fault worth avoiding. (This is a
+correction: the first version of that comment claimed re-serialisation would let
+a signature pass over unsigned content. It would not — a canonical re-encoding of
+the parsed struct cannot change meaning. The mutation pass caught the claim being
+untestable, and both the comment and the test were fixed.)
+
+**Ordering is an integer, not a version string.** Is "1.10" newer than "1.9"?
+The release process owns a monotonic build number and the appliance compares
+that. A downgrade or a re-install is REFUSED unless an operator explicitly asks:
+a downgrade re-introduces every fault the newer build fixed, and re-installing
+the current build is the shape a replay takes on an offline path.
+
+**Rollback is real only because the NEW image confirms itself.** `ConfirmHealthy`
+takes the running slot as a parameter and refuses if it is not the staged one, so
+the old image cannot bless the new one. An updater that marks its own work
+healthy has an automatic rollback that can only fire when nothing ran at all —
+and the failure worth catching is the update that boots, comes up, and cannot
+reach the cinema server. Attempts are counted BEFORE the boot, so an image that
+hangs instantly still exhausts its tries; the limit is three rather than one,
+because a single failed boot can be a power cut and rolling back a good update
+because someone switched the rack off is its own outage.
+
+**Verified is not installable, and they are separate fields.** This image has no
+A/B slots (BLOCKERS B8), so a bundle can be perfectly valid and still not
+installable here. `VerifyResult.Installable` and `Report.ABSupported` carry that
+separately all the way to the dashboard, which renders both. Collapsing them
+would let "this bundle is good" read as "this update can be applied", and a booth
+would wait for something that is never going to happen.
+
+**Cloud update is not built at all.** §9.4 makes it "optional and outbound-only",
+and nothing here reaches the network for an update. If it is ever built it should
+reuse D31's support-window shape rather than adding a second egress path.

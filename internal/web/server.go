@@ -87,6 +87,10 @@ type Deps struct {
 	// function rather than the store, so this package keeps no ability to write
 	// to the configuration database.
 	SupportTrail func(limit int) ([]model.SupportSession, error)
+	// Update is the §9.4 signed-bundle service (internal/update). Nil on an
+	// appliance without one; the handlers say so rather than implying an update
+	// could be verified.
+	Update UpdateService
 }
 
 // Server owns the patron and admin HTTP servers.

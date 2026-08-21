@@ -121,6 +121,36 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
 - **Workaround in place:** heuristic XML-essence extraction (DECISIONS D15),
   behind the same `Unwrap` seam.
 
+### B8. No A/B partitions, no bootloader integration, no secure boot, no TPM [§9.4, §4.3 hardened tier]
+- **Needed to clear:** an appliance IMAGE built with two system slots and a
+  bootloader that honours a boot-target and attempt-count contract
+  (grub-editenv, U-Boot's bootcount, or systemd-boot's counting), plus — for the
+  hardened tier — secure boot and a TPM to hold the update-verification key.
+  None of that is a software change to this repo; it is how the image and the
+  hardware are built.
+- **Seam in code:** `update.Platform` (`internal/update/slots.go`). This build
+  ships `UnsupportedPlatform`, whose every method REFUSES with a reason naming
+  what is missing. Nothing simulates a slot switch.
+- **What IS built and tested here (2026-08-21):** the signed-bundle format and
+  its verifier — trust store lookup by key id, signature over the exact manifest
+  bytes, payload bound by digest and size, product and tier checks, and a refusal
+  to downgrade or re-install unless an operator asks — and the complete A/B state
+  machine: stage into the inactive slot, refuse to stage over an unproven image,
+  count boot attempts BEFORE the boot, require the NEW image to confirm its own
+  health, and roll back to the untouched known-good slot when it does not.
+  An operator can verify a bundle from the update media on this appliance today
+  and be told exactly what is wrong with it.
+- **What that does NOT clear:** nothing can be installed and nothing can be
+  rolled back on this image, and the operator surface says so as a field
+  (`ab_supported: false`) rather than in prose that could be dropped. §9.4's
+  promise — "a bad update never bricks a booth appliance" — is a promise about a
+  machine that can boot the other slot, and this one cannot.
+- **Key custody is also outstanding.** The appliance holds PUBLIC keys only and
+  can never sign (asserted in `internal/invariants`), but the private half needs
+  a custody story — an HSM or TPM, a rotation procedure, and a plan for what
+  happens when a key is lost or leaked. That is a process question, not a code
+  one, and it has not been answered.
+
 ## None of the above block the in-scope software work
 
 The caption path (parser → resolver → timing → state machine → fan-out → patron
