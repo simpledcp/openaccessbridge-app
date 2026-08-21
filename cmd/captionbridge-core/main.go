@@ -28,6 +28,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/readiness"
+	"github.com/simpledcp/captionbridge/internal/security/support"
 	"github.com/simpledcp/captionbridge/internal/sim"
 	"github.com/simpledcp/captionbridge/internal/web"
 )
@@ -91,7 +92,21 @@ func main() {
 		media:    newMediaClient(socketPath(*socketDir, ipc.SocketMedia), log),
 		firewall: newFirewallClient(socketPath(*socketDir, ipc.SocketFirewall), log),
 		machine:  machine, hub: hub, ctrl: ctrl, captionWarnings: captionWarnings,
+		// Buffered by one: the change signal is a nudge to reconcile, and a
+		// nudge that arrives while a reconciliation is already running must not
+		// block the manager's timer goroutine.
+		supportChanged: make(chan struct{}, 1),
 	}
+	// §9.4 support sessions. Constructing the manager CLOSES anything the audit
+	// trail still shows as open: support mode fails closed across a restart
+	// (internal/security/support).
+	clearLegacySupportFlag(store, log)
+	sup.support = support.New(support.Options{
+		Store:    store,
+		Log:      log,
+		Endpoint: func() support.Endpoint { return supportEndpoint(store) },
+		OnChange: sup.signalSupportChange,
+	})
 	// Install-time verification and the firewall apply happen BEFORE the surfaces
 	// come up, so the dashboard's first answer is a measurement rather than a
 	// zero value (§9.3 "at install and periodically at runtime").
@@ -117,6 +132,10 @@ func main() {
 		// admission enforces the same number the caption fan-out does (D11).
 		Signaler: &mediaSignaler{media: sup.media, log: log, maxPeers: deployed.MaxConcurrentClients},
 		Status:   sup.status,
+		// §9.4: the surface that opens a way into this appliance, and the trail
+		// that makes its use reviewable.
+		Support:      sup.support,
+		SupportTrail: store.RecentSupportSessions,
 		// The §6.4 calibration wizard reaches captionbridge-media over the SAME
 		// loopback socket dir this process was given. Without it the wizard falls
 		// back to the default location and reports "the media process is not

@@ -53,6 +53,32 @@ type Config struct {
 	AdminOnClientIface bool
 	// AdminPort is the admin/setup UI port; defaults to DefaultAdminPort when zero.
 	AdminPort int
+	// SupportEgress is the §9.4 support window, present only while a support
+	// session is open. Nil means no window, which is the default and the state
+	// the appliance spends its life in.
+	SupportEgress *SupportEgress
+}
+
+// SupportEgress is the ONE outbound destination a support session may reach
+// (§9.4 "outbound-only, time-limited, and audited").
+//
+// Every field is required and there is no default, deliberately. A support
+// window with a missing address would have to be rendered either as a bare
+// `oif <iface> accept` — an unrestricted egress hole opened by a support switch —
+// or as nothing at all, silently. Generate refuses instead.
+type SupportEgress struct {
+	// Iface is the interface the support endpoint is reachable on. It is named
+	// rather than assumed: on this appliance the theater side and the patron side
+	// are both possible, and guessing would put support traffic on the patron
+	// LAN.
+	Iface string
+	// Host is a single literal IP. Not a hostname: resolving one would need DNS
+	// from the appliance, which §9.1's DNS-leak checks exist to prevent, and a
+	// name that resolves differently later is a rule that quietly changes what it
+	// permits.
+	Host string
+	// Port is the single destination port.
+	Port int
 }
 
 // SysctlSettings returns the kernel knobs that must be set alongside the ruleset to
@@ -86,6 +112,26 @@ func Generate(cfg Config) (string, error) {
 	}
 
 	var b strings.Builder
+	// REPLACE the table, never add to it.
+	//
+	// `nft -f` on a table definition is ADDITIVE: `add rule` semantics are
+	// implicit, so feeding this script at a table that already exists appends
+	// every rule again and leaves whatever was there before. That is not a
+	// cosmetic problem. Re-applying after a configuration change would keep the
+	// OLD rules alive beside the new ones — the previous cinema server's allow
+	// rule after the address is corrected, or the admin-on-patron-interface rule
+	// after a switch from Booth Diagnostic to a production profile. The stricter
+	// posture would be applied and the looser one would go on accepting packets,
+	// which is the precise shape of a hole nobody would see: the dashboard reads
+	// the table, finds the expected rules present, and reports the posture
+	// verified.
+	//
+	// The two lines below are the standard idiom. The bare `table` line creates
+	// it if it is absent, so the `delete` cannot fail on a fresh boot, and both
+	// land inside the same `nft -f` transaction as the definition that follows —
+	// so the appliance is never momentarily unprotected between them.
+	b.WriteString("table inet captionbridge\n")
+	b.WriteString("delete table inet captionbridge\n")
 	b.WriteString("table inet captionbridge {\n")
 
 	// --- input chain -------------------------------------------------------
@@ -137,6 +183,15 @@ func Generate(cfg Config) (string, error) {
 			fmt.Fprintf(&b, "    oif %q %s daddr %s tcp dport %d accept    # ACSP (acs-initiated, Variant A)\n",
 				cfg.TheaterIface, fam.kw, fam.literal(), cfg.ACSPPort)
 		}
+	}
+	if sup := cfg.SupportEgress; sup != nil {
+		// §9.4's support window. OUTPUT only, one address, one port, and no
+		// matching input rule anywhere — the return traffic is admitted by the
+		// established/related rule at the top of the input chain, exactly as
+		// Variant A's replies are. An inbound accept here would turn "outbound
+		// only" into a listening port on an appliance whose SSH is disabled.
+		fmt.Fprintf(&b, "    oif %q %s daddr %s tcp dport %d accept    # support session (§9.4, time-limited)\n",
+			sup.Iface, ipKeyword(sup.Host), sup.Host, sup.Port)
 	}
 	b.WriteString("  }\n")
 
@@ -226,6 +281,23 @@ func validate(cfg Config) (allowlist, error) {
 	if err := validIface(cfg.ClientIface); err != nil {
 		return none, fmt.Errorf("firewall: ClientIface %w", err)
 	}
+	// §9.4's support window is validated to the same standard as everything else
+	// that reaches the root-applied ruleset. A partially configured window is
+	// REFUSED rather than rendered: the only two ways to render one are a bare
+	// interface accept, which is an unrestricted egress hole opened by a support
+	// switch, and silence, which would report a window as open while permitting
+	// nothing.
+	if sup := cfg.SupportEgress; sup != nil {
+		if err := validIface(sup.Iface); err != nil {
+			return none, fmt.Errorf("firewall: support egress interface %w", err)
+		}
+		if net.ParseIP(sup.Host) == nil {
+			return none, fmt.Errorf("firewall: support endpoint %q is not a literal IP address", sup.Host)
+		}
+		if sup.Port < 1 || sup.Port > 65535 {
+			return none, fmt.Errorf("firewall: support endpoint port %d is out of range", sup.Port)
+		}
+	}
 	entries := cfg.Allowlist()
 	if len(entries) == 0 {
 		return none, errors.New("firewall: the theater allowlist is empty; at least one cinema server / media-block IP is required")
@@ -301,6 +373,15 @@ func validIface(name string) error {
 		}
 	}
 	return nil
+}
+
+// ipKeyword is the nft match keyword for an address's family. One rule cannot
+// carry both "ip" and "ip6" matches.
+func ipKeyword(host string) string {
+	if strings.Contains(host, ":") {
+		return "ip6"
+	}
+	return "ip"
 }
 
 // validateRange checks an nft port-range literal like "10000-20000".

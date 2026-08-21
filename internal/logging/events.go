@@ -62,6 +62,14 @@ const (
 	EvDebugCaptureStopped Event = "security.debug_capture.stopped"
 	EvDebugCaptureCapped  Event = "security.debug_capture.limit_reached"
 
+	// §9.4 support sessions: the only re-entry path once SSH is disabled, so
+	// every transition is an audit event at Warn — the level a review reads. The
+	// operator's REASON never appears here: it is free text and could contain
+	// anything, so only its length travels (the text itself is in the local audit
+	// trail). The grantee is hashed, as everywhere else in this package.
+	EvSupportSessionOpened Event = "security.support_mode.opened"
+	EvSupportSessionClosed Event = "security.support_mode.closed"
+
 	// Process supervision.
 	EvProcessStarted   Event = "process.started"
 	EvProcessRestarted Event = "process.restarted"

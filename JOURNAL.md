@@ -711,3 +711,80 @@ recorded. The third of those is worth noting for a different reason — the firs
 attempt at that mutation silently did not apply, because the pattern no longer
 matched after gofmt, and the test "passed". A mutation that does not apply proves
 nothing, so it was re-run with the target asserted before the edit.
+
+## §9.4 support mode: a window with a deadline, and the rule that could never be removed (D31, D31a)
+
+Support mode was a settings key the dashboard read and nothing wrote. That is
+worth stating plainly, because a boolean is not a small version of this feature —
+it is the failure mode of it. §9.4 makes support mode the only way back into an
+appliance whose SSH is disabled, and a persisted flag cannot carry a deadline:
+set once, it stays set. The feature whose job is to avoid a permanent way in was
+implemented as one.
+
+**What a session is now.** An absolute deadline, clamped to four hours whatever
+is asked for, enforced by a timer AND re-checked on every read so no caller can
+see a window whose time has passed. It signals the supervisor on open and close
+so the firewall changes at that moment rather than at the next posture pass — the
+deadline is the promise the feature makes. It does not survive a restart: a
+window that came back after a boot would outlive the person who opened it and the
+reason they gave, and the trail records those as `ended_by_restart` rather than
+losing them.
+
+**The rule is real, because the output chain is `policy drop`.** Opening a
+session adds exactly one line: one interface, one address, one port, in the
+OUTPUT chain and nowhere else. A partial endpoint is refused rather than
+rendered — the only two ways to render a window with no address are a bare `oif
+<iface> accept`, which is an unrestricted egress hole opened by a support switch,
+and silence, which reports a window that permits nothing. The host must be a
+literal IP: resolving a name would need DNS from an appliance whose §9.1 checks
+exist to catch DNS leaks, and a name that resolves differently tomorrow is a rule
+that quietly changes what it permits.
+
+**The audit is a precondition, not a side effect.** If the trail cannot record
+the session, the window does not open. The reason is required — an audit entry
+without one is a timestamp — and it is stored locally and never logged, because
+it is operator free text that could contain anything. Its LENGTH is logged, so a
+trail of empty reasons is visible without the text travelling. The trail is
+rendered beside the switch, because a support mode whose history lives only in a
+database is one nobody reviews.
+
+**A window is not a connection.** This appliance has no tunnel client and no
+support endpoint of its own; it permits an outbound destination and dials
+nothing. `TunnelEstablished` is a field on every response, always false in this
+build, and the dashboard RENDERS that field rather than asserting the text — so
+nothing can drift into reporting a connection the appliance never made. The
+existing dashboard test caught the first version of that renderer doing exactly
+that: it printed "none established" as a constant, and the guard that every
+measured fact must be read from the API failed it.
+
+## The defect found on the way: a ruleset that could never remove a rule (D31a)
+
+Support mode needs its rule to disappear when the window closes, which is what
+sent me to look at how the ruleset is applied. `nft -f` on a table definition has
+implicit `add` semantics: applied at a table that already exists, it appends
+every rule again and leaves whatever was there before. The generated script had
+no flush and no delete, and had not needed one until now.
+
+The consequence is not duplicate lines. **A configuration change could not remove
+a rule.** The previous cinema server's allow rule would survive the address being
+corrected. The admin-on-patron-interface rule would survive a switch from Booth
+Diagnostic to Patron-Facing — the stricter posture applied, the looser one still
+accepting, and §9.3's introspection finding every expected rule present and
+reporting the posture verified. That is the shape of hole this repo keeps looking
+for: it reads green.
+
+The fix is the standard idiom — a bare `table` line so the delete cannot fail on
+a fresh boot, then `delete table`, then the definition, all inside one `nft -f`
+transaction so there is never an instant without a default-deny.
+
+**What is NOT proven here, and it matters.** Applying nftables needs root (B5),
+and this host has user namespaces disabled (`unshare -rn` is refused), so there is
+no way to demonstrate either the append behaviour or the fix against a live
+ruleset on this machine. The defect is established from nft's documented
+semantics and the fix is asserted in the generated script text. It goes in STATUS
+as something to confirm the first time the helper runs as root on real hardware.
+
+Five behaviours were mutation-confirmed: the duration clamp; sessions surviving a
+restart; the reason reaching the log; the egress rule moved into the INPUT chain;
+and the table delete removed — the last of which failed the two replacement tests
+and the wiring invariant together.

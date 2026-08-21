@@ -180,6 +180,40 @@ func TestInvariant_ThePreShowChecklistIsServedAndPrintable(t *testing.T) {
 	}
 }
 
+// TestInvariant_TheSupportWindowIsOutboundOnlyAndReachesTheRuleset: §9.4's
+// support mode is the only re-entry path once SSH is disabled, which makes it
+// the one feature here whose failure is a permanent way in. Two things must hold
+// in the SOURCE, because both are the kind of thing a refactor quietly changes.
+//
+// The literals below are LOAD-BEARING.
+func TestInvariant_TheSupportWindowIsOutboundOnlyAndReachesTheRuleset(t *testing.T) {
+	// 1. The window is wired into the ruleset the supervisor derives. A session
+	//    that opens a state variable and no rule permits nothing; one whose rule
+	//    is never removed is a permanent egress hole opened by a support switch.
+	status := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "status.go"))
+	if !strings.Contains(status, "SupportEgress: s.supportEgress()") {
+		t.Errorf("the support window never reaches the firewall config: the session would permit nothing")
+	}
+	// 2. The rule is emitted in the OUTPUT chain only. An inbound accept would
+	//    turn "outbound-only" into a listening port on an appliance whose SSH is
+	//    deliberately off — the exact thing §9.4 replaces.
+	fw := readFile(t, filepath.Join(repoRoot(t), "internal", "security", "firewall", "firewall.go"))
+	outputIdx := strings.Index(fw, "--- output chain")
+	supportIdx := strings.Index(fw, "support session (§9.4")
+	if outputIdx < 0 || supportIdx < 0 {
+		t.Fatalf("could not locate the output chain (%d) or the support rule (%d)", outputIdx, supportIdx)
+	}
+	if supportIdx < outputIdx {
+		t.Errorf("the support rule is emitted before the output chain: it is not outbound-only")
+	}
+	// 3. The ruleset REPLACES the table. Without the delete, applying appends and
+	//    a closed support window's rule outlives the session that justified it —
+	//    as does every other rule any configuration change was meant to remove.
+	if !strings.Contains(fw, "delete table inet captionbridge") {
+		t.Errorf("the generated ruleset does not clear the table it replaces: old rules would survive")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

@@ -9,6 +9,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/caption/acsp"
 	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/captionbridge/internal/security/support"
 	"github.com/simpledcp/captionbridge/internal/sim"
 )
 
@@ -92,6 +93,11 @@ func TestCueVisibilityReachesTheDashboardWithoutTheText(t *testing.T) {
 // TestSupportSessionRowAndWarning: §8.2's "Support session" row and §8.3's
 // "debug capture / support mode active" alert. The warning code existed and
 // nothing ever raised it, so the condition could not appear on the dashboard.
+//
+// The row is now driven by the SESSION MANAGER rather than by a stored flag. A
+// persisted boolean cannot carry a deadline, so a "support mode on" setting
+// written once stayed on forever — which is precisely the permanent way in that
+// §9.4's time limit exists to prevent (D31).
 func TestSupportSessionRowAndWarning(t *testing.T) {
 	dir := t.TempDir()
 	store := testStore(t, model.AuditoriumProfile{AuditoriumID: "screen-3"})
@@ -104,8 +110,13 @@ func TestSupportSessionRowAndWarning(t *testing.T) {
 		t.Errorf("nothing is capturing; the dashboard must not shout")
 	}
 
-	if err := store.PutSetting(config.SettingSupportMode, "true"); err != nil {
-		t.Fatalf("PutSetting: %v", err)
+	// Open a real, bounded, audited session — the only thing that can now put
+	// the appliance into support mode.
+	mustSetting(t, store, config.SettingSupportEndpointHost, "203.0.113.10")
+	mustSetting(t, store, config.SettingSupportEndpointPort, "443")
+	mustSetting(t, store, config.SettingSupportEgressIface, "eth0")
+	if _, err := sup.support.Open(support.OpenRequest{Reason: "ticket 42", AdminUser: "tech"}); err != nil {
+		t.Fatalf("opening a support session: %v", err)
 	}
 	sup.reconcile(context.Background())
 	st := sup.status()
@@ -114,6 +125,27 @@ func TestSupportSessionRowAndWarning(t *testing.T) {
 	}
 	if !hasCode(st.Warnings, model.WarnDebugCaptureActive) {
 		t.Errorf("an open support session must be visibly indicated, got %v", codes(st.Warnings))
+	}
+
+	// And closing it must take the row and the alert back down: a warning that
+	// only ever goes up is one a booth learns to ignore.
+	if err := sup.support.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+	sup.reconcile(context.Background())
+	st = sup.status()
+	if st.SupportSession != model.TriNo {
+		t.Errorf("a closed session still shows as open, got %q", st.SupportSession)
+	}
+	if hasCode(st.Warnings, model.WarnDebugCaptureActive) {
+		t.Errorf("the alert survived the session closing: %v", codes(st.Warnings))
+	}
+}
+
+func mustSetting(t *testing.T, store *config.SQLiteStore, key, value string) {
+	t.Helper()
+	if err := store.PutSetting(key, value); err != nil {
+		t.Fatalf("PutSetting(%s): %v", key, err)
 	}
 }
 

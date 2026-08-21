@@ -46,6 +46,9 @@ func (s *Server) adminSurface() http.Handler {
 	mux.HandleFunc("/api/admin/session/qr.png", s.requireAdmin(s.handleAdminSessionQR))
 	// §11.5's staff pre-show gate (checklist.go).
 	mux.HandleFunc("/api/admin/preshow", s.requireAdmin(s.handleAdminPreShow))
+	// §9.4 support sessions (support.go): the only way back in once SSH is off.
+	mux.HandleFunc("/api/admin/support", s.requireAdmin(s.handleAdminSupport))
+	mux.HandleFunc("/api/admin/support/close", s.requireAdmin(postOnly(s.handleAdminSupportClose)))
 	mux.Handle("/", s.adminMux())
 	return securityHeaders(mux)
 }

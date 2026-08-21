@@ -16,6 +16,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/readiness"
 	"github.com/simpledcp/captionbridge/internal/security/firewall"
+	"github.com/simpledcp/captionbridge/internal/security/support"
 	"github.com/simpledcp/captionbridge/internal/security/verify"
 	"github.com/simpledcp/captionbridge/internal/web"
 )
@@ -54,6 +55,14 @@ type supervisor struct {
 
 	captionWarnings *readiness.CaptionWarnings
 
+	// support owns the §9.4 session: the only re-entry path once SSH is off, and
+	// therefore the one whose window must never outlive its deadline.
+	support *support.Manager
+	// supportChanged carries the manager's open/close signal into the loop, so
+	// the firewall rule is added and removed at the moment the window does,
+	// rather than at the next scheduled posture pass.
+	supportChanged chan struct{}
+
 	mu sync.Mutex
 	// network and versions are refreshed by reconcile and read by status, which
 	// runs on the web goroutine.
@@ -61,11 +70,11 @@ type supervisor struct {
 	// support is §8.2's "Support session" row, read from the config store by
 	// reconcile. status must not touch the store (an admin page load cannot be
 	// allowed to stall on it), so it reads this cache.
-	support      model.Tri
-	versions     model.SystemConfigVersion
-	lastRecordAt time.Time
-	lastRecordOK bool
-	lastReason   string
+	supportActive model.Tri
+	versions      model.SystemConfigVersion
+	lastRecordAt  time.Time
+	lastRecordOK  bool
+	lastReason    string
 	// persistedAudioCompat is the device identity last written to the §10.8
 	// record, so a newly qualified device is persisted at once rather than
 	// waiting for the readiness outcome to change.
@@ -88,6 +97,10 @@ func (s *supervisor) loop(ctx context.Context) {
 			s.media.poll()
 		case <-posture.C:
 			s.reconcile(ctx)
+		case <-s.supportChanged:
+			// A support window just opened or closed. Reconcile at once: the
+			// ruleset must gain or lose its egress rule when the window does.
+			s.reconcile(ctx)
 		}
 	}
 }
@@ -107,10 +120,7 @@ func (s *supervisor) reconcile(ctx context.Context) {
 	allowlist := firewall.ParseAllowlist(aud.CinemaServerIP)
 	adminOnClient := web.AdminReachableFromPatron(s.patronBind, s.adminBind)
 	if theater != "" && client != "" && len(allowlist) > 0 {
-		s.firewall.ensureApplied(firewall.ConfigFromInputs(firewall.Inputs{
-			Profile: s.profile, TheaterIface: theater, ClientIface: client,
-			Auditorium: aud, AdminOnClientIface: adminOnClient,
-		}))
+		s.firewall.ensureApplied(s.derivedFirewallConfig(theater, client, aud, adminOnClient))
 	} else {
 		s.log.Info(logging.EvStateTransition,
 			logging.Field("phase", "firewall_apply_awaiting_setup"),
@@ -154,11 +164,12 @@ func (s *supervisor) reconcile(ctx context.Context) {
 		AllowedServer:    aud.CinemaServerIP,
 		IdentityStrength: aud.IdentityStrength,
 	}
-	// §8.2 "Support session". §9.4 has it off by default and nothing in this
-	// build can open one, so an absent setting is a genuine "no" rather than an
-	// unmeasured fact — the appliance owns this switch and can read it.
-	support, _, _ := s.store.GetSetting(config.SettingSupportMode)
-	s.support = model.TriOf(support == "true")
+	// §8.2 "Support session", read from the manager that owns the window rather
+	// than from a stored flag. A persisted boolean cannot express a deadline, and
+	// a support switch that is only ever written and never expires is the hole
+	// this feature exists to avoid.
+	_, sessionOpen := s.support.Current()
+	s.supportActive = model.TriOf(sessionOpen)
 	s.mu.Unlock()
 
 	if !reconfigured {
@@ -169,6 +180,22 @@ func (s *supervisor) reconcile(ctx context.Context) {
 		s.recordAudioQualification(aud, hasProfile)
 	}
 	s.recordReadiness(s.buildStatus(rep), rep)
+}
+
+// derivedFirewallConfig is the ruleset this appliance's configuration and live
+// state imply. It is a method rather than an expression inside reconcile so a
+// test can ask what would be applied without a firewall helper to apply it to —
+// the §9.4 support window is a rule that must appear and disappear with the
+// window, and that is exactly the kind of wiring that is easy to leave out.
+func (s *supervisor) derivedFirewallConfig(theater, client string, aud model.AuditoriumProfile, adminOnClient bool) firewall.Config {
+	return firewall.ConfigFromInputs(firewall.Inputs{
+		Profile: s.profile, TheaterIface: theater, ClientIface: client,
+		Auditorium: aud, AdminOnClientIface: adminOnClient,
+		// §9.4: nil unless a session is open right now. Egress() re-checks the
+		// deadline, so a window whose time has passed contributes no rule even if
+		// this pass beat the manager's expiry timer to it.
+		SupportEgress: s.supportEgress(),
+	})
 }
 
 // status is the dashboard snapshot (§10.6). It reads cached measurements and the
@@ -187,7 +214,7 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 	s.mu.Lock()
 	net := s.network
 	versions := s.versions
-	support := s.support
+	support := s.supportActive
 	s.mu.Unlock()
 	net.ConnectedServer = link.Server
 	// §8.5: the OUTCOME of the wrong-room guard, not just the strength of the pin.

@@ -62,6 +62,19 @@
       <h2>Appliance <span class="muted small">(§10.8)</span></h2>
       <dl id="version-detail"></dl>
     </div>
+    <!-- §9.4 support mode: the only way back in once SSH is off, so the state of
+         that way in is spelled out rather than shown as a toggle. -->
+    <div class="tile">
+      <h2>Support session <span class="muted small">(§9.4)</span></h2>
+      <dl id="support-detail"></dl>
+      <p class="muted small" id="support-note"></p>
+      <div class="session-actions">
+        <input type="text" id="support-reason" placeholder="Reason (recorded, required)" maxlength="200">
+        <button type="button" id="support-open">Open a support window</button>
+        <button type="button" id="support-close">Close it</button>
+      </div>
+      <dl id="support-trail"></dl>
+    </div>
     <!-- §11.5 staff pre-show gate. The printable form is the one that matters:
          it goes in a binder and survives the appliance being what is broken. -->
     <div class="tile">

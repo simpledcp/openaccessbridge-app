@@ -44,6 +44,11 @@ type Inputs struct {
 	WebRTCPortRange string
 	// PatronWebPorts overrides DefaultPatronWebPorts when non-empty.
 	PatronWebPorts []int
+	// SupportEgress is the §9.4 support window, present only while a session is
+	// open. It is an INPUT rather than something derived from configuration
+	// because it is not configuration: the endpoint is configured, the window is
+	// a live state with a deadline on it.
+	SupportEgress *SupportEgress
 }
 
 // ConfigFromInputs turns stored configuration into a ruleset Config (§9.1: "The
@@ -78,9 +83,10 @@ func ConfigFromInputs(in Inputs) Config {
 	}
 
 	return Config{
-		Profile:      in.Profile,
-		TheaterIface: in.TheaterIface,
-		ClientIface:  in.ClientIface,
+		Profile:       in.Profile,
+		TheaterIface:  in.TheaterIface,
+		ClientIface:   in.ClientIface,
+		SupportEgress: in.SupportEgress,
 		// The stored field is scalar; ParseAllowlist lets an operator express a
 		// multi-host allowlist (ACSP endpoint + media block, or a redundant server)
 		// without a schema change (§9.1 "IP(s)").

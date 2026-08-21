@@ -24,4 +24,5 @@ type SystemConfigVersion struct {
 }
 
 // CurrentConfigSchemaVersion is the schema version this build writes.
-const CurrentConfigSchemaVersion = 1
+// Version 2 added the §9.4 support-session audit trail (support_sessions).
+const CurrentConfigSchemaVersion = 2

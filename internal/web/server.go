@@ -22,6 +22,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
+	"github.com/simpledcp/captionbridge/internal/security/support"
 )
 
 // LangOption is a selectable caption language for the patron UI.
@@ -77,6 +78,15 @@ type Deps struct {
 	// SetupWindow is how long first-boot setup mode stays open before auto-expiry
 	// (§8.1 step 14). Zero uses a default.
 	SetupWindow time.Duration
+	// Support is the §9.4 session manager (internal/security/support). Nil on an
+	// appliance that does not offer support sessions, and every handler checks:
+	// the surface must say "not available" rather than panicking, and must never
+	// imply a window could be opened when nothing could open one.
+	Support *support.Manager
+	// SupportTrail reads the recent audit trail for the operator surface. It is a
+	// function rather than the store, so this package keeps no ability to write
+	// to the configuration database.
+	SupportTrail func(limit int) ([]model.SupportSession, error)
 }
 
 // Server owns the patron and admin HTTP servers.

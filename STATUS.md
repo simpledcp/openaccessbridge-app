@@ -84,6 +84,7 @@ green.
 | 21 | ICE gathering confined to the configured patron interface, refused by name when that interface is absent, and the networks a patron was really offered MEASURED off the emitted SDP and shown on the dashboard (§6.7, §9.1, §8.2, D28) | `internal/audio/webrtcpeer`, `internal/ipc/network.go`, `cmd/*` |
 | 22 | §10.4 QR onboarding: an in-tree pure-Go QR encoder verified module-for-module against independent implementations across all 160 version/level combinations and decoded by zxing-cpp, served per-show on the admin surface with a computed minimum print size (D29) | `internal/qr`, `internal/web/session_admin.go` |
 | 23 | §11.5 pre-show QA checklist codified as a staff procedure: explicit three-state pass/fail per item, a remedy on every item, staff steps printed but never recorded, and a printable booth sheet (D30) | `internal/model/checklist.go`, `internal/readiness/checklist.go`, `internal/web/checklist.go` |
+| 24 | §9.4 support mode: a bounded, audited, outbound-only WINDOW with an absolute deadline that does not survive a restart, one scoped egress rule, an audit trail beside the switch — plus the fix for an nftables ruleset that could never remove a rule (D31, D31a) | `internal/security/support`, `internal/security/firewall`, `internal/config/support.go`, `cmd/captionbridge-core` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -172,8 +173,17 @@ the audit lanes' own reports.
   the pairing rather than calibrating one device and reporting two; the show path
   in `cmd/captionbridge-media` has the same shape and is masked only by the B3/B4
   refusal. Worth a decision before the hardware path lands.
-- **Support mode (§9.4)** — off by default, outbound-only, time-limited,
-  audited — is still only a config key.
+- **Support mode opens the WINDOW, not a tunnel.** §9.4's session is built —
+  bounded, audited, outbound-only, visibly indicated — but this appliance has no
+  tunnel client and no support endpoint of its own, so nothing dials out. Every
+  surface reports that distinction (`tunnel_established` is a field, always
+  false). A real support transport is a separate piece of work and needs a
+  service to connect to.
+- **The nftables table-replacement fix is not demonstrated on a live ruleset.**
+  Applying needs root (B5) and this host has user namespaces disabled, so the
+  append-vs-replace behaviour is established from nft's documented semantics and
+  the fix is asserted in the generated script text. Confirm it against a real
+  ruleset the first time the helper runs as root (D31a).
 - **Signed offline updates + A/B rollback (§9.4)** are not built.
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.

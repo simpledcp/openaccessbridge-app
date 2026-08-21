@@ -34,6 +34,20 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- The §9.4 support-session audit trail. Not content (guardrail #5): a record of
+-- who opened a way into this appliance, when, for how long, and to which single
+-- address. A support mode with no durable trail is one whose use cannot be
+-- reviewed after the fact.
+CREATE TABLE IF NOT EXISTS support_sessions (
+    id         TEXT PRIMARY KEY,
+    state      TEXT NOT NULL,
+    opened_at  TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    closed_at  TEXT,            -- NULL while open; startup closes any it finds
+    opened_by  TEXT NOT NULL,   -- HASH of the admin username, never the name
+    reason     TEXT NOT NULL,   -- operator free text; stored locally, never logged
+    endpoint   TEXT NOT NULL    -- iface:host:port the window permitted
+);
 `
 
 // SQLiteStore is the crash-safe single-file configuration store. It is the only

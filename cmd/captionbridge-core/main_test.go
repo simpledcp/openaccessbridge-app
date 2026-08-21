@@ -20,6 +20,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/model"
 	"github.com/simpledcp/captionbridge/internal/readiness"
 	"github.com/simpledcp/captionbridge/internal/security/firewall"
+	"github.com/simpledcp/captionbridge/internal/security/support"
 	"github.com/simpledcp/captionbridge/internal/security/verify"
 	"github.com/simpledcp/captionbridge/internal/sim"
 )
@@ -130,14 +131,22 @@ func newSupervisorWithFetcher(t *testing.T, store *config.SQLiteStore, dir strin
 	opts := captionMachineOptions(store, log, aud, cw)
 	opts.Controller, opts.Resolver, opts.Loader = ctrl, res, loader
 
-	return &supervisor{
+	sup := &supervisor{
 		store: store, log: log, profile: model.ProfileBoothDiagnostic,
 		deployed:   mustProfile(model.ProfileBoothDiagnostic),
 		patronBind: "0.0.0.0:8080", adminBind: "127.0.0.1:8090",
 		media:    newMediaClient(filepath.Join(dir, ipc.SocketMedia), log),
 		firewall: newFirewallClient(filepath.Join(dir, ipc.SocketFirewall), log),
 		machine:  acsp.New(opts), hub: hub, ctrl: ctrl, captionWarnings: cw,
-	}, fetcher
+		supportChanged: make(chan struct{}, 1),
+	}
+	sup.support = support.New(support.Options{
+		Store:    store,
+		Log:      log,
+		Endpoint: func() support.Endpoint { return supportEndpoint(store) },
+		OnChange: sup.signalSupportChange,
+	})
+	return sup, fetcher
 }
 
 func mustProfile(name model.FirewallProfile) deploy.Profile {

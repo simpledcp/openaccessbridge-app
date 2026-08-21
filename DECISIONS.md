@@ -428,3 +428,78 @@ readable when the appliance is the thing that is broken.
 `model.SystemReadiness` — the same account of itself the operator is looking at —
 rather than re-deriving from `readiness.Inputs`. A parallel derivation could
 disagree with the page, and two truths on one screen is worse than either.
+
+### D31. Support mode is a WINDOW with a deadline, not a flag — and a window is not a connection [§9.4, §9.1]
+§9.4: "Off by default. When enabled by an admin it is outbound-only,
+time-limited, and audited, and visibly indicated. It is the only re-entry path
+once SSH is disabled." That last sentence is what makes this the one feature in
+the product whose failure mode is a permanent way in, so the design is shaped
+around the failure rather than the feature.
+
+**What existed before was a boolean.** `support_mode` was a settings key the
+dashboard read and nothing wrote. A persisted boolean cannot carry a deadline: set
+once, it stays set, which is precisely the permanent re-entry path §9.4's time
+limit exists to prevent. Startup now CLEARS a stored `support_mode = true` — it
+grants no window and no rule, and leaving it set would tell a future reader that
+support mode is on.
+
+**Opening a session opens exactly one outbound rule.** The output chain is
+`policy drop`, so this is real: `oif <iface> ip daddr <host> tcp dport <port>
+accept`, in the OUTPUT chain and nowhere else. Return traffic is admitted by the
+established/related rule, exactly as Variant A's ACSP replies are. An inbound
+accept would turn "outbound-only" into a listening port on an appliance whose SSH
+is deliberately off, which is the thing support mode replaces.
+
+**A partially configured endpoint is refused, never rendered.** The only two ways
+to render a window with no address are a bare `oif <iface> accept` — an
+unrestricted egress hole opened by a support switch — and silence, which reports
+a window that permits nothing. The host must be a literal IP, not a name: resolving
+one would need DNS from an appliance whose §9.1 checks exist to detect DNS leaks,
+and a name that resolves differently tomorrow is a rule that quietly changes what
+it permits.
+
+**Time-limited means the appliance closes it.** An absolute deadline, clamped to
+four hours whatever is requested, enforced by a timer AND re-checked on every
+read so no caller can see a window the deadline has already closed. Opening and
+closing signal the supervisor to reconcile immediately rather than at the next
+posture pass: the deadline is the promise, and a rule that lingers past it breaks
+it. It does NOT survive a restart — a window that came back after a boot would
+outlive the person who opened it and the reason they gave.
+
+**Audited, and the audit is a precondition.** If the trail cannot record the
+session, the window does not open: an audited feature whose audit failed is an
+unaudited feature. The operator's REASON is required — an audit entry without one
+is a timestamp — and it is stored locally and NEVER logged, because it is free
+text that could contain anything (§9.4). Its length is logged, so a trail of
+empty reasons is visible without the text travelling. The grantee is hashed.
+
+**A window is not a connection, and that is a field rather than a sentence.**
+This appliance has no tunnel client and no support endpoint of its own. It
+permits an outbound destination; it does not dial one. `TunnelEstablished` is
+present on every response and is always false in this build, so nothing can
+quietly start reading "a support session is open" as "a support engineer is on
+the box" — and the dashboard renders that field rather than asserting it.
+
+### D31a. The nftables ruleset REPLACES its table rather than adding to it [§9.1, §9.3]
+Found while building D31, and it predates it. `nft -f` on a table definition has
+implicit `add` semantics: applied at a table that already exists it appends every
+rule again and leaves whatever was there before. The generated script had no
+flush and no delete.
+
+The consequence is not duplicate lines. It is that **a configuration change could
+not remove a rule**: the previous cinema server's allow rule would survive the
+address being corrected, and the admin-on-patron-interface rule would survive a
+switch from Booth Diagnostic to a production profile. The stricter posture would
+be applied, the looser one would still be accepting packets, and introspection
+would find the expected rules present and report the posture verified.
+
+Generate now emits `table inet captionbridge` (creating it if absent, so the
+delete cannot fail on a fresh boot) followed by `delete table inet captionbridge`
+before the definition. Both land inside the same `nft -f` transaction, so there
+is no instant in which the appliance has no table and therefore no default-deny.
+
+**Not demonstrated on a live ruleset here.** Applying nftables needs root (B5)
+and this host has user namespaces disabled, so the behaviour is established from
+nft's documented semantics and the fix is asserted in the generated text. It
+should be confirmed against a real ruleset the first time the helper runs as root
+on an appliance.

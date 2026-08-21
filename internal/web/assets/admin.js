@@ -688,6 +688,62 @@
     el("checklist-summary").textContent = summary;
   }
 
+  /* §9.4. The distinction this renderer exists to hold: an open window is not a
+   * connection. The appliance permits one outbound destination for a bounded
+   * time; it has no tunnel client and dials nothing, and a booth reading
+   * "support session: open" must not conclude that someone is on the box. */
+  function renderSupport(rep) {
+    var rows = [];
+    if (!rep.endpoint_configured) {
+      rows.push(row("Support endpoint", "not configured", STATE_WARN,
+        "no support session can be opened; if SSH is disabled there is no way back into this appliance"));
+    }
+    if (rep.active && rep.session) {
+      var mins = Math.max(0, Math.round((rep.remaining_seconds || 0) / 60));
+      rows.push(row("Window", "OPEN — " + mins + " min remaining", STATE_WARN,
+        "outbound only, to " + rep.session.endpoint));
+      /* Read from the API rather than asserted here: the field exists so that
+       * nothing can drift into reporting a connection this appliance never
+       * made. It is false in every build that has no tunnel client. */
+      rows.push(row("Connection",
+        rep.tunnel_established ? "established" : "none established by this appliance",
+        rep.tunnel_established ? STATE_WARN : null,
+        "the window permits a connection; it does not make one"));
+      rows.push(row("Opened", new Date(rep.session.opened_at).toLocaleString(), null));
+    } else {
+      rows.push(row("Window", "closed", STATE_OK, "support mode is off by default"));
+    }
+    dl(el("support-detail"), rows);
+    el("support-note").textContent = rep.note || "";
+
+    /* The trail sits beside the switch: a support mode whose history is only in
+     * a database is one nobody reviews. */
+    dl(el("support-trail"), (rep.recent || []).slice(0, 5).map(function (s) {
+      return row(new Date(s.opened_at).toLocaleString(), s.state,
+        s.state === "open" ? STATE_WARN : null, s.endpoint);
+    }));
+  }
+
+  function refreshSupport() {
+    fetch("/api/admin/support", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 503) return null;
+        if (!r.ok) throw new Error("status " + r.status);
+        return r.json();
+      })
+      .then(function (rep) {
+        if (!rep) {
+          dl(el("support-detail"), [row("Support session", "not available on this appliance", STATE_UNKNOWN)]);
+          return;
+        }
+        renderSupport(rep);
+      })
+      .catch(function () {
+        dl(el("support-detail"), [row("Support session", "not answering", STATE_BAD,
+          "check captionbridge-core")]);
+      });
+  }
+
   function refreshChecklist() {
     fetch("/api/admin/preshow", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) {
@@ -783,4 +839,29 @@
    * meter, and it is derived from the status rows that refresh every 3 s. */
   refreshChecklist();
   setInterval(refreshChecklist, 15000);
+
+  /* §9.4. The reason is required by the API; sending an empty one produces the
+   * refusal rather than a silent no-op, which is what an operator should see. */
+  el("support-open").addEventListener("click", function () {
+    var reason = el("support-reason").value || "";
+    fetch("/api/admin/support", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason })
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.json().then(function (d) {
+          el("support-note").textContent = (d && d.error) || "the appliance refused that request";
+        });
+      }
+      el("support-reason").value = "";
+      return refreshSupport();
+    }).catch(refreshSupport);
+  });
+  el("support-close").addEventListener("click", function () {
+    fetch("/api/admin/support/close", { method: "POST", credentials: "same-origin" })
+      .then(refreshSupport).catch(refreshSupport);
+  });
+  refreshSupport();
+  setInterval(refreshSupport, 15000);
 })();
