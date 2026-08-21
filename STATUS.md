@@ -190,7 +190,8 @@ refute it; survivors carry reproductions). Three broke shipped behaviour and are
 fixed (D36); the §9.3 SSH row (D37), §8.5's half-wired wrong-room guard and its
 missing wizard fields (D38), §9.4's unreachable debug capture (D39) and the
 §5/§7 patron-truth cluster (D40) and §12.4's unenforced profile requirements
-(D41) are done too. **25 remain open**, grouped below by section. This is the
+(D41) and the §10.3/§10.8/§9.4 diagnostics (D42) are done too. **21 remain
+open**, grouped below by section. This is the
 next backlog, and it is listed rather than summarised because a summary is how a
 list like this stops being acted on.
 
@@ -216,16 +217,15 @@ step (the miswiring §8.1 step 3 exists to prevent), no theater-side static
 IP/DHCP configuration (which needs root, B5), partial server-family collection,
 and the audio device/calibration steps are not part of the wizard flow.
 
-**§9 security (4 open).** The SSH row (D37), debug capture (D39) and
-`caption.cue.visible_no_text` (D40) are done. Still open:
-`caption.timeline.anchor_updated` is never emitted;
+**§9 security (3 open).** The SSH row (D37), debug capture (D39),
+`caption.cue.visible_no_text` (D40) and `caption.timeline.anchor_updated` (D42)
+are done. Still open:
 Booth Diagnostic's "admin on the configured admin subnet" is admin on the whole
 patron interface instead; §9.5's Wi-Fi spec is unenforced prose.
 
-**§10 models (4).** `last_timeline_anchor_monotonic_ns` is declared and never
-populated. Two of §10.8's four compatibility revisions are never written, so
-"what changed since this last worked?" is half-answered. `update_channel` has no
-staged-rollout meaning.
+**§10 models (1 open).** The timeline anchor and both missing §10.8 compatibility
+revisions are done (D42). Still open: `update_channel` has no staged-rollout
+meaning.
 
 **§11 test layers (4).** Every no-forwarding/no-reachability claim is derived
 from configuration the appliance generated rather than probed; there is no

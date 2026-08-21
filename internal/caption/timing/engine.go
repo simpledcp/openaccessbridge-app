@@ -487,6 +487,15 @@ type Status struct {
 	WarnBudgetMS   int64
 	TargetBudgetMS int64
 	OverBudget     bool
+	// AnchorMonotonicNS is the MONOTONIC timestamp of the last re-anchor, or 0
+	// when the engine has never anchored (§5.5, §10.3).
+	//
+	// Monotonic on purpose: §5.5's whole design is that playback position is
+	// predicted from a monotonic clock so a wall-clock step — NTP, a booth PC
+	// correcting itself mid-show — cannot move the captions. A diagnostic that
+	// reported the wall time of the anchor would be measuring the thing the
+	// design exists to ignore.
+	AnchorMonotonicNS int64
 }
 
 // Status returns a diagnostic snapshot (no caption text).
@@ -494,17 +503,30 @@ func (e *Engine) Status() Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return Status{
-		PositionMS:     e.positionLocked(),
-		State:          e.state,
-		Playing:        e.rate != 0,
-		Visible:        e.visible,
-		DriftMS:        e.driftMS,
-		Language:       e.language,
-		CueCount:       len(e.cues),
-		WarnBudgetMS:   e.warnBudgetMS,
-		TargetBudgetMS: e.targetBudgetMS,
-		OverBudget:     e.overBudgetLocked(),
+		PositionMS:        e.positionLocked(),
+		State:             e.state,
+		Playing:           e.rate != 0,
+		Visible:           e.visible,
+		DriftMS:           e.driftMS,
+		Language:          e.language,
+		CueCount:          len(e.cues),
+		WarnBudgetMS:      e.warnBudgetMS,
+		TargetBudgetMS:    e.targetBudgetMS,
+		OverBudget:        e.overBudgetLocked(),
+		AnchorMonotonicNS: anchorNanos(e.anchorMono),
 	}
+}
+
+// anchorNanos renders an anchor as nanoseconds, or 0 for "never anchored".
+//
+// Zero is the honest value for an engine that has not anchored: §10.3's field is
+// a diagnostic, and a number derived from a zero time would read as a real
+// anchor at an absurd instant rather than as an absence.
+func anchorNanos(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
 }
 
 // DriftMS returns the last measured drift (predicted − server) at the most recent

@@ -317,6 +317,23 @@ func (c *Controller) MaxDriftMS() int64 {
 	return max
 }
 
+// LastAnchorMonotonicNS is the most recent re-anchor across the language
+// engines, or 0 when nothing has anchored (§5.5, §10.3).
+//
+// The MOST RECENT, because §10.3's field answers "when did the timeline last get
+// a fix from the server" — and a tech reading it after a drift complaint wants
+// the freshest anchor, not the staleest. Zero means no engine has ever anchored,
+// which is a real state (nothing has played yet) and not a timestamp.
+func (c *Controller) LastAnchorMonotonicNS() int64 {
+	// The REFERENCE engine, for the same reason §8.2's timeline row reads it:
+	// it is the thing the server's transport state actually drives. The
+	// per-language content engines only exist once reels have loaded, so taking
+	// the anchor from them would report "never anchored" for every show between
+	// the first Update Timeline and the first loaded language — which is exactly
+	// the window a tech investigating a slow start is looking at.
+	return c.ref.Status().AnchorMonotonicNS
+}
+
 // WarnBudgetMS returns the configured drift warn threshold (§5.5 / D9). Zero in
 // Options takes the timing package's D9 default, which is what this reports.
 func (c *Controller) WarnBudgetMS() int64 { return c.ref.WarnBudgetMS() }

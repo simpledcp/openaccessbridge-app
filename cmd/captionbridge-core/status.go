@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -375,6 +376,21 @@ func (s *supervisor) recordReadiness(r model.SystemReadiness, rep verify.Report)
 	if fwVersion != "" {
 		v.FirewallProfileVersion = fwVersion
 	}
+	// §10.8's remaining two compatibility revisions. They were declared on the
+	// record and never written, so "what changed since this last worked?" — the
+	// question §10.8 exists to answer — could only be half-answered: a tech
+	// comparing a working appliance with a broken one saw the schema and the
+	// firewall and nothing about the hardware or the server family.
+	//
+	// Both are EMPTY when unknown rather than filled with a plausible default. A
+	// revision string nobody set would compare equal between two appliances that
+	// differ, which is worse than an obviously absent field.
+	if hw := s.hardwareProfileVersion(); hw != "" {
+		v.HardwareProfileVersion = hw
+	}
+	if sf := s.serverFamilyCompat(); sf != "" {
+		v.ServerFamilyCompat = sf
+	}
 	s.mu.Lock()
 	if s.versions.AudioDeviceCompat != "" {
 		v.AudioDeviceCompat = s.versions.AudioDeviceCompat
@@ -452,4 +468,54 @@ func (s *supervisor) calibrationRecorded() bool {
 func (s *supervisor) phase9Recorded() bool {
 	v, ok, _ := s.store.GetSetting(config.SettingPhase9Review)
 	return ok && strings.TrimSpace(v) != ""
+}
+
+// hardwareProfileVersion is §10.8's hardware revision: the platform this build
+// runs on plus the input devices it is actually serving from.
+//
+// It is built from OBSERVED devices, not from configuration, because the
+// question it answers is "did the hardware change" — and a stored device id that
+// no longer matches what is plugged in is precisely the case a tech is chasing.
+// Synthetic stand-ins are marked as such, so a record from a bench appliance can
+// never be mistaken for one from a booth (B3/B4).
+func (s *supervisor) hardwareProfileVersion() string {
+	devices := map[string]bool{}
+	for _, a := range s.media.audio() {
+		if id := strings.TrimSpace(a.InputDeviceID); id != "" {
+			devices[id] = true
+		}
+	}
+	if len(devices) == 0 {
+		// Nothing observed: an empty revision is the honest answer, and it makes
+		// the record obviously incomplete rather than falsely comparable.
+		return ""
+	}
+	ids := make([]string, 0, len(devices))
+	for id := range devices {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return runtime.GOOS + "/" + runtime.GOARCH + ":" + strings.Join(ids, ",")
+}
+
+// serverFamilyCompat is §10.8's per-family compatibility revision: which cinema
+// server family this auditorium is pinned to, and the ACSP variant in force.
+//
+// The family is a Phase 0A finding (B1) and is often unknown, which is why this
+// returns EMPTY rather than a placeholder: "unknown" written into a revision
+// field compares equal across two appliances talking to different servers.
+func (s *supervisor) serverFamilyCompat() string {
+	aud, ok := auditoriumProfile(s.store)
+	if !ok {
+		return ""
+	}
+	family := strings.TrimSpace(aud.ServerFamily)
+	if family == "" {
+		return ""
+	}
+	variant := strings.TrimSpace(string(aud.ACSPInitiation))
+	if variant == "" {
+		variant = string(model.ACSInitiated) // D6: Variant A is the working assumption
+	}
+	return family + "/" + variant
 }

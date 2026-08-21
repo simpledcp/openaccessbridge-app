@@ -1274,3 +1274,43 @@ anyone, silently, with nothing anywhere saying it had been considered.
 
 `RequireClearErrorStates` got no runtime gate on purpose: it is a property of the
 patron copy, not of a running appliance, and D40 is what actually satisfies it.
+
+## The diagnostics that were specified and never produced (D42)
+
+Three fields and an event, all named in the plan, none of them ever written.
+Nothing was broken by their absence — which is why they survived so long. They
+are only missed at the moment something else breaks and the question cannot be
+answered.
+
+**The timeline anchor was declared and never assigned.** §5.5's whole design is
+predicting position from a monotonic clock and re-anchoring on the server, and
+the field that says when the last fix arrived read 0 everywhere. Zero also means
+"never anchored", so it could not distinguish a running show from a dead one.
+
+Getting it right took one correction worth keeping: my first version read the
+anchor from the per-language content engines, which only exist once reels have
+loaded. That reports "never anchored" for the whole window between the first
+Update Timeline and the first loaded language — exactly the window someone
+investigating a slow start is staring at. It reads the REFERENCE engine now, for
+the same reason §8.2's timeline row does.
+
+**§9.4 lists `caption.timeline.anchor_updated` and nothing emitted it**, so after
+a "captions are drifting" report there was no record of whether the server kept
+re-anchoring or how far out the prediction was each time.
+
+**Two of §10.8's four compatibility revisions were never written**, so the record
+that exists to answer "what changed since this last worked?" answered half of it.
+The hardware revision is built from OBSERVED devices rather than stored
+configuration, because a stored device id that no longer matches what is plugged
+in is the very case being chased. Two details took thought: it is sorted, so a
+poll reporting devices in a different order cannot look like a hardware change;
+and the record only overwrites with a non-empty value, so the last known hardware
+survives the media process going away — which is precisely the outage someone
+would be debugging when they read it. Both fields stay EMPTY when unknown, since
+a placeholder revision compares equal between two appliances that differ.
+
+**And a latent crash fell out.** `stateLocked()` called `m.ctrl.MaxDriftMS()`
+unguarded, while the machine guards for a nil controller everywhere it drives
+content — so `State()` on a machine built without one panicked. It had never
+fired because every caller supplies a controller. Asking a second question of the
+same field is what surfaced it, and it is fixed rather than worked around.

@@ -375,6 +375,7 @@ func (m *Machine) applyTimeline(req Request) {
 		} else {
 			m.ctrl.UpdateTimeline(req.TimelineMS)
 		}
+		m.logAnchor(req.TimelineMS)
 		m.advanceToPlaying()
 	case PlayPaused:
 		m.ctrl.Pause()
@@ -386,6 +387,7 @@ func (m *Machine) applyTimeline(req Request) {
 		// No play-state given: treat as a timeline re-anchor while playing.
 		if m.state == model.StatePlaying {
 			m.ctrl.UpdateTimeline(req.TimelineMS)
+			m.logAnchor(req.TimelineMS)
 		}
 	}
 	if m.state == model.StateLeased {
@@ -830,6 +832,16 @@ func (m *Machine) stateLocked() model.CaptionLinkState {
 	if len(m.languages) > 0 {
 		curLang = m.languages[0]
 	}
+	// A nil controller is a supported configuration — the machine guards for it
+	// wherever it drives content (blankOutput, loadReels) — and this function did
+	// not, so State() on a machine built without one panicked. It was latent
+	// because every existing caller supplies a controller; the §10.3 anchor field
+	// is simply the first thing to ask a second question of it.
+	var drift, anchor int64
+	if m.ctrl != nil {
+		drift = m.ctrl.MaxDriftMS()
+		anchor = m.ctrl.LastAnchorMonotonicNS()
+	}
 	return model.CaptionLinkState{
 		State:              m.state,
 		Server:             m.server,
@@ -843,8 +855,34 @@ func (m *Machine) stateLocked() model.CaptionLinkState {
 		AssetsLoaded:       len(m.loadedLangs) > 0,
 		CurrentLanguage:    curLang,
 		AvailableLanguages: m.availLangs,
-		DriftMSEstimate:    m.ctrl.MaxDriftMS(),
+		DriftMSEstimate:    drift,
+		// §10.3's anchor timestamp. It was declared on this struct and never
+		// assigned, so the one diagnostic that says when the timeline last got a
+		// fix from the server read 0 on every appliance — and 0 is also the value
+		// for "never anchored", which made the field unable to tell a running show
+		// from a dead one.
+		LastTimelineAnchorMonotonicNS: anchor,
 	}
+}
+
+// logAnchor emits §9.4's `caption.timeline.anchor_updated`.
+//
+// The event is in §9.4's minimum set and nothing emitted it, so the one thing a
+// tech needs after a "captions are drifting" report — did the server keep
+// re-anchoring us, and by how much was the local prediction out each time — was
+// not recorded anywhere. §5.5's whole design is re-anchoring; its diagnostic was
+// the missing half.
+//
+// It carries positions and a drift figure, which are timeline values, never
+// content: a timeline position says where the film is, not what anyone said.
+func (m *Machine) logAnchor(timelineMS int64) {
+	if m.ctrl == nil {
+		return
+	}
+	m.log.Info(logging.EvTimelineAnchorUpdated,
+		logging.Field("timeline_ms", timelineMS),
+		logging.Field("drift_ms", m.ctrl.MaxDriftMS()),
+		logging.Field("play_state", string(m.playState)))
 }
 
 func (m *Machine) emitState() {

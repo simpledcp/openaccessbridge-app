@@ -881,3 +881,47 @@ anywhere saying it had been considered.
 `RequireClearErrorStates` is deliberately NOT given a runtime gate: it is a
 property of the code (§7.2's patron copy), not of a running appliance, and the
 patron-truth pass (D40) is what actually satisfies it.
+
+### D42. The diagnostics §10.3, §10.8 and §9.4 specify, actually produced [§5.5, §9.4, §10.3, §10.8]
+Three fields and one event that the plan names and the appliance never wrote.
+Each is the same kind of loss: not a broken feature, but a question a tech cannot
+answer at the moment something breaks.
+
+**`last_timeline_anchor_monotonic_ns` was declared and never assigned.** §5.5's
+whole design is predicting playback position from a monotonic clock and
+re-anchoring on the server's timeline, and the one diagnostic that says WHEN the
+timeline last got a fix read 0 on every appliance. Zero is also the value for
+"never anchored", so the field could not tell a running show from a dead one. It
+now comes from the controller's REFERENCE engine, for the same reason §8.2's
+timeline row does: that is the engine the server's transport actually drives.
+The per-language content engines only exist once reels have loaded, so reading
+the anchor from them would report "never anchored" for every show between the
+first Update Timeline and the first loaded language — precisely the window
+someone investigating a slow start is looking at.
+
+**`caption.timeline.anchor_updated` is in §9.4's minimum event set and nothing
+emitted it.** After a "captions are drifting" report there was no record of
+whether the server kept re-anchoring, or by how much the local prediction was out
+each time. §5.5 is built on re-anchoring; this was its missing half. The event
+carries the timeline position, the drift and the play state — timeline values,
+never content: a position says where the film is, not what anyone said.
+
+**Two of §10.8's four compatibility revisions were never written.** §10.8 exists
+to answer "what changed since this last worked?", and a tech comparing a working
+appliance with a broken one saw the schema and the firewall and nothing about the
+hardware or the server family. Both are now written, and both are EMPTY when
+unknown rather than filled with a plausible default — a revision string nobody
+set compares EQUAL between two appliances that differ, which is worse than an
+obviously absent field. The hardware revision is built from OBSERVED devices
+rather than configuration, because the question it answers is "did the hardware
+change" and a stored device id that no longer matches what is plugged in is the
+case being chased; it is order-independent, so a poll cannot look like a change;
+and the record only ever overwrites these fields with a non-empty value, so the
+last known hardware survives the media process going away — which is exactly the
+outage a tech is debugging.
+
+**A latent crash fell out of it.** `stateLocked()` called `m.ctrl.MaxDriftMS()`
+unguarded while the machine guards for a nil controller everywhere it drives
+content. `State()` on a machine built without one panicked, latently, because
+every existing caller happened to supply a controller. Asking a second question
+of the same field is what surfaced it.
