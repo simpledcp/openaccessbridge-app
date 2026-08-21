@@ -69,7 +69,16 @@ func main() {
 
 	// D11: the per-profile concurrent-client cap is enforced by the fan-out
 	// backpressure, which means the cap has to reach the fan-out (§12 capacity).
-	hub := fanout.NewHub(fanout.Options{Auditorium: *auditorium, MaxClients: deployed.MaxConcurrentClients})
+	// §9.4's `caption.cue.visible_no_text`: a cue was shown, in this language, for
+	// this long — never its words. It is the sanctioned trade the no-content rule
+	// leaves open for debugging a "captions look wrong" report, and it had no
+	// production caller, so the only way to investigate one was to capture the
+	// text itself.
+	cueVisibility := logging.NewCueVisibilityTracker(log, logging.CueVisibilityOptions{})
+	hub := fanout.NewHub(fanout.Options{
+		Auditorium: *auditorium, MaxClients: deployed.MaxConcurrentClients,
+		OnCueVisibility: cueVisibility.Observe,
+	})
 	ctrl := caption.NewController(caption.Options{Hub: hub})
 	ctrl.Start()
 	defer ctrl.Close()

@@ -1210,3 +1210,31 @@ is D40.
 Six behaviours mutation-confirmed. Two first attempts proved nothing and were
 worth chasing: one asserted against the harness's empty initial state rather than
 the page's, and one removed a guard no test could exercise.
+
+## §9.4's cue-visibility event, and a mutation that changed the test rather than the code
+
+`caption.cue.visible_no_text` is §9.4's sanctioned trade against the no-content
+rule: a cue was shown, in this language, for this long — never the words. The
+tracker existed, hashed the cue id, and had no caller. Same shape as the debug
+capture: the safe path was unreachable, so investigating a "captions look wrong"
+report meant capturing the text.
+
+Wiring it into the fan-out took two corrections, and both are worth recording.
+
+The first was mine and immediate: on a cue-OUT the new state carries no id (it is
+a blank), so reporting it left the tracker unable to pair the hide with its show
+and it emitted nothing at all. The hide has to name the cue it is ENDING, which
+is the previous state's id.
+
+The second is subtler. A mutation that passed the caption TEXT where the id
+belongs did not fail anything — because the tracker hashes whatever it is handed,
+so no text appeared in the log and every assertion held. That looks like a
+non-finding until you consider what the hash is of: a caption line is
+low-entropy, and a hash of one is confirmable against a candidate script by
+anyone holding the log. "Was this line shown in this screening" is exactly the
+question §9.4's opaque identifiers exist to make unanswerable. The test now pins
+that the emitted hash is the hash of the cue ID and specifically NOT the hash of
+the text, and the mutation fails as it should.
+
+That is the second time in this pass that a mutation proving nothing was the
+useful result rather than the wasted one.

@@ -70,7 +70,9 @@ type cueState struct {
 
 // Hub fans caption state out to subscribers, keyed by language.
 type Hub struct {
-	mu        sync.Mutex
+	mu              sync.Mutex
+	onCueVisibility func(language, cueID string, visible bool)
+
 	subs      map[*Subscriber]struct{}
 	cueByLang map[string]cueState
 	// kindByLang records which track kind serves each language. Presence in this
@@ -100,11 +102,23 @@ type Options struct {
 	// OnCount is called with the live subscriber count on connect/disconnect, for
 	// the dashboard "connected caption clients" tile (§8.2).
 	OnCount func(int)
+	// OnCueVisibility receives every cue-in and cue-out, for §9.4's
+	// `caption.cue.visible_no_text` event: "records that a cue was shown and for
+	// how long, not its words — enough to debug a 'captions look wrong' report
+	// without storing content".
+	//
+	// It takes the cue ID rather than the text, and the tracker hashes even that
+	// before anything reaches a log. Nil disables the event entirely; the hub
+	// never logs on its own, because a fan-out that decided for itself what to
+	// record would be the wrong place for that decision to live.
+	OnCueVisibility func(language, cueID string, visible bool)
 }
 
 // NewHub builds a Hub.
 func NewHub(opts Options) *Hub {
 	return &Hub{
+		onCueVisibility: opts.OnCueVisibility,
+
 		subs:       make(map[*Subscriber]struct{}),
 		cueByLang:  make(map[string]cueState),
 		kindByLang: make(map[string]model.TrackKind),
@@ -146,6 +160,11 @@ func (h *Hub) buildLocked(language string) Message {
 func (h *Hub) PublishCue(language string, visible bool, cue model.Cue) {
 	h.mu.Lock()
 	h.seq++
+	// The cue that was on screen before this call. A cue-OUT has to name the cue
+	// it is ending — the new state carries no id, so reporting that would leave
+	// §9.4's event unable to pair a hide with its show and it would emit nothing
+	// at all.
+	prev := h.cueByLang[language]
 	cs := cueState{visible: visible}
 	if visible {
 		cs.text = cue.Text
@@ -169,7 +188,19 @@ func (h *Hub) PublishCue(language string, visible bool, cue model.Cue) {
 	}
 	msg := h.buildLocked(language)
 	targets := h.subsForLocked(language)
+	onVis := h.onCueVisibility
 	h.mu.Unlock()
+	// §9.4's content-free diagnostic, outside the lock: a cue was shown, in this
+	// language, for this long. Never the words.
+	if onVis != nil {
+		id := cs.cueID
+		if !visible {
+			id = prev.cueID
+		}
+		if id != "" {
+			onVis(language, id, visible)
+		}
+	}
 	for _, s := range targets {
 		s.deliver(msg)
 	}

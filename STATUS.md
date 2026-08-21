@@ -189,7 +189,7 @@ A fresh audit of every `buildplan.md` section against the shipped tree produced
 refute it; survivors carry reproductions). Three broke shipped behaviour and are
 fixed (D36); the §9.3 SSH row (D37), §8.5's half-wired wrong-room guard and its
 missing wizard fields (D38), §9.4's unreachable debug capture (D39) and the
-§5/§7 patron-truth cluster (D40) are done too. **27 remain open**, grouped below
+§5/§7 patron-truth cluster (D40) are done too. **26 remain open**, grouped below
 by section. This is the
 next backlog, and it is listed rather than summarised because a summary is how a
 list like this stops being acted on.
@@ -216,9 +216,9 @@ step (the miswiring §8.1 step 3 exists to prevent), no theater-side static
 IP/DHCP configuration (which needs root, B5), partial server-family collection,
 and the audio device/calibration steps are not part of the wizard flow.
 
-**§9 security (5 open).** The SSH row (D37) and debug capture (D39) are done.
-Still open: `caption.cue.visible_no_text` and `caption.timeline.anchor_updated`
-are never emitted, so §9.4's sanctioned content-free diagnostics do not exist;
+**§9 security (4 open).** The SSH row (D37), debug capture (D39) and
+`caption.cue.visible_no_text` (D40) are done. Still open:
+`caption.timeline.anchor_updated` is never emitted;
 Booth Diagnostic's "admin on the configured admin subnet" is admin on the whole
 patron interface instead; §9.5's Wi-Fi spec is unenforced prose.
 

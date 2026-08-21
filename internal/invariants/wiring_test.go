@@ -380,6 +380,24 @@ func TestInvariant_DebugCaptureHasADoorAndAnAlert(t *testing.T) {
 	}
 }
 
+// TestInvariant_TheCueVisibilityEventHasAProducer: §9.4 names
+// `caption.cue.visible_no_text` as the sanctioned trade against the no-content
+// rule — "records that a cue was shown and for how long, not its words — enough
+// to debug a 'captions look wrong' report without storing content".
+//
+// The tracker implemented it and nothing called it, so the only way to
+// investigate such a report was to capture the text itself. Same shape as D39:
+// an unreachable safe path does not prevent the act.
+//
+// The literal is LOAD-BEARING.
+func TestInvariant_TheCueVisibilityEventHasAProducer(t *testing.T) {
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	if !strings.Contains(src, "OnCueVisibility: cueVisibility.Observe") {
+		t.Error("§9.4's caption.cue.visible_no_text has no producer: a 'captions look wrong' " +
+			"report can only be investigated by capturing the text")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {
