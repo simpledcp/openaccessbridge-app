@@ -30,6 +30,11 @@ import (
 // ChecklistFacts are the few things the checklist needs that the dashboard
 // verdict does not carry, supplied by the surface that owns them.
 type ChecklistFacts struct {
+	// PhysicalPortLabel is §8.5's re-cabling defence: "Tie the auditorium profile
+	// to the physical port label so a re-cabling that swaps rooms is caught at
+	// setup, not mid-show." The appliance cannot see a cable, so the label it was
+	// given is printed and a person confirms it.
+	PhysicalPortLabel string
 	// Auditorium is the room's own name (§8.5), which the dashboard verdict does
 	// not carry — SystemReadiness names the cinema SERVER, which is a different
 	// thing and mixing them up is precisely the wrong-room confusion §8.5 is
@@ -60,7 +65,7 @@ func BuildChecklist(st model.SystemReadiness, facts ChecklistFacts) model.PreSho
 	checks = append(checks, captionChecks(st)...)
 	checks = append(checks, audioChecks(st, DefaultLatencyBudgets())...)
 	checks = append(checks, patronChecks(st, facts, now())...)
-	checks = append(checks, staffChecks(st)...)
+	checks = append(checks, staffChecks(st, facts.PhysicalPortLabel)...)
 
 	out := model.PreShowChecklist{
 		Auditorium:  facts.Auditorium,
@@ -420,7 +425,7 @@ func patronChecks(st model.SystemReadiness, facts ChecklistFacts, now time.Time)
 // and this repo has already shipped that once (a §10.8 readiness stamp written
 // by pressing a button). So these items are always outstanding, every time the
 // sheet is generated, and the sheet says so.
-func staffChecks(st model.SystemReadiness) []model.PreShowCheck {
+func staffChecks(st model.SystemReadiness, portLabel string) []model.PreShowCheck {
 	patronNet := model.PreShowCheck{
 		ID: "patron_page_reachable_from_seats", Title: "Patron page loads on the patron Wi-Fi, FROM THE SEATS",
 		Section: "§11.5, §9.5", Source: model.SourceStaff, Blocking: true,
@@ -437,6 +442,23 @@ func staffChecks(st model.SystemReadiness) []model.PreShowCheck {
 			"surface. The appliance's own check answers for its BINDING; only this one answers for " +
 			"what the network actually permits.",
 	}
+	cable := model.PreShowCheck{
+		ID: "theater_cable_in_the_labelled_port", Title: "The theater-side cable is in the labelled port",
+		Section: "§8.5", Source: model.SourceStaff, Blocking: false,
+		Remedy: "If the cable is in a different port, this appliance is very likely serving another " +
+			"room. Stop and check the rack against the auditorium profile before the house opens — " +
+			"this is the re-cabling failure §8.5 exists to catch, and it is invisible from software.",
+	}
+	if label := strings.TrimSpace(portLabel); label != "" {
+		cable.Detail = "This auditorium's profile says the theater side is on: " + label +
+			". Confirm the cable is physically there."
+	} else {
+		cable.Detail = "No physical port label is recorded for this auditorium, so there is nothing " +
+			"to check the rack against. Record one in the setup wizard."
+		cable.Remedy = "Record the port label in the setup wizard. Without it a re-cabling that swaps " +
+			"two rooms cannot be caught at setup, which is what §8.5 asks for."
+	}
+
 	loaner := model.PreShowCheck{
 		ID: "loaner_kit_ready", Title: "Loaner devices and wired headphones are charged and ready",
 		Section: "§2, §12.5", Source: model.SourceStaff, Blocking: false,
@@ -445,7 +467,7 @@ func staffChecks(st model.SystemReadiness) []model.PreShowCheck {
 		Remedy: "A patron with no usable device has no access, whatever this appliance reports. Wired " +
 			"headphones matter for HI specifically: Bluetooth adds 100-300 ms on top of the budget.",
 	}
-	return []model.PreShowCheck{patronNet, adminHidden, loaner}
+	return []model.PreShowCheck{patronNet, adminHidden, cable, loaner}
 }
 
 func passFail(ok bool) model.CheckState {

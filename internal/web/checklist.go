@@ -52,6 +52,18 @@ func (s *Server) preShowChecklist() model.PreShowChecklist {
 		Auditorium:           s.auditoriumName(),
 		PerShowTokenRequired: s.cfg.PerShowToken,
 	}
+	// §8.5's re-cabling defence: the label the installer recorded, printed for a
+	// person to check against the rack.
+	if s.deps.Store != nil {
+		if profiles, err := s.deps.Store.ListAuditoriumProfiles(); err == nil {
+			for _, p := range profiles {
+				if strings.TrimSpace(p.PhysicalPortLabel) != "" {
+					facts.PhysicalPortLabel = p.PhysicalPortLabel
+					break
+				}
+			}
+		}
+	}
 	if cur, ok := s.sessions.Current(); ok {
 		facts.SessionIssued = true
 		facts.SessionExpiresAt = cur.ExpiresAt

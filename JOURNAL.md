@@ -1109,3 +1109,30 @@ nothing looked would be the mirror image of the defect being fixed, so it reads
 else the profile rule already fails — which is exactly where an unmeasured state
 is most dangerous, and the case my first tests missed. Four behaviours
 mutation-confirmed once that gap was closed.
+
+## §8.5's wrong-room guard was running on half its input (D38)
+
+The setup wizard collected the expected screen name. The §10.5 record stored it.
+The ACSP machine implemented the comparison, complete with a comment explaining
+why it compares case- and whitespace-insensitively but nothing cleverer ("treating
+'Screen 3' as 'Auditorium 3' would silence exactly the re-cabling this guard
+exists to catch"). The simulator exercised it. And core passed only the
+fingerprint.
+
+So an installer filled in the field, and it did nothing.
+
+The mutation makes the failure vivid: with the screen name unwired, a server
+announcing "Screen 7" against a pin of "Auditorium 3" reports identity
+**"unpinned"** — not a mismatch, not a match, but "nothing was pinned", while the
+wizard's field is full. And it is the worse half to have lost: what a server
+announces as a fingerprint is a Phase 0A finding (B1), so the screen name is the
+only pin an operator can actually set today.
+
+The wizard was also missing the fingerprint field and the physical port label
+entirely, so two of §8.5's three pins had no way in at all. Both are now there,
+along with the room name §7.2 shows patrons.
+
+The port label gets the §11.5 treatment rather than a fake check: an appliance
+cannot see a cable, so the sheet prints the label the installer recorded and asks
+a person to confirm the rack matches it. With none recorded it says there is
+nothing to check against — an unrecorded label is the finding, not a blank line.

@@ -229,3 +229,36 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// §8.5: "Tie the auditorium profile to the physical port label so a re-cabling
+// that swaps rooms is caught at setup, not mid-show." The appliance cannot see a
+// cable, so the honest form is a staff step that prints the label it was given.
+func TestThePortLabelIsPrintedForAPersonToCheck(t *testing.T) {
+	facts := liveFacts()
+	facts.PhysicalPortLabel = "rack A, port 3"
+	cl := BuildChecklist(healthy(), facts)
+
+	c := find(t, cl, "theater_cable_in_the_labelled_port")
+	if c.Source != model.SourceStaff {
+		t.Fatalf("the cable check is %q; an appliance cannot see a cable", c.Source)
+	}
+	if !strings.Contains(c.Detail, "rack A, port 3") {
+		t.Fatalf("the sheet does not print the label to check against: %q", c.Detail)
+	}
+	if c.State != model.CheckNotRun {
+		t.Fatalf("a staff step reports %q", c.State)
+	}
+}
+
+// With no label recorded there is nothing to check the rack against, and the
+// sheet says so rather than printing an empty instruction.
+func TestNoPortLabelSaysThereIsNothingToCheckAgainst(t *testing.T) {
+	cl := BuildChecklist(healthy(), liveFacts())
+	c := find(t, cl, "theater_cable_in_the_labelled_port")
+	if !strings.Contains(c.Detail, "No physical port label") {
+		t.Fatalf("an unrecorded label does not say so: %q", c.Detail)
+	}
+	if !strings.Contains(c.Remedy, "setup wizard") {
+		t.Fatalf("the remedy does not say how to record one: %q", c.Remedy)
+	}
+}

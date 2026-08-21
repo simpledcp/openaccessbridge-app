@@ -32,6 +32,16 @@
       <input id="srv-aud" placeholder="auditorium id (e.g. screen-3)">
       <input id="srv-ip" placeholder="cinema server IP (e.g. 10.10.20.15)">
       <input id="srv-name" placeholder="expected screen name (e.g. Auditorium 3)">
+      <!-- §8.5's other pinned identity. Optional: what a server announces is a
+           Phase 0A finding (B1), and an installer who does not have one leaves
+           it blank rather than inventing a value the guard would compare. -->
+      <input id="srv-fp" placeholder="expected server fingerprint (optional)">
+      <!-- §8.5: "Tie the auditorium profile to the physical port label so a
+           re-cabling that swaps rooms is caught at setup, not mid-show." -->
+      <input id="srv-port" placeholder="physical port label (e.g. rack A, port 3)">
+      <!-- §7.2/§8.5: the room name a patron sees, and the last human check
+           against a wrong-room join. -->
+      <input id="srv-room" placeholder="auditorium name shown to patrons (e.g. Auditorium 3)">
       <button id="srv-save">Save</button>
       <span class="status" data-step="server"></span>
     </li>

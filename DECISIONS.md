@@ -738,3 +738,31 @@ the mirror image of the defect this replaced. A mutation found that the guard
 making `SSHCorrect` depend on introspection is load-bearing ONLY on profiles
 that permit SSH (elsewhere the profile rule already fails), which is precisely
 where an unmeasured state is most dangerous; there is now a test for that case.
+
+### D38. §8.5's wrong-room guard ran on half its input, and the half it had is the one a server may not announce [§8.5, §10.5, §7.2]
+§8.5 pins two facts per auditorium — the expected server fingerprint and the
+expected screen name — and warns loudly when the connected server matches
+neither. The setup wizard collected the screen name. The §10.5 record stored it.
+`internal/caption/acsp` implemented the comparison. The simulator exercised it.
+And `cmd/captionbridge-core` passed only the fingerprint, so on a real install
+the guard an installer had just configured did nothing with the field they
+filled in.
+
+**It is the worse half to lose.** What a cinema server announces as a fingerprint
+is a Phase 0A finding (B1) — unknown until someone captures a real session — so
+the screen name is the only pin an operator can actually set today. Unwired, a
+server announcing "Screen 7" against a pin of "Auditorium 3" reported identity
+`unpinned`: not a mismatch, not a match, but "nothing was pinned" — while the
+wizard's field was full.
+
+Both halves are now passed, both are settable in the wizard (the fingerprint
+field was missing from it entirely), and an invariant asserts each literal
+reaches the machine.
+
+**The port label is a STAFF step, because an appliance cannot see a cable.**
+§8.5 also asks to "tie the auditorium profile to the physical port label so a
+re-cabling that swaps rooms is caught at setup, not mid-show". The honest form is
+the §11.5 pattern: the sheet prints the label the installer recorded and asks a
+person to confirm the rack matches. With no label recorded it says there is
+nothing to check against, rather than printing an empty instruction — an
+unrecorded label is itself the finding.

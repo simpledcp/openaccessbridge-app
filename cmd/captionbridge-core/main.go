@@ -264,7 +264,17 @@ func captionMachineOptions(store *config.SQLiteStore, log *logging.Logger, aud m
 		PreferredLanguages: preferredLanguages(store),
 		// Wrong-room guard (§8.5/§10.5): the identity pinned for this auditorium
 		// at setup. Empty disables it — an unprovisioned appliance pins nothing.
+		//
+		// BOTH halves. The screen name was collected by the setup wizard, stored
+		// in the §10.5 profile, and then never passed here: the machine
+		// implemented the comparison, the simulator exercised it, and production
+		// supplied only the fingerprint — which is the half a server may not even
+		// announce (B1). So on a real install the guard an installer had just
+		// configured did nothing, and §8.5's "warn loudly if the connected server
+		// does not match" could not fire on the one field an operator can
+		// actually fill in today.
 		ExpectedFingerprint: aud.ExpectedServerFingerprint,
+		ExpectedScreenName:  aud.ExpectedScreenName,
 		WarnFraction:        leaseWarnFraction(store, log),
 		FetchTimeout:        assetFetchTimeout(store, log),
 		OnState:             w.Observe,

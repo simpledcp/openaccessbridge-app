@@ -55,6 +55,13 @@
       auditorium_id: document.getElementById("srv-aud").value,
       cinema_server_ip: document.getElementById("srv-ip").value,
       expected_screen_name: document.getElementById("srv-name").value,
+      // §8.5's remaining pins. Sent even when blank so clearing one is possible:
+      // a stale pin from a previous room is exactly what this guard is for.
+      expected_server_fingerprint: document.getElementById("srv-fp").value,
+      physical_port_label: document.getElementById("srv-port").value,
+      // §7.2: the room name patrons see. Without it every appliance shows the
+      // same build-time default, which is the confusion §8.5 exists to catch.
+      auditorium_name: document.getElementById("srv-room").value,
     }), "server");
   });
   document.getElementById("prof-save").addEventListener("click", function () {

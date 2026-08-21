@@ -327,6 +327,30 @@ func TestInvariant_MediaPortsMatchTheFirewallRange(t *testing.T) {
 	}
 }
 
+// TestInvariant_BothPinnedIdentityHalvesReachTheGuard: §8.5's wrong-room guard
+// compares two pinned facts, and production supplied one. The setup wizard
+// collected the screen name, the §10.5 record stored it, the ACSP machine
+// implemented the comparison, the simulator exercised it — and core never passed
+// it, so an installer who filled that field in configured nothing.
+//
+// It matters more than the fingerprint half: what a server announces as a
+// fingerprint is a Phase 0A finding (B1), so the screen name is the only pin an
+// operator can actually set today.
+//
+// The literal is LOAD-BEARING.
+func TestInvariant_BothPinnedIdentityHalvesReachTheGuard(t *testing.T) {
+	src := readFile(t, filepath.Join(repoRoot(t), "cmd", "captionbridge-core", "main.go"))
+	for _, half := range []string{
+		"ExpectedFingerprint: aud.ExpectedServerFingerprint",
+		"ExpectedScreenName:  aud.ExpectedScreenName",
+	} {
+		if !strings.Contains(src, half) {
+			t.Errorf("the pinned identity half %q never reaches the ACSP machine: "+
+				"§8.5's wrong-room guard runs on less than the installer configured", half)
+		}
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {
