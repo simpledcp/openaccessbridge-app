@@ -275,6 +275,21 @@ type SystemReadiness struct {
 	CaptionLink CaptionLinkState   `json:"caption_link"`
 	AudioInputs []AudioStreamState `json:"audio_inputs"`
 
+	// UnresolvedLocators is §5.3's resolver-coverage evidence: every locator form
+	// this appliance could not fetch, attributed to the server family that
+	// emitted it.
+	//
+	// It is on the READINESS document rather than only in the log because §5.3
+	// says coverage "grows from real observations", and an observation nobody can
+	// read does not grow anything. The count was accumulated in the resolver from
+	// the start and had no reader at all — an engineer investigating a venue
+	// where captions never appear had to correlate warning lines by hand to learn
+	// that one vendor's locator scheme has no handler.
+	//
+	// Empty is the ordinary case and is NOT a warning: a show whose locators all
+	// resolve produces nothing here.
+	UnresolvedLocators []UnresolvedLocator `json:"unresolved_locators,omitempty"`
+
 	// Network/security posture (§9.3).
 	ForwardingDisabled bool `json:"forwarding_disabled"`
 	FirewallActive     bool `json:"firewall_active"`
@@ -463,3 +478,18 @@ func (r SystemReadiness) IdentityCheckLabel() string {
 // IdentityCheckOK reports whether the wrong-room guard actually RAN and PASSED.
 // Anything else is not a pass — see IdentityCheckLabel.
 func (r SystemReadiness) IdentityCheckOK() bool { return r.IdentityCheck == IdentityCheckMatch }
+
+// UnresolvedLocator is one locator form the resolver has no handler for, and the
+// server family observed emitting it (§5.3, BLOCKER B1).
+//
+// It carries a FORM and never a locator: a raw locator can embed a film title,
+// and §9.4 bars content from anything persisted or logged. "scheme:dolby-res"
+// is a handler to write; the path behind it is nobody's business.
+type UnresolvedLocator struct {
+	// Family is the announced/configured server family, or "" when unknown.
+	// Unknown is preserved as empty rather than as a placeholder so observations
+	// from two vendors are never merged into one bucket.
+	Family string `json:"server_family,omitempty"`
+	Form   string `json:"locator_form"`
+	Count  int    `json:"count"`
+}

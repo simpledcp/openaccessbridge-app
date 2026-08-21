@@ -90,11 +90,14 @@ func DefaultLatencyBudgets() LatencyBudgets { return LatencyBudgets{HIMaxMS: 150
 // dashboard grows facts; a caller that does not have one leaves it zero and the
 // report says nothing about it rather than guessing.
 type Inputs struct {
-	Link    model.CaptionLinkState
-	Audio   []model.AudioStreamState
-	Verify  verify.Report
-	Network Network
-	Budgets LatencyBudgets
+	Link model.CaptionLinkState
+	// UnresolvedLocators is §5.3's resolver-coverage evidence, read from the
+	// resolver's accumulation. Empty is the ordinary case.
+	UnresolvedLocators []model.UnresolvedLocator
+	Audio              []model.AudioStreamState
+	Verify             verify.Report
+	Network            Network
+	Budgets            LatencyBudgets
 	// CaptionWarnings are the live caption-path warnings (§8.3). They come from
 	// CaptionWarnings.Snapshot, i.e. from conditions the ACSP link actually
 	// raised — guardrail #7 applies to the caption path exactly as it does to
@@ -151,6 +154,8 @@ func Assemble(in Inputs) model.SystemReadiness {
 		AudioReady:   audioReady(in.Audio),
 		CaptionLink:  in.Link,
 		AudioInputs:  in.Audio,
+
+		UnresolvedLocators: in.UnresolvedLocators,
 
 		ForwardingDisabled:   rep.ForwardingDisabledV4 && rep.ForwardingDisabledV6,
 		FirewallActive:       rep.FirewallActive,

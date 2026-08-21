@@ -102,6 +102,8 @@ green.
 | 26 | §6.5 multi-device rooms: a per-stream device assignment the profile can hold, validated against the three ways it can be recorded wrongly, built one device at a time through the wizard, and honoured per stream by the media process (D34) | `internal/model/profile.go`, `internal/web/calibration.go`, `cmd/captionbridge-media` |
 | 27 | §6.7 encode-path latency corrected to ONE accumulation: the smallest whole number of capture periods that holds an Opus frame, which at the shipped settings is 10 ms rather than the 20 ms the estimate used to claim (D33) | `internal/audio/pipeline` |
 | 28 | §9.5 Wi-Fi onboarding: a `WIFI:` code beside the show's, the patron network stored as the shared credential it is — never logged, never in a status document, cleared with the network — and the format's ambiguities cross-checked or flagged rather than guessed (D35) | `internal/qr/wifi.go`, `internal/web/wifi.go` |
+| 29 | §5.4 D8 steps (3)/(4) on BOTH sides of the seam: a closed-caption track outranks a subtitle track for the default and the fetch order, and the offer list reaches `internal/web` in that order — so a patron with no stated preference is served the track that carries the sound cues (D43) | `internal/caption/rpl`, `internal/caption/acsp`, `internal/web/patron.go` |
+| 30 | §5.3 unresolved locators classified BY SERVER FAMILY, with the announced family plumbed from a wire field nothing read, the tally surfaced on the §8.2 caption panel, and the five caption dependencies rebuilt as one constructor both `main()` and the tests use (D43) | `internal/caption/resolver`, `internal/caption/acsp`, `cmd/captionbridge-core/status.go` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -182,7 +184,7 @@ failed feed raises a critical warning); nothing sensitive in logs (redaction).
 Recorded honestly rather than closed off. Fullest detail is in JOURNAL.md and in
 the audit lanes' own reports.
 
-### The 2026-08-21 spec-vs-code audit backlog — 36 open items
+### The 2026-08-21 spec-vs-code audit backlog — 19 open items
 
 A fresh audit of every `buildplan.md` section against the shipped tree produced
 **39 confirmed gaps** (each found by an auditor, then put to a skeptic told to
@@ -190,16 +192,22 @@ refute it; survivors carry reproductions). Three broke shipped behaviour and are
 fixed (D36); the §9.3 SSH row (D37), §8.5's half-wired wrong-room guard and its
 missing wizard fields (D38), §9.4's unreachable debug capture (D39) and the
 §5/§7 patron-truth cluster (D40) and §12.4's unenforced profile requirements
-(D41) and the §10.3/§10.8/§9.4 diagnostics (D42) are done too. **21 remain
-open**, grouped below by section. This is the
+(D41), the §10.3/§10.8/§9.4 diagnostics (D42) and the §5.3/§5.4 caption
+partials (D43) are done too. **19 remain open**, grouped below by section. This is the
 next backlog, and it is listed rather than summarised because a summary is how a
 list like this stops being acted on.
 
-**§5 caption path (3 open).** The uncaptioned-segment message, the subtitle-grade
-labelling and the silent playlist fault are done (D40); ERROR stays collapsed
-into DISCONNECTED as a recorded decision rather than a gap. Still open: the D8
-language-priority order is partial, and language-prioritised fetch and the
-unresolved-locator classification (§5.3) are unwired.
+**§5 caption path (1 open).** The uncaptioned-segment message, the subtitle-grade
+labelling and the silent playlist fault are done (D40); the D8 language-priority
+order and the by-server-family unresolved-locator classification are done (D43);
+ERROR stays collapsed into DISCONNECTED as a recorded decision rather than a gap.
+Still open: §5.3's language-prioritised FETCH. The mechanism exists and is
+tested, but production sets no eager-language cap so every language loads up
+front and `RequestLanguage` cannot be reached. Wiring it needs two things it does
+not have — a memory budget measured against real content (B7), and a per-language
+"loading" state in the fan-out, since `kindByLang` presence currently means
+"loaded" and a carried-but-unfetched language would render as "this show has no
+captions in your language". See D43.
 
 **§6 audio (2).** §6.6's browser playback/reconnect state is not reported, so an
 operator cannot tell "the phone never started audio" from "the feed is silent".

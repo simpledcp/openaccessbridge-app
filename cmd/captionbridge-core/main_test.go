@@ -123,21 +123,20 @@ func newSupervisorWithFetcher(t *testing.T, store *config.SQLiteStore, dir strin
 	ctrl.Start()
 	t.Cleanup(ctrl.Close)
 
-	cw := readiness.NewCaptionWarnings(0)
+	// The SAME constructor the binary uses. Assembling an equivalent-looking
+	// stack here by hand is what let main() and the fixture drift apart, which is
+	// how a dependency main() forgot went on passing the suite.
 	fetcher := &resolver.MemoryFetcher{Files: map[string][]byte{}}
-	res := resolver.NewPluggable(fetcher, nil, log)
-	loader := newCaptionLoader(resolver.NewPipeline(res, resolver.NewCache(1<<20), log), 1, cw)
-	aud, _ := auditoriumProfile(store)
-	opts := captionMachineOptions(store, log, aud, cw)
-	opts.Controller, opts.Resolver, opts.Loader = ctrl, res, loader
+	stack := newCaptionStack(store, log, hub, ctrl, fetcher, 1<<20)
 
 	sup := &supervisor{
 		store: store, log: log, profile: model.ProfileBoothDiagnostic,
 		deployed:   mustProfile(model.ProfileBoothDiagnostic),
 		patronBind: "0.0.0.0:8080", adminBind: "127.0.0.1:8090",
-		media:    newMediaClient(filepath.Join(dir, ipc.SocketMedia), log),
-		firewall: newFirewallClient(filepath.Join(dir, ipc.SocketFirewall), log),
-		machine:  acsp.New(opts), hub: hub, ctrl: ctrl, captionWarnings: cw,
+		media:        newMediaClient(filepath.Join(dir, ipc.SocketMedia), log),
+		firewall:     newFirewallClient(filepath.Join(dir, ipc.SocketFirewall), log),
+		captionStack: stack,
+
 		supportChanged: make(chan struct{}, 1),
 	}
 	sup.support = support.New(support.Options{

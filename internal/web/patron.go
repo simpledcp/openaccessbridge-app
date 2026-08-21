@@ -293,6 +293,14 @@ func (s *Server) resolveLanguage(r *http.Request) (serving string, requested str
 	return negotiateLanguage(explicit, accept, s.cfg.DefaultLanguage, s.availableLanguages())
 }
 
+// NegotiateLanguageForTest exposes negotiateLanguage so a test in the caption
+// packages can span the seam between the machine's D8 ranking and the web
+// layer's use of it. Neither half is meaningful alone: this is the only place
+// the two agree or fail to.
+func NegotiateLanguageForTest(explicit string, accept []string, venue string, available []string) (serving, requested string, substituted bool) {
+	return negotiateLanguage(explicit, accept, venue, available)
+}
+
 // negotiateLanguage applies DECISIONS D8's priority order. An explicit patron
 // choice outranks the order (D8 governs the DEFAULT, not an active selection);
 // otherwise: (1) the venue-configured default, (2) a browser-language match,
@@ -331,7 +339,12 @@ func defaultLanguage(accept []string, venue string, available []string) string {
 			return m // D8 (2) browser-language match
 		}
 	}
-	return available[0] // D8 (3)/(4): first available track
+	// D8 (3)/(4): the most accessible track. `available` arrives in D8 priority
+	// order from the caption machine (model.CaptionLinkState.AvailableLanguages),
+	// so the head is the closed-caption track where the show carries one. This
+	// line used to say the same thing while receiving raw RPL order, which made
+	// it the first track the PLAYLIST happened to list instead.
+	return available[0]
 }
 
 // matchLanguage resolves a BCP-47 tag against the available tracks: exact match

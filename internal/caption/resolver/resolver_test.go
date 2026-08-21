@@ -4,10 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/simpledcp/captionbridge/internal/caption/rpl"
 	"github.com/simpledcp/captionbridge/internal/caption/timedtext"
+	"github.com/simpledcp/captionbridge/internal/logging"
 	"github.com/simpledcp/captionbridge/internal/model"
 )
 
@@ -97,10 +100,108 @@ func TestPluggableUnresolvedFormClassified(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for vendor-specific locator")
 	}
-	forms := p.UnresolvedForms()
-	if forms["scheme:dcp"] != 1 {
-		t.Fatalf("expected classified unresolved form, got %v", forms)
+	got := p.UnresolvedLocators()
+	if len(got) != 1 || got[0].Form != "scheme:dcp" || got[0].Count != 1 {
+		t.Fatalf("expected classified unresolved form, got %+v", got)
 	}
+	if got[0].Family != "" {
+		t.Fatalf("no server declared a family, so the observation must not claim one: %+v", got[0])
+	}
+}
+
+// TestUnresolvedLocatorsAreAttributedToTheirServerFamily is the half §5.3 asks
+// for and the resolver did not have: "log and classify every unresolved locator
+// form BY SERVER FAMILY".
+//
+// The count alone cannot be acted on. Coverage is meant to grow from real
+// observations (B1: the wire contract is unconfirmed), and an observation
+// without its source does not compose — two venues reporting three unresolved
+// `scheme:dcp` locators are either one vendor problem or two, and the form
+// count cannot tell them apart. The family is the difference between "a form
+// exists" and "this vendor emits it", which is a handler to write.
+func TestUnresolvedLocatorsAreAttributedToTheirServerFamily(t *testing.T) {
+	p := NewPluggable(nil, nil, nil)
+	p.SetServerFamily("GDC")
+	if _, err := p.Resolve(context.Background(), "dcp://vendor/a"); err == nil {
+		t.Fatal("expected an error for a vendor-specific locator")
+	}
+	if _, err := p.Resolve(context.Background(), "dcp://vendor/b"); err == nil {
+		t.Fatal("expected an error for a vendor-specific locator")
+	}
+	// A different server takes over the link mid-session.
+	p.SetServerFamily("Dolby")
+	if _, err := p.Resolve(context.Background(), "dcp://vendor/c"); err == nil {
+		t.Fatal("expected an error for a vendor-specific locator")
+	}
+	got := p.UnresolvedLocators()
+	if len(got) != 2 {
+		t.Fatalf("two families emitted the form; got %d buckets: %+v", len(got), got)
+	}
+	// Stable order: family then form.
+	if got[0].Family != "Dolby" || got[0].Count != 1 {
+		t.Errorf("Dolby bucket = %+v, want 1 observation", got[0])
+	}
+	if got[1].Family != "GDC" || got[1].Count != 2 {
+		t.Errorf("GDC bucket = %+v, want 2 observations", got[1])
+	}
+}
+
+// The earlier observations keep the family they were recorded under. Attributing
+// them to whoever announced last would invent evidence that a vendor emits a
+// form nobody ever saw it emit — which is exactly the kind of claim a Phase 0A
+// finding must not contain.
+func TestChangingFamilyDoesNotReattributeEarlierObservations(t *testing.T) {
+	p := NewPluggable(nil, nil, nil)
+	p.SetServerFamily("GDC")
+	if _, err := p.Resolve(context.Background(), "dcp://vendor/a"); err == nil {
+		t.Fatal("expected an error")
+	}
+	p.SetServerFamily("Dolby")
+	got := p.UnresolvedLocators()
+	if len(got) != 1 || got[0].Family != "GDC" {
+		t.Fatalf("the observation was re-attributed: %+v", got)
+	}
+}
+
+// §9.4: the raw locator can embed a film title. The form is loggable; the path
+// behind it never is — not in the log line, and not in the accumulation a
+// dashboard renders.
+func TestNeitherTheLogNorTheTallyCarriesTheLocator(t *testing.T) {
+	var buf syncBuf
+	p := NewPluggable(nil, nil, logging.New(logging.Options{Component: "test", JSON: true, Writer: &buf}))
+	p.SetServerFamily("GDC")
+	const secret = "THE_UNRELEASED_FILM_TITLE"
+	if _, err := p.Resolve(context.Background(), "dcp://vendor/"+secret); err == nil {
+		t.Fatal("expected an error")
+	}
+	if out := buf.String(); strings.Contains(out, secret) {
+		t.Fatalf("the locator reached the log:\n%s", out)
+	} else if !strings.Contains(out, "GDC") {
+		t.Fatalf("the server family — operational configuration, not content — was not logged:\n%s", out)
+	}
+	for _, u := range p.UnresolvedLocators() {
+		if strings.Contains(u.Form, secret) {
+			t.Fatalf("the locator reached the tally: %+v", u)
+		}
+	}
+}
+
+// syncBuf is a concurrency-safe log sink.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (w *syncBuf) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
+}
+
+func (w *syncBuf) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.String()
 }
 
 func TestUnwrapPlainXML(t *testing.T) {

@@ -45,8 +45,15 @@ const (
 // CaptionLinkState is the observable ACSP link state (§10.3). It carries no
 // caption text — only state, counts, timers, and opaque IDs.
 type CaptionLinkState struct {
-	State              ACSPState  `json:"state"`
-	Server             string     `json:"server"`
+	State  ACSPState `json:"state"`
+	Server string    `json:"server"`
+	// ServerFamily is the cinema server family in force for this link: what the
+	// server declared on announce, else the auditorium profile's configured
+	// value. EMPTY means not known — the wire field is PROVISIONAL (BLOCKER B1)
+	// and many servers will declare nothing. It is the attribution key for
+	// §5.3's unresolved-locator observations, so an "unknown" placeholder would
+	// merge two vendors into one misleading bucket.
+	ServerFamily       string     `json:"server_family,omitempty"`
 	LeaseActive        bool       `json:"lease_active"`
 	LeaseExpiresInMS   int64      `json:"lease_expires_in_ms"`
 	RequestIntervalMS  int64      `json:"request_interval_ms"` // == half lease (§5.2 item 1)
@@ -56,7 +63,10 @@ type CaptionLinkState struct {
 	RPLLoaded          bool       `json:"rpl_loaded"`
 	AssetsLoaded       bool       `json:"assets_loaded"`
 	CurrentLanguage    string     `json:"current_language"`
-	AvailableLanguages []string   `json:"available_languages"`
+	// AvailableLanguages is every caption language the current show carries, in
+	// D8 priority order (venue preference first, then most-accessible track kind).
+	// Consumers may treat the first entry as the language to serve by default.
+	AvailableLanguages []string `json:"available_languages"`
 	// LastTimelineAnchorMonotonicNS is the monotonic timestamp of the last
 	// timeline anchor (§5.5); used by the timing engine, surfaced for diagnostics.
 	LastTimelineAnchorMonotonicNS int64 `json:"last_timeline_anchor_monotonic_ns"`

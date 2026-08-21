@@ -11,6 +11,7 @@
 package rpl
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/simpledcp/captionbridge/internal/caption/timedtext"
@@ -100,6 +101,46 @@ func kindFromType(t string) model.TrackKind {
 	default:
 		return model.TrackUnknown
 	}
+}
+
+// BestKindFor returns the most accessible track kind carried for a language, or
+// TrackUnknown when the language is not present.
+//
+// "Most accessible" is model.TrackKind.AccessibilityRank: a ClosedCaption track
+// beats a subtitle track because it carries speaker names, sound effects and
+// music cues — the information a deaf or hard-of-hearing patron is relying on.
+func (r *RPL) BestKindFor(language string) model.TrackKind {
+	best := model.TrackUnknown
+	found := false
+	for _, reel := range r.Reels {
+		for _, res := range reel.Resources {
+			if !res.IsTimedText() || res.Language != language {
+				continue
+			}
+			if !found || res.Kind.AccessibilityRank() < best.AccessibilityRank() {
+				best, found = res.Kind, true
+			}
+		}
+	}
+	return best
+}
+
+// LanguagesByAccessibility returns the distinct timed-text languages ordered by
+// how accessible their best track is, ties broken by first-seen order.
+//
+// This is D8 steps (3) and (4) — "first ClosedCaption track, then first subtitle
+// track" — which were previously collapsed into plain RPL order. The difference
+// shows on a show that carries both: with no venue preference configured, RPL
+// order could put a subtitle track first, so the appliance would default to
+// subtitles and eagerly fetch them while a closed-caption track sat in the same
+// playlist. A deaf patron would be served the track that omits exactly what they
+// need, on a show that carried the right one.
+func (r *RPL) LanguagesByAccessibility() []string {
+	langs := r.Languages()
+	sort.SliceStable(langs, func(i, j int) bool {
+		return r.BestKindFor(langs[i]).AccessibilityRank() < r.BestKindFor(langs[j]).AccessibilityRank()
+	})
+	return langs
 }
 
 // Languages returns the distinct languages of the timed-text resources, in first-

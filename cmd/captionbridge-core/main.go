@@ -83,27 +83,20 @@ func main() {
 	ctrl.Start()
 	defer ctrl.Close()
 
-	// The caption path's loud warnings (§8.3) — lease near expiry, an asset the
-	// server would not serve, a parse degradation, a server that is not the one
-	// this room is pinned to. Guardrail #7 is not audio-only.
-	captionWarnings := readiness.NewCaptionWarnings(leaseWarnFraction(store, log))
-
-	// ACSP machine over a memory-backed resolver (a real server / Phase 0A wire
-	// contract swaps in behind the same Resolver/Transport seam).
+	// The caption path — warnings sink (§8.3), resolver, loader, controller and
+	// ACSP machine — built by the one constructor the tests also use, over a
+	// memory-backed fetcher (a real server / Phase 0A wire contract swaps in
+	// behind the same Resolver/Transport seam).
 	fetcher := &resolver.MemoryFetcher{Files: map[string][]byte{}}
-	res := resolver.NewPluggable(fetcher, nil, log)
-	loader := newCaptionLoader(resolver.NewPipeline(res, resolver.NewCache(8<<20), log), 1, captionWarnings)
-	aud, _ := auditoriumProfile(store)
-	opts := captionMachineOptions(store, log, aud, captionWarnings)
-	opts.Controller, opts.Resolver, opts.Loader = ctrl, res, loader
-	machine := acsp.New(opts)
+	stack := newCaptionStack(store, log, hub, ctrl, fetcher, 8<<20)
+	machine := stack.machine
 
 	sup := &supervisor{
 		store: store, log: log, profile: profile, deployed: deployed,
 		patronBind: *patronBind, adminBind: *adminBind,
-		media:    newMediaClient(socketPath(*socketDir, ipc.SocketMedia), log),
-		firewall: newFirewallClient(socketPath(*socketDir, ipc.SocketFirewall), log),
-		machine:  machine, hub: hub, ctrl: ctrl, captionWarnings: captionWarnings,
+		media:        newMediaClient(socketPath(*socketDir, ipc.SocketMedia), log),
+		firewall:     newFirewallClient(socketPath(*socketDir, ipc.SocketFirewall), log),
+		captionStack: stack,
 		// Buffered by one: the change signal is a nudge to reconcile, and a
 		// nudge that arrives while a reconciliation is already running must not
 		// block the manager's timer goroutine.
@@ -301,10 +294,16 @@ func captionMachineOptions(store *config.SQLiteStore, log *logging.Logger, aud m
 		// actually fill in today.
 		ExpectedFingerprint: aud.ExpectedServerFingerprint,
 		ExpectedScreenName:  aud.ExpectedScreenName,
-		WarnFraction:        leaseWarnFraction(store, log),
-		FetchTimeout:        assetFetchTimeout(store, log),
-		OnState:             w.Observe,
-		OnWarning:           w.Raise,
+		// The configured family attributes §5.3's unresolved-locator observations
+		// when the server declares none on announce, which B1 says is the case to
+		// expect. Without it the appliance still counts unresolved forms — it just
+		// cannot say which vendor emits them, which is the only part of the count
+		// that turns into a handler.
+		ServerFamily: aud.ServerFamily,
+		WarnFraction: leaseWarnFraction(store, log),
+		FetchTimeout: assetFetchTimeout(store, log),
+		OnState:      w.Observe,
+		OnWarning:    w.Raise,
 	}
 }
 

@@ -1314,3 +1314,111 @@ unguarded, while the machine guards for a nil controller everywhere it drives
 content — so `State()` on a machine built without one panicked. It had never
 fired because every caller supplies a controller. Asking a second question of the
 same field is what surfaced it, and it is fixed rather than worked around.
+
+## §5.3/§5.4 — the track a deaf patron actually gets, and who to ask about the one we cannot fetch
+
+Three items were left from the audit's §5 group. Two are now closed and the
+third is recorded with the work it actually needs, which turned out to be more
+than "wire up the function".
+
+### The coin flip
+
+D8's language order has said "(3) first ClosedCaption track; (4) first subtitle
+track" since it was written. Two separate places collapsed those into one step.
+`acsp.selectLanguages` fell back to "remaining available languages in RPL order",
+and `internal/web`'s `defaultLanguage` returned `available[0]` under a comment
+claiming to be D8 (3)/(4) while receiving the machine's raw playlist order.
+
+So on a show carrying both a closed-caption and a subtitle track, with no venue
+preference configured, the appliance defaulted to whichever the playlist listed
+first. The difference is not cosmetic and it is not a translation preference: a
+closed-caption track carries speaker attribution, sound effects and music cues,
+and a subtitle track carries dialogue. A deaf patron served the subtitle track is
+missing exactly what they came for, on a show that carried the right track all
+along — and the picker just shows two languages, so nothing on their phone says
+so.
+
+`AccessibilityRank` already existed and already ranked the four kinds correctly.
+It was used to pick the best RESOURCE for a language and never to rank the
+languages themselves. `rpl.LanguagesByAccessibility` does that now, the machine
+uses it for D8 steps (3)/(4), and `CaptionLinkState.AvailableLanguages` reports
+the priority order rather than playlist order so the web layer's fallback lands
+on the same answer. A test spans the seam deliberately: reordering either side
+alone fails it, because either side alone is decoration.
+
+The venue's configured preference still wins. A venue that chose French for its
+screens made a decision about its audience, and a track-kind heuristic should not
+quietly overturn it.
+
+### A tally nobody could read, keyed by the field nobody can act on
+
+§5.3 asks for "log and classify every unresolved locator form **by server
+family**". Half of that was built. `UnresolvedForms()` counted forms and had
+exactly one caller — its own test. And `Request.ServerFamily` had been sitting on
+the wire since wire.go was written while `handleAnnounce` took only `ServerID`,
+so a server that identified itself was ignored.
+
+The half that was missing is the half that turns a count into work. "3 unresolved
+`scheme:dcp` locators" says a form exists. "GDC emits `scheme:dcp`" is a handler
+to write and a vendor to ask. Coverage is meant to grow from real observations
+(B1 says the wire contract is unconfirmed, so field evidence is the plan), and
+observations without their source do not compose: two venues reporting the same
+form are either one vendor problem or two, and a form count cannot tell them
+apart.
+
+The announced family now wins, the auditorium profile's configured value stands
+in when the server declares none — which B1 says to expect — and neither known
+stays EMPTY. Not "unknown": a placeholder compares equal across two appliances
+talking to two different vendors and invents a shared problem out of two separate
+ones. Earlier observations keep the family they were recorded under, because
+re-attributing them on a family change would fabricate evidence that a vendor
+emits a form nobody saw it emit.
+
+The tally reaches `SystemReadiness.UnresolvedLocators` and renders on the §8.2
+caption panel, and the row is **absent** when nothing was observed. "Unresolved
+locators: none" would be a claim that every locator resolved, which an appliance
+that has fetched nothing cannot support. §9.4 holds all the way through: the form
+travels, the raw locator never does, because a locator can embed a film title.
+
+### The mutation pass found more than the code did
+
+Six mutations, three of which passed on the first run. Each was more interesting
+than the code change that preceded it.
+
+`BestKindFor` returning the LAST resource for a language instead of the most
+accessible one broke nothing — every fixture happened to list each language's
+best track last, so "take the last one" was indistinguishable from "take the
+best". A fixture that lists the best one first now exists.
+
+The other two were the same defect twice. Deleting the supervisor's read of the
+tally broke nothing, and deleting `ServerFamily: aud.ServerFamily` from
+`captionMachineOptions` broke nothing. The second is the D38 wrong-room defect
+exactly: the wizard collects a value, the profile stores it, the machine
+implements the behaviour, production never passes it across, and every individual
+layer reviews as correct. I had set out to fix a built-but-unwired capability and
+built two more on the way.
+
+So the class got a structural fix rather than a third patch. The five caption
+dependencies — machine, hub, resolver, controller, warnings — were five fields on
+`supervisor` assigned at two call sites, `main()` and the test fixture, which is
+precisely how a field missing from one goes on passing the suite. They travel as
+one `captionStack` now, built by one constructor both callers use, following the
+precedent `newCaptionLoader` had already set for the same reason. A dependency
+that is not wired is now not wired for anybody.
+
+### What is left, and why it is not half-done
+
+`RequestLanguage` still has no production caller, and that is recorded rather
+than papered over. Production sets no `EagerLanguages` cap, so every language is
+fetched up front and the on-demand path is unreachable; adding a hook that is a
+no-op in every shipping configuration would be theatre, not wiring.
+
+Turning the cap on needs two things that do not exist. A cap is a memory budget,
+and there is no measurement of caption memory against real content to set one
+from (B7). And the fan-out has no per-language "loading" state — `kindByLang`
+presence currently means "loaded", so a language the show CARRIES but has not
+FETCHED would render on a patron's phone as "this show has no captions in your
+language". That is fail-wrong on the patron surface, which is the one thing this
+codebase will not ship. Both are named in D43 as the work the cap requires.
+
+`make check` green: 753 top-level Go tests, 23 browser cases.

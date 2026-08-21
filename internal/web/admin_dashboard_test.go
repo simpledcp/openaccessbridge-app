@@ -86,6 +86,8 @@ func TestDashboardRendersTheFactsTheAPIAlreadyMeasured(t *testing.T) {
 		"password_set",                // §9.5 a passphrase is on file, not what it is
 		"hex_ambiguity",               // §9.5 a value some scanners misread
 		"ssh_introspected",            // §9.3 measured vs merely configured
+		"unresolved_locators",         // §5.3 which locator forms have no handler
+		"server_family",               // §5.3 and WHICH server emits them
 	} {
 		if !strings.Contains(script, field) {
 			t.Errorf("admin.js never reads %q — the fact is measured and invisible", field)
@@ -253,5 +255,22 @@ func TestZeroIsNotRenderedAsAMeasurement(t *testing.T) {
 	}
 	if !strings.Contains(script, "cleared rather than measured") {
 		t.Errorf("a cleared level must say it was cleared, not print the silence floor as a reading")
+	}
+}
+
+// TestUnresolvedLocatorsAppearOnlyWhenObserved: the tally has no honest empty
+// form. An always-present "Unresolved caption locators: none" row makes a claim
+// on every render — that every locator resolved — which the appliance cannot
+// support before it has fetched anything. Absent means no observation, and the
+// row must be absent then.
+func TestUnresolvedLocatorsAppearOnlyWhenObserved(t *testing.T) {
+	script := mustAsset(t, "assets/admin.js")
+	if !strings.Contains(script, "if (!list || !list.length) return null;") {
+		t.Error("the unresolved-locator row does not suppress itself when nothing was observed")
+	}
+	// A null row only works if the renderer skips it; without the filter the
+	// whole caption panel throws and every row above it disappears too.
+	if !strings.Contains(script, "rows.filter(Boolean)") {
+		t.Error("dl() does not skip null rows, so a conditional row breaks the panel")
 	}
 }

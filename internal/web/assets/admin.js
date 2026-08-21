@@ -37,7 +37,11 @@
 
   function dl(target, rows) {
     target.innerHTML = "";
-    rows.forEach(function (r) {
+    /* A row builder may return null for "there is nothing to say here". That is
+     * different from a row reading "none": a row that is always present makes a
+     * claim every time it renders, and some facts (an unresolved-locator tally)
+     * have no honest empty form. */
+    rows.filter(Boolean).forEach(function (r) {
       var dt = document.createElement("dt");
       dt.textContent = r.label;
       var dd = document.createElement("dd");
@@ -185,7 +189,28 @@
         (s.connected_caption_clients || 0) + " of " + (s.max_concurrent_clients ? s.max_concurrent_clients : "unlimited"),
         capState(s), s.max_concurrent_clients ? "" : "no per-profile cap is configured (D11)"),
       driftRow(cl, s.caption_drift_budget_ms, s.caption_drift_measured),
+      unresolvedRow(s.unresolved_locators),
     ]);
+  }
+
+  /* §5.3's resolver-coverage evidence. It appears ONLY when there is something
+   * to report: an empty tally is the absence of an observation, not a claim that
+   * every locator resolved, and a permanent "Unresolved locators: none" row
+   * would read as the latter.
+   *
+   * The row names the SERVER FAMILY because that is the part that turns into
+   * work — "GDC emits scheme:dcp" is a handler to write and a vendor to ask,
+   * where a bare form count is a curiosity. Where no family is known the row
+   * says so rather than inventing one. */
+  function unresolvedRow(list) {
+    if (!list || !list.length) return null;
+    var parts = list.map(function (u) {
+      var who = u.server_family ? u.server_family : "unidentified server";
+      return who + ": " + u.locator_form + " \u00d7 " + u.count;
+    });
+    return row("Unresolved caption locators", parts.join("; "), STATE_WARN,
+      "captions referenced by these locator forms could not be fetched; " +
+      "this appliance has no handler for them (\u00a75.3, BLOCKER B1)");
   }
 
   /* timelineRow is §8.2's "Timeline: playing / paused / stopped". "no timeline"

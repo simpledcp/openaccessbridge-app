@@ -33,9 +33,14 @@ const defaultFetchTimeout = 5 * time.Second
 
 // Options configures a Machine.
 type Options struct {
-	Controller          *caption.Controller
-	Resolver            resolver.Resolver // fetches the RPL document
-	Loader              *resolver.Loader  // fetches timed-text per reel
+	Controller *caption.Controller
+	Resolver   resolver.Resolver // fetches the RPL document
+	// ServerFamily is the auditorium profile's configured cinema server family,
+	// used to attribute resolver observations when the server does not declare
+	// one on announce (§5.3 "classify every unresolved locator form by server
+	// family", BLOCKER B1).
+	ServerFamily        string
+	Loader              *resolver.Loader // fetches timed-text per reel
 	Clock               func() time.Time
 	Log                 *logging.Logger
 	ExpectedFingerprint string // wrong-room guard (§8.5); empty disables it
@@ -79,21 +84,25 @@ type Options struct {
 // OnSelfHeal) are invoked with the lock held and must not call back into the
 // Machine.
 type Machine struct {
-	mu        sync.Mutex
-	ctrl      *caption.Controller
-	res       resolver.Resolver
-	loader    *resolver.Loader
-	clock     func() time.Time
-	log       *logging.Logger
-	expFP     string
-	expScreen string
-	prefLng   []string
-	warnFr    float64
-	onState   func(model.CaptionLinkState)
-	onWarn    func(model.Warning)
-	onHeal    func()
-	eagerN    int
-	fetchTO   time.Duration
+	mu   sync.Mutex
+	ctrl *caption.Controller
+	res  resolver.Resolver
+	// serverFamily is the auditorium profile's configured family (§8.1);
+	// observedFamily is what is actually in force after an announce.
+	serverFamily   string
+	observedFamily string
+	loader         *resolver.Loader
+	clock          func() time.Time
+	log            *logging.Logger
+	expFP          string
+	expScreen      string
+	prefLng        []string
+	warnFr         float64
+	onState        func(model.CaptionLinkState)
+	onWarn         func(model.Warning)
+	onHeal         func()
+	eagerN         int
+	fetchTO        time.Duration
 
 	state         model.ACSPState
 	server        string
@@ -141,26 +150,32 @@ func New(opts Options) *Machine {
 	if opts.FetchAheadReels > 0 && opts.Loader != nil {
 		opts.Loader.FetchAheadReels = opts.FetchAheadReels
 	}
-	return &Machine{
-		ctrl:       opts.Controller,
-		res:        opts.Resolver,
-		loader:     opts.Loader,
-		clock:      clk,
-		log:        log,
-		expFP:      opts.ExpectedFingerprint,
-		expScreen:  strings.TrimSpace(opts.ExpectedScreenName),
-		prefLng:    opts.PreferredLanguages,
-		warnFr:     wf,
-		onState:    opts.OnState,
-		onWarn:     opts.OnWarning,
-		onHeal:     opts.OnSelfHeal,
-		eagerN:     opts.EagerLanguages,
-		fetchTO:    to,
-		state:      model.StateDisconnected,
-		outputMode: model.OutputUnknown,
-		activeSeg:  -1,
-		identity:   IdentityUnknown,
+	m := &Machine{
+		ctrl:         opts.Controller,
+		res:          opts.Resolver,
+		serverFamily: strings.TrimSpace(opts.ServerFamily),
+		loader:       opts.Loader,
+		clock:        clk,
+		log:          log,
+		expFP:        opts.ExpectedFingerprint,
+		expScreen:    strings.TrimSpace(opts.ExpectedScreenName),
+		prefLng:      opts.PreferredLanguages,
+		warnFr:       wf,
+		onState:      opts.OnState,
+		onWarn:       opts.OnWarning,
+		onHeal:       opts.OnSelfHeal,
+		eagerN:       opts.EagerLanguages,
+		fetchTO:      to,
+		state:        model.StateDisconnected,
+		outputMode:   model.OutputUnknown,
+		activeSeg:    -1,
+		identity:     IdentityUnknown,
 	}
+	// Seed the resolver with the configured family before any announce. A
+	// resolver outlives a show, so without this an observation made before the
+	// first announce would be attributed to whichever family was set last.
+	m.applyServerFamily("")
+	return m
 }
 
 // Connected marks the TCP connection established (Variant A: the ACS dialed the
@@ -211,6 +226,7 @@ func (m *Machine) Handle(req Request) Response {
 func (m *Machine) handleAnnounce(req Request) Response {
 	m.server = req.ServerID
 	m.screenName = req.ScreenName
+	m.applyServerFamily(req.ServerFamily)
 	if m.state == model.StateDisconnected {
 		m.state = model.StateConnected
 	}
@@ -218,6 +234,33 @@ func (m *Machine) handleAnnounce(req Request) Response {
 	m.checkIdentity(req)
 	m.emitState()
 	return Response{Type: ReqAnnounce, OK: true, State: string(m.state)}
+}
+
+// familyAware is the optional half of resolver.Resolver that can attribute its
+// observations to a server family. A resolver that does not implement it simply
+// is not told; nothing depends on the attribution being available.
+type familyAware interface {
+	SetServerFamily(family string)
+}
+
+// applyServerFamily records which server family this link is talking to.
+//
+// The announced family WINS over the configured one when the server declares
+// it, because the configured value is an operator's answer to a setup question
+// (§8.1) and the announced value is the server speaking for itself. Where the
+// server says nothing — which is the common case, since ServerFamily is a
+// PROVISIONAL field on an unconfirmed wire contract (B1) — the auditorium
+// profile's value stands in, and where neither exists the family stays empty
+// and observations record honestly that their source is unknown.
+func (m *Machine) applyServerFamily(announced string) {
+	family := strings.TrimSpace(announced)
+	if family == "" {
+		family = strings.TrimSpace(m.serverFamily)
+	}
+	m.observedFamily = family
+	if fa, ok := m.res.(familyAware); ok {
+		fa.SetServerFamily(family)
+	}
 }
 
 // checkIdentity applies the §8.5 wrong-room guard: "pin the expected server
@@ -732,11 +775,53 @@ func (m *Machine) selectLanguages(avail []string) []string {
 			seen[l] = true
 		}
 	}
-	// 2) then any remaining available languages in RPL order.
-	for _, l := range avail {
+	// 2) then any remaining languages, MOST ACCESSIBLE TRACK FIRST (D8 steps 3
+	//    and 4: "first ClosedCaption track, then first subtitle track"), ties
+	//    broken by RPL order.
+	//
+	//    This step used to be plain RPL order, which collapsed the two. On a show
+	//    carrying both a closed-caption and a subtitle track, and with no venue
+	//    preference configured, the appliance would default to whichever came
+	//    first in the playlist — so a deaf patron could be served the subtitle
+	//    track, which omits the speaker names and sound effects they are relying
+	//    on, from a show that carried the right track all along.
+	for _, l := range m.orderedByAccessibility(avail) {
 		if !seen[l] {
 			out = append(out, l)
 			seen[l] = true
+		}
+	}
+	return out
+}
+
+// orderedByAccessibility ranks the available languages by their best track kind,
+// falling back to the given order when no RPL is loaded to ask.
+func (m *Machine) orderedByAccessibility(avail []string) []string {
+	if m.activeSeg < 0 || m.activeSeg >= len(m.segments) {
+		return avail
+	}
+	doc := m.segments[m.activeSeg].doc
+	if doc == nil {
+		return avail
+	}
+	ranked := doc.LanguagesByAccessibility()
+	// Keep only what the caller offered, in the ranked order, then anything the
+	// RPL did not rank (so a language can never be dropped by ordering it).
+	inRanked := map[string]bool{}
+	var out []string
+	offered := map[string]bool{}
+	for _, l := range avail {
+		offered[l] = true
+	}
+	for _, l := range ranked {
+		if offered[l] {
+			out = append(out, l)
+			inRanked[l] = true
+		}
+	}
+	for _, l := range avail {
+		if !inRanked[l] {
+			out = append(out, l)
 		}
 	}
 	return out
@@ -854,7 +939,16 @@ func (m *Machine) stateLocked() model.CaptionLinkState {
 		RPLLoaded:          m.currentRPL != nil,
 		AssetsLoaded:       len(m.loadedLangs) > 0,
 		CurrentLanguage:    curLang,
-		AvailableLanguages: m.availLangs,
+		// The offer list is reported in D8 PRIORITY order, not raw RPL order.
+		// It is not merely cosmetic: internal/web's defaultLanguage falls back to
+		// available[0] as D8 steps (3)/(4) when a patron has no explicit choice
+		// and no Accept-Language match, so whatever is first here is what an
+		// ordinary phone displays. Reporting raw RPL order made that fallback
+		// pick whichever track the playlist listed first — a subtitle track on a
+		// show that also carried closed captions. It also puts the most
+		// accessible track at the top of the patron's language picker.
+		AvailableLanguages: m.languages,
+		ServerFamily:       m.observedFamily,
 		DriftMSEstimate:    drift,
 		// §10.3's anchor timestamp. It was declared on this struct and never
 		// assigned, so the one diagnostic that says when the timeline last got a

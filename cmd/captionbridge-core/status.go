@@ -11,6 +11,7 @@ import (
 	"github.com/simpledcp/captionbridge/internal/caption"
 	"github.com/simpledcp/captionbridge/internal/caption/acsp"
 	"github.com/simpledcp/captionbridge/internal/caption/fanout"
+	"github.com/simpledcp/captionbridge/internal/caption/resolver"
 	"github.com/simpledcp/captionbridge/internal/config"
 	"github.com/simpledcp/captionbridge/internal/deploy"
 	"github.com/simpledcp/captionbridge/internal/logging"
@@ -37,6 +38,43 @@ const (
 // supervisor is core's supervision half (§3.5): it reconciles the stored
 // configuration with the two helper processes, runs the §9.3 verification, keeps
 // the §10.8 versioning record honest, and assembles the dashboard verdict.
+// captionStack is everything the caption path needs, constructed together so no
+// caller can wire a subset. See the note on supervisor.captionStack.
+type captionStack struct {
+	machine *acsp.Machine
+	hub     *fanout.Hub
+	// res is the locator resolver, held so §5.3's unresolved-locator tally can
+	// reach the dashboard. It is the concrete type rather than resolver.Resolver
+	// because the accumulation is not part of the fetch interface.
+	res *resolver.Pluggable
+	// ctrl is the caption controller. The dashboard reads §8.2's timeline row
+	// from it: the reference timing engine is what the server's transport state
+	// actually drives, so it is a measurement rather than an inference.
+	ctrl            *caption.Controller
+	captionWarnings *readiness.CaptionWarnings
+}
+
+// newCaptionStack builds the caption path: warnings sink, resolver, loader,
+// controller and ACSP machine, wired to each other and to the stored auditorium
+// profile.
+//
+// It exists so the binary and the tests drive the SAME wiring. Every hook here
+// is one a previous audit found assigned in main() alone and therefore invisible
+// to the suite; the constructor is what makes "assigned in one place only"
+// impossible rather than merely discouraged.
+func newCaptionStack(store *config.SQLiteStore, log *logging.Logger, hub *fanout.Hub,
+	ctrl *caption.Controller, fetcher resolver.MediaBlockFetcher, cacheBytes int64) captionStack {
+	warnings := readiness.NewCaptionWarnings(leaseWarnFraction(store, log))
+	res := resolver.NewPluggable(fetcher, nil, log)
+	loader := newCaptionLoader(resolver.NewPipeline(res, resolver.NewCache(cacheBytes), log), 1, warnings)
+	aud, _ := auditoriumProfile(store)
+	opts := captionMachineOptions(store, log, aud, warnings)
+	opts.Controller, opts.Resolver, opts.Loader = ctrl, res, loader
+	return captionStack{
+		machine: acsp.New(opts), hub: hub, res: res, ctrl: ctrl, captionWarnings: warnings,
+	}
+}
+
 type supervisor struct {
 	store    *config.SQLiteStore
 	log      *logging.Logger
@@ -48,14 +86,21 @@ type supervisor struct {
 
 	media    *mediaClient
 	firewall *firewallClient
-	machine  *acsp.Machine
-	hub      *fanout.Hub
-	// ctrl is the caption controller. The dashboard reads §8.2's timeline row
-	// from it: the reference timing engine is what the server's transport state
-	// actually drives, so it is a measurement rather than an inference.
-	ctrl *caption.Controller
 
-	captionWarnings *readiness.CaptionWarnings
+	// The caption path travels as ONE value, and that is a correction rather
+	// than tidiness.
+	//
+	// These five were five independent fields assigned at two call sites — main()
+	// and the test fixture — and the fixture was free to assign a field main()
+	// forgot, or the reverse. A mutation proved it: deleting the resolver from
+	// main()'s supervisor literal broke NOTHING, because the fixture supplied its
+	// own. That is the same defect as the §8.5 screen name and the §12.4 profile
+	// flags — a dependency wired in one place and silently missing in the other,
+	// where every individual layer is correct and the feature does nothing.
+	//
+	// One constructor, one struct, both callers: a field that is not set is not
+	// set for anybody, and the tests notice.
+	captionStack
 
 	// debugCapture owns §9.4's bounded content capture. Its warnings are §8.3's
 	// "debug capture / support mode active" alert, which had no producer.
@@ -230,11 +275,16 @@ func (s *supervisor) buildStatus(rep verify.Report) model.SystemReadiness {
 
 	cueVisible, cueKnown := s.hub.CueVisible()
 	return readiness.Assemble(readiness.Inputs{
-		Link:            link,
-		Audio:           s.media.audio(),
-		Verify:          rep,
-		Network:         net,
-		CaptionWarnings: s.captionWarnings.Snapshot(),
+		Link: link,
+		// §5.3's unresolved-locator evidence. The resolver has been counting these
+		// since it was written and nothing read the count, so a venue whose server
+		// emits a locator form we have no handler for produced a silent, invisible
+		// tally. This is the reader.
+		UnresolvedLocators: s.unresolvedLocators(),
+		Audio:              s.media.audio(),
+		Verify:             rep,
+		Network:            net,
+		CaptionWarnings:    s.captionWarnings.Snapshot(),
 		// §8.3: an ACTIVE capture must be visibly indicated for as long as it
 		// runs. The manager already produced these warnings and nothing consumed
 		// them, so the alert could not appear however loudly it was configured.
@@ -496,6 +546,21 @@ func (s *supervisor) hardwareProfileVersion() string {
 	}
 	sort.Strings(ids)
 	return runtime.GOOS + "/" + runtime.GOARCH + ":" + strings.Join(ids, ",")
+}
+
+// unresolvedLocators reports which locator forms this appliance could not fetch,
+// attributed to the server family that emitted them (§5.3 / Phase 0A / B1).
+//
+// A nil resolver yields nothing rather than an empty-and-therefore-clean-looking
+// answer, but the two render identically here for a reason: an empty list is not
+// a claim that every locator resolved, it is the absence of any observation to
+// the contrary. The dashboard shows the list when it is non-empty and says
+// nothing when it is not, which is what §5.3 asks for — evidence, not a verdict.
+func (s *supervisor) unresolvedLocators() []model.UnresolvedLocator {
+	if s.res == nil {
+		return nil
+	}
+	return s.res.UnresolvedLocators()
 }
 
 // serverFamilyCompat is §10.8's per-family compatibility revision: which cinema
