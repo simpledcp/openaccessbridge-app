@@ -98,6 +98,131 @@ test("a clean language negotiation says nothing at all", () => {
   assert.strictEqual(env.client.state().lang, "en");
 });
 
+/* §5.2 item 5 / §5.6: "reels or compositions with empty ReelResources must
+ * render 'no captions for this segment' to the patron, not an error and not
+ * silence."
+ *
+ * The server has always sent language_available:false and the page never read
+ * it, so on an uncaptioned reel between captioned reels a patron saw an empty
+ * black box and nothing else. From a seat, mid-show, that is indistinguishable
+ * from a phone that has stopped working. */
+test("an uncaptioned segment says so instead of going blank", () => {
+  const env = load({ mode: "caption" });
+  const ws = env.captionSockets()[0];
+  ws.open();
+  ws.deliver({ status: "active", visible: true, text: "a line from the captioned reel",
+    language: "en", caption_grade: true, language_available: true });
+  assert.strictEqual(env.els.caption.textContent, "a line from the captioned reel");
+
+  // The next reel carries no track for this language.
+  ws.deliver({ status: "active", visible: false, language: "en", language_available: false });
+  assert.strictEqual(env.els.caption.textContent, "");
+  assert.match(env.els.message.textContent, /no captions for this part/i);
+});
+
+test("captions coming back clears the uncaptioned-segment message", () => {
+  const env = load({ mode: "caption" });
+  const ws = env.captionSockets()[0];
+  ws.open();
+  ws.deliver({ status: "active", visible: false, language: "en", language_available: false });
+  assert.match(env.els.message.textContent, /no captions for this part/i);
+
+  ws.deliver({ status: "active", visible: true, text: "captions resume",
+    language: "en", caption_grade: true, language_available: true });
+  assert.strictEqual(env.els.caption.textContent, "captions resume");
+  assert.strictEqual(env.els.message.textContent, "");
+});
+
+/* §5.4: "If only subtitle tracks exist, the patron-facing copy should say
+ * 'Subtitles available' rather than 'Closed captions', so a patron relying on
+ * caption-grade information is not misled." A subtitle track carries dialogue; a
+ * caption-grade one carries speaker names, sound effects and music cues — which
+ * is what a deaf patron is relying on. */
+test("a subtitle-grade track says what is missing from it", () => {
+  const env = load({ mode: "caption" });
+  const ws = env.captionSockets()[0];
+  ws.open();
+  ws.deliver({ status: "active", visible: true, text: "dialogue only",
+    language: "fr", kind: "subtitle", caption_grade: false, language_available: true });
+  assert.match(env.els.captiongrade.textContent, /subtitles/i);
+  assert.match(env.els.captiongrade.textContent, /speaker names|sound effects/i);
+});
+
+test("a caption-grade track says nothing at all", () => {
+  const env = load({ mode: "caption" });
+  const ws = env.captionSockets()[0];
+  ws.open();
+  ws.deliver({ status: "active", visible: true, text: "[door slams] Who's there?",
+    language: "en", kind: "closed-caption", caption_grade: true, language_available: true });
+  assert.strictEqual(env.els.captiongrade.textContent, "",
+    "a note on every show would be read by nobody");
+});
+
+/* §7.2: "Connection state, always visible: connected, reconnecting…, waiting for
+ * show to start, unavailable."
+ *
+ * The indicator was driven only by the CAPTION transport, and /listen opens no
+ * caption transport — so a patron listening to audio read "Connecting…" for the
+ * whole show while sound was coming out of their headphones. Wrong in the
+ * reassuring direction, on the one element a patron checks when they think
+ * something is broken. */
+test("a listening patron's connection state follows the audio, not the captions", () => {
+  const env = load({ mode: "listen" });
+  // The harness starts elements empty; the real page ships "Connecting…" in the
+  // HTML, which is exactly what a listening patron used to be left staring at.
+  assert.ok(!/connected/i.test(env.els.connstate.textContent), "nothing is connected yet");
+
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{ stream: "HI", label: "Hearing assistance", available: true }],
+  });
+  env.client.chooseStream("HI");
+  env.peers()[0].fireTrack();
+
+  assert.match(env.els.connstate.textContent, /connected/i,
+    "audio is playing and the indicator still says connecting");
+});
+
+test("an unavailable feed says unavailable rather than connecting forever", () => {
+  const env = load({ mode: "listen" });
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{ stream: "HI", label: "Hearing assistance", available: false,
+      reason: "Hearing assistance is not currently available." }],
+  });
+  env.client.chooseStream("HI");
+  assert.match(env.els.connstate.textContent, /unavailable/i);
+});
+
+/* On a route that has BOTH, the caption transport stays the authority. Two
+ * writers would fight, and the way they would fight matters: audio reporting
+ * "Connected" while the caption socket is reconnecting tells a deaf patron their
+ * captions are fine at the exact moment they are not. */
+test("on a captions route the caption transport keeps the indicator", () => {
+  const env = load({ mode: "accessibility" });
+  const ws = env.captionSockets()[0];
+  ws.open();
+  assert.match(env.els.connstate.textContent, /connected/i);
+
+  // Captions drop. Audio keeps playing — and must not overwrite the warning.
+  ws.close();
+  assert.match(env.els.connstate.textContent, /reconnecting/i);
+
+  env.client.handleAudioFrame({
+    type: "audio_state",
+    playback_available: true,
+    streams: [{ stream: "HI", label: "Hearing assistance", available: true }],
+  });
+  env.client.chooseStream("HI");
+  if (env.peers().length) env.peers()[0].fireTrack();
+
+  assert.match(env.els.connstate.textContent, /reconnecting/i,
+    "audio overwrote the caption transport's state: a patron whose captions just " +
+    "dropped would be told everything is connected");
+});
+
 /* §6.7 receive-side tuning: "a small per-patron 'audio is choppy → add a little
  * buffer' control that trades latency for stability". */
 test("the buffer control trades latency for stability monotonically", () => {

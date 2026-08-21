@@ -118,7 +118,10 @@ function load(opts) {
   const wantAudio = mode !== "caption";
 
   const ids = ["connstate", "auditorium", "message"];
-  if (wantCaptions) ids.push("caption", "lang", "bigger", "smaller");
+  // captiongrade is §5.4's "which grade of text is this" note: present whenever
+  // captions are, because a patron relying on caption-grade information has to
+  // be told when they are not getting it.
+  if (wantCaptions) ids.push("caption", "captiongrade", "lang", "bigger", "smaller");
   if (wantAudio) ids.push("audiopanel", "audiostatus", "streampicker", "volume", "buffer");
   ids.push("theme");
 

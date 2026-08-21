@@ -188,19 +188,16 @@ A fresh audit of every `buildplan.md` section against the shipped tree produced
 **39 confirmed gaps** (each found by an auditor, then put to a skeptic told to
 refute it; survivors carry reproductions). Three broke shipped behaviour and are
 fixed (D36); the §9.3 SSH row (D37), §8.5's half-wired wrong-room guard and its
-missing wizard fields (D38), and §9.4's unreachable debug capture (D39) are done
-too. **31 remain open**, grouped below by section. This is the
+missing wizard fields (D38), §9.4's unreachable debug capture (D39) and the
+§5/§7 patron-truth cluster (D40) are done too. **27 remain open**, grouped below
+by section. This is the
 next backlog, and it is listed rather than summarised because a summary is how a
 list like this stops being acted on.
 
-**§5 caption path (6).** The ERROR state is unreachable — no code assigns it, and
-the faults that justify it (an RPL that will not fetch or parse) change no state
-and raise no warning, so a faulted link is indistinguishable from a healthy one
-awaiting content. An uncaptioned reel between captioned reels produces the
-`language_available:false` signal end to end and the patron page never reads it,
-so a deaf patron sees a blank area and cannot tell it from a broken phone.
-Subtitle-only shows are not labelled "Subtitles available" (§5.4). The D8
-language-priority order is partial. Language-prioritised fetch and the
+**§5 caption path (3 open).** The uncaptioned-segment message, the subtitle-grade
+labelling and the silent playlist fault are done (D40); ERROR stays collapsed
+into DISCONNECTED as a recorded decision rather than a gap. Still open: the D8
+language-priority order is partial, and language-prioritised fetch and the
 unresolved-locator classification (§5.3) are unwired.
 
 **§6 audio (2).** §6.6's browser playback/reconnect state is not reported, so an

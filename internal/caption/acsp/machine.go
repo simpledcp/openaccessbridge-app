@@ -419,13 +419,26 @@ func (m *Machine) handleSetRPL(req Request) Response {
 		data, err = m.res.Resolve(ctx, req.RPLLocation)
 		cancel()
 	}
+	// A playlist the appliance cannot load is a caption-plane fault, and it used
+	// to produce ONE LOG LINE: no state change, no warning, nothing on the
+	// dashboard. The link went on reporting whatever it had been, and the next
+	// PlayPlaying advanced it to PLAYING with nothing loaded — a patron shown
+	// "active" over a blank area. Guardrail #7 is not audio-only.
 	if err != nil || len(data) == 0 {
 		m.log.Warn(logging.EvAssetFetchFailed, logging.Field("reason", "rpl_fetch_failed"))
+		m.warn(model.Warning{Code: model.WarnCaptionRPLUnavailable,
+			Message: "The cinema server named a caption playlist this appliance could not fetch. " +
+				"Captions cannot start until it loads.",
+			Severity: model.SeverityCritical})
 		return Response{Type: ReqSetRPLLocation, OK: false, Reason: "rpl_fetch_failed"}
 	}
 	parsed, err := rpl.ParseBytes(data)
 	if err != nil {
 		m.log.Warn(logging.EvAssetFetchFailed, logging.Field("reason", "rpl_parse_failed"))
+		m.warn(model.Warning{Code: model.WarnCaptionRPLUnavailable,
+			Message: "The cinema server's caption playlist could not be read. This is a fault in " +
+				"the playlist itself, not in the connection.",
+			Severity: model.SeverityCritical})
 		return Response{Type: ReqSetRPLLocation, OK: false, Reason: "rpl_parse_failed"}
 	}
 	// Store as a timeline segment. The Playout ID is a hint, never the key: it can

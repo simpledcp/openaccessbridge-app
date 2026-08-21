@@ -39,6 +39,12 @@
     <div id="caption" class="caption"></div>
   {{end}}
     <div id="message" class="message"></div>
+    <!-- §5.4: what GRADE of text this is. A patron who came for closed captions
+         and is served a subtitle track must be told, because subtitle tracks
+         routinely omit speaker names and sound effects — the information a deaf
+         or hard-of-hearing patron is relying on. Empty when the track is
+         caption-grade: saying nothing is the normal case. -->
+    <p id="captiongrade" class="hint" role="status" aria-live="polite"></p>
   {{if .ModeMessage}}
     <!-- A control this session was not granted is replaced by the reason, never
          drawn as a control that cannot connect (§7.2, §10.4). -->

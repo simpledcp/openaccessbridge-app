@@ -38,6 +38,7 @@
   var captionEl = el("caption");
   var messageEl = el("message");
   var stateEl = el("connstate");
+  var gradeEl = el("captiongrade");
   var langSel = el("lang");
 
   // Plain-language patron status copy (§7.2). Never technical.
@@ -69,6 +70,24 @@
 
   function render(state) {
     var st = STATUS_TEXT[state.status] || STATUS_TEXT.unavailable;
+
+    /* §5.2 item 5 / §5.6: a reel or composition with no track for this language.
+     * The server has always sent this and the page never read it, so on an
+     * uncaptioned reel between captioned reels a patron saw an empty black box
+     * and nothing else — indistinguishable, from their seat, from a phone that
+     * had stopped working. Mid-show, in the dark, that is the judgement they are
+     * left to make.
+     *
+     * It is checked BEFORE the status, because the link is legitimately "active"
+     * during an uncaptioned segment: nothing is wrong, there is simply nothing
+     * to show, and that is a different thing to say. */
+    if (state.language_available === false) {
+      if (captionEl) captionEl.textContent = "";
+      setMessage(STATUS_TEXT.no_captions_for_content.msg, STATUS_TEXT.no_captions_for_content.cls);
+      renderGrade(state);
+      return;
+    }
+
     if (captionEl && state.visible && state.text) {
       captionEl.textContent = state.text;
       setMessage("", "");
@@ -76,6 +95,31 @@
       if (captionEl) captionEl.textContent = "";
       setMessage(st.msg, st.cls);
     }
+    renderGrade(state);
+  }
+
+  /* §5.4: "If only subtitle tracks exist, the patron-facing copy should say
+   * 'Subtitles available' rather than 'Closed captions'."
+   *
+   * The distinction is not cosmetic. A subtitle track carries dialogue; a
+   * caption-grade track carries speaker names, sound effects and music cues —
+   * the information a deaf or hard-of-hearing patron is relying on to follow a
+   * film. Presenting one as the other misleads exactly the patron this product
+   * exists for, so when the track is not caption-grade the page says so and
+   * says what is missing. Silence is the correct rendering for a caption-grade
+   * track: a note on every show would be read by nobody. */
+  function renderGrade(state) {
+    if (!gradeEl) return;
+    if (state.language_available === false || !state.status || state.status === "unavailable") {
+      gradeEl.textContent = "";
+      return;
+    }
+    if (state.caption_grade === false) {
+      gradeEl.textContent = "Subtitles — this show has no closed-caption track, " +
+        "so speaker names and sound effects may not appear.";
+      return;
+    }
+    gradeEl.textContent = "";
   }
 
   // The show is over: stop reconnecting, say so politely, and stay put (§7.2).
@@ -337,6 +381,21 @@
 
   function applyVolume() { if (audioEl) audioEl.volume = volume; }
 
+  /* §7.2 "Connection state, always visible". The indicator is driven by the
+   * CAPTION transport, and /listen opens no caption transport at all — so a
+   * patron listening to audio read "Connecting…" for the whole show while sound
+   * came out of their headphones. A status light that is wrong in the reassuring
+   * direction is worse than none: it is the one thing a patron checks when they
+   * think something is broken.
+   *
+   * On a route with captions the caption transport stays the authority (it is
+   * the one that reconnects, and two writers would fight). On an audio-only
+   * route the audio path owns it. */
+  function audioConnState(label, cls) {
+    if (MODE !== "listen") return;
+    setConn(label, cls);
+  }
+
   function setAudioStatus(text, cls) {
     var n = el("audiostatus");
     if (!n) return;
@@ -405,7 +464,11 @@
   function chooseStream(name) {
     var s = streamByName(name);
     if (!s) return;
-    if (!s.available) { setAudioStatus(s.reason || "That feed is not available right now.", "error"); return; }
+    if (!s.available) {
+      setAudioStatus(s.reason || "That feed is not available right now.", "error");
+      audioConnState("Unavailable", "error");
+      return;
+    }
     if (!audioDoc.playback_available) {
       setAudioStatus(audioDoc.playback_reason || "Listening is not available right now.", "waiting");
       return;
@@ -457,6 +520,7 @@
         // Audio is flowing: clear the connecting state, but never clear the
         // statement of what this feed actually is.
         setAudioStatus(sourceNote(), sourceNote() ? "waiting" : "");
+        audioConnState("Connected", "connected");
       };
       pc.onicecandidate = function (ev) {
         if (!ev.candidate) return;
@@ -476,6 +540,7 @@
       });
     } catch (e) {
       setAudioStatus("Listening could not be started. Please contact theater staff.", "error");
+      audioConnState("Unavailable", "error");
     }
   }
 

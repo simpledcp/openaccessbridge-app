@@ -37,6 +37,12 @@ const (
 	// acsp.WarnLeaseNearExpiry / acsp.WarnCaptionAssetUnavailable).
 	WarnCaptionLeaseNearExpiry  = "caption_lease_near_expiry"
 	WarnCaptionAssetUnavailable = "caption_asset_unavailable"
+	// WarnCaptionRPLUnavailable: the server named a playlist this appliance could
+	// not fetch or parse. Distinct from WarnCaptionAssetUnavailable, which is a
+	// missing TRACK FILE inside a playlist that did load — the two have different
+	// remedies (reload the playlist vs a content fault in the DCP), and until
+	// this existed an unloadable RPL produced one log line and nothing else.
+	WarnCaptionRPLUnavailable = "caption_rpl_unavailable"
 	// WarnCaptionParseDegraded carries the timed-text parser's non-fatal warning
 	// classes (§5.4). A defaulted edit rate or a whole reel of cues dropped at the
 	// <StartTime> origin changes what a patron sees, so it cannot be log-only.

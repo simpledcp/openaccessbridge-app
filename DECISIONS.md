@@ -788,3 +788,55 @@ guardrail #5), a sweeper, and — the half that was equally missing — §8.3's
 "debug capture active" alert is finally CONSUMED: the manager produced those
 warnings and nothing read them, so a running capture could not be visibly
 indicated however loudly it was configured.
+
+### D40. The caption path tells a patron what is happening, and ERROR stays collapsed into DISCONNECTED [§5.2, §5.4, §5.6, §7.2]
+Four faults, all the same failure from a seat: the appliance knew something and
+the patron could not tell.
+
+**An uncaptioned segment went blank.** The fan-out has always sent
+`language_available:false` — with a comment saying "a blank caption area forever
+is exactly the silent degradation guardrail #7 forbids" — and `patron.js` never
+read the field. On an uncaptioned reel between captioned reels, the exact case
+§5.2 item 5 was written for, a deaf patron saw an empty black box and nothing
+else. From a seat, mid-show, that is indistinguishable from a phone that has
+stopped working, and it is the judgement they are left to make. The page now
+shows "No captions for this part of the program" — copy that already existed for
+a different case — and checks it BEFORE the link status, because during an
+uncaptioned segment the link is legitimately "active": nothing is wrong, there is
+simply nothing to show, and that is a different thing to say.
+
+**A subtitle track was presented as captions.** `caption_grade` was on the wire
+and unread. §5.4 asks for this because a subtitle track carries dialogue while a
+caption-grade track carries speaker names, sound effects and music cues — the
+information a deaf patron is relying on. The page now names it and says what is
+missing. A caption-grade track shows NOTHING: a note on every show would be read
+by nobody.
+
+**A listening patron read "Connecting…" for the whole show.** §7.2's connection
+indicator was driven only by the caption transport, and `/listen` opens no
+caption transport at all — so sound came out of the headphones while the status
+light said connecting. Wrong in the reassuring direction, on the one element a
+patron checks when they think something is broken. The audio path now owns the
+indicator on audio-only routes and ONLY there: on a combined route the caption
+transport stays the authority, because audio reporting "Connected" while the
+caption socket is reconnecting would tell a deaf patron their captions are fine
+at the moment they are not.
+
+**A playlist that would not load produced one log line.** No state change, no
+warning, nothing on the dashboard — and the next PlayPlaying advanced to PLAYING
+without checking that anything had been loaded, so the patron was shown "active"
+over a blank area. There is now a distinct `caption_rpl_unavailable` warning
+(separate from a missing track file inside a playlist that DID load: different
+fault, different remedy), and PLAYING with no playlist is no longer reported to a
+patron as working captions.
+
+**ERROR stays unreachable, deliberately, and that is now written down.** §5.2
+lists ERROR as a state and no code assigns it, which the audit reported as a gap.
+It is not one. The supervisor already routes every transport-class fault to
+DISCONNECTED and re-runs the connection sequence — "one recovery route, not two"
+— and `model.CaptionLinkState` documents ERROR as "a fault the link cannot carry
+on from", reporting the server as NOT CONNECTED. An unfetchable playlist is not
+that: the link is fine and the next Set RPL may well succeed. Entering ERROR for
+it would send a tech to check cables for a fault in the DCP. The real defect was
+the silence, not the missing state, and the collapse is a deliberate choice that
+was simply never recorded.

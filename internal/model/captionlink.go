@@ -73,6 +73,18 @@ func (s CaptionLinkState) PatronStatus() PatronCaptionStatus {
 		if s.OutputMode == OutputDisabled {
 			return PatronCaptionNoCaptions
 		}
+		// PLAYING with no playlist loaded is not a working caption service.
+		//
+		// It is reachable: a Set RPL Location that could not be fetched or parsed
+		// leaves the machine in its previous state, and the next Update Timeline
+		// with PlayPlaying advances to PLAYING without checking that anything was
+		// ever loaded. The result was status "active" with no cue — a patron
+		// staring at a blank area being told, in effect, that captions are
+		// working. That is the silent degradation guardrail #7 forbids, and it is
+		// the shape a deaf patron cannot distinguish from a broken phone.
+		if !s.RPLLoaded {
+			return PatronCaptionUnavailable
+		}
 		return PatronCaptionActive
 	case StateReady, StateRPLReceived, StateTimelineActive, StateLeased, StateAnnounced, StateConnected:
 		return PatronCaptionWaiting

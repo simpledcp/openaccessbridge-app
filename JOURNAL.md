@@ -1163,3 +1163,50 @@ visibly indicated however loudly it was configured. Both halves are pinned by an
 invariant now — the route, the sink, `RequireTmpfs: true`, and the alert's
 consumer — because each was individually absent and each is individually
 deletable by a refactor that looks harmless.
+
+## The patron-truth pass: four ways the appliance knew and the patron could not tell (D40)
+
+Every one of these is the same failure seen from a seat. The appliance had the
+fact. The page did not show it.
+
+**Two of them were fields already on the wire.** `language_available` has been
+sent by the fan-out since it was written, with a comment saying in as many words
+that a blank caption area forever is the silent degradation guardrail #7 forbids
+— and `patron.js` never read it. So on an uncaptioned reel between captioned
+reels, the precise case §5.2 item 5 exists for, a deaf patron got an empty black
+box. `caption_grade` was the same: sent, unread, so a subtitle track was
+presented as captions to someone relying on speaker names and sound effects.
+
+Both fixes are a few lines in `render()`. What took the thinking was the order:
+the uncaptioned-segment check has to come BEFORE the status check, because during
+such a segment the link is legitimately "active". Nothing is wrong; there is
+simply nothing to show; and those are different sentences.
+
+**A listening patron read "Connecting…" for the whole show.** The §7.2 indicator
+was driven only by the caption transport, and `/listen` opens no caption
+transport. Sound in the headphones, "Connecting…" on the screen. The fix gives
+the audio path the indicator on audio-only routes and ONLY there — and the
+mutation that proved the guard matters is the interesting one: removing it made
+every test pass, because no test had both transports live at once. With one
+added (captions drop, audio keeps playing) it fails properly. Audio reporting
+"Connected" while the caption socket reconnects would tell a deaf patron their
+captions are fine at the moment they are not.
+
+**A playlist that would not load produced one log line.** No state change, no
+warning, and — the part that reaches a patron — the next PlayPlaying advanced to
+PLAYING without checking anything had been loaded, so the status said "active"
+over a blank area.
+
+**And one reported gap that I decided is not one.** The audit flagged §5.2's
+ERROR state as unreachable, which is true: no code assigns it. But the supervisor
+already routes transport faults to DISCONNECTED and re-runs the connection
+sequence — "one recovery route, not two" — and the model documents ERROR as "a
+fault the link cannot carry on from", reporting the server as NOT connected. An
+unfetchable playlist is not that. Entering ERROR for it would tell a tech to
+check cables for a fault in the DCP. The defect was the silence, not the missing
+state; the collapse was a deliberate choice nobody had written down, and now it
+is D40.
+
+Six behaviours mutation-confirmed. Two first attempts proved nothing and were
+worth chasing: one asserted against the harness's empty initial state rather than
+the page's, and one removed a guard no test could exercise.
