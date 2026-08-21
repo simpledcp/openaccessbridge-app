@@ -182,6 +182,71 @@ failed feed raises a critical warning); nothing sensitive in logs (redaction).
 Recorded honestly rather than closed off. Fullest detail is in JOURNAL.md and in
 the audit lanes' own reports.
 
+### The 2026-08-21 spec-vs-code audit backlog — 36 open items
+
+A fresh audit of every `buildplan.md` section against the shipped tree produced
+**39 confirmed gaps** (each found by an auditor, then put to a skeptic told to
+refute it; survivors carry reproductions). Three broke shipped behaviour and are
+fixed — see D36. The other **36 are open**, grouped below by section. This is the
+next backlog, and it is listed rather than summarised because a summary is how a
+list like this stops being acted on.
+
+**§5 caption path (6).** The ERROR state is unreachable — no code assigns it, and
+the faults that justify it (an RPL that will not fetch or parse) change no state
+and raise no warning, so a faulted link is indistinguishable from a healthy one
+awaiting content. An uncaptioned reel between captioned reels produces the
+`language_available:false` signal end to end and the patron page never reads it,
+so a deaf patron sees a blank area and cannot tell it from a broken phone.
+Subtitle-only shows are not labelled "Subtitles available" (§5.4). The D8
+language-priority order is partial. Language-prioritised fetch and the
+unresolved-locator classification (§5.3) are unwired.
+
+**§6 audio (2).** §6.6's browser playback/reconnect state is not reported, so an
+operator cannot tell "the phone never started audio" from "the feed is silent".
+(The §6.7/§9.1 port contradiction in this group is fixed — D36.)
+
+**§7 patron UI (4).** `/listen` shows a permanently wrong connection state
+("Connecting…" while audio plays). §7.1's mode selection is not fully
+reload-free. Two others are fixed in D36.
+
+**§8 admin and wrong-room safeguards (10) — the largest and most consequential
+cluster.** Everything an installer types into the identity step is STORED AND
+IGNORED: `expected_screen_name` and `expected_server_fingerprint` are persisted
+and never compared, so §8.5's wrong-room guard cannot be turned on by the person
+doing the install. The physical port label is never set, so the re-cabling
+defence never runs. §8.1's steps are incomplete: no physical-port confirmation
+(the miswiring step exists to prevent), no theater-side static IP/DHCP
+configuration, partial server-family collection, partial audio steps. §8.3's
+debug-capture alert has nothing to raise it.
+
+**§9 security (8).** THE SSH ROW IS A CONSTANT: §9.3's verification reports "SSH
+state correct" from a config setting rather than from the running sshd, so a
+Patron-Facing appliance with sshd actually running reports "SSH disabled". That
+is fail-wrong, and it is the sharpest item in the backlog. Debug caption logging
+and debug audio capture have no admin path at all, so §9.4's sanctioned,
+bounded, self-deleting way to capture content for a support case does not exist —
+which makes the unsanctioned way the only way. `caption.cue.visible_no_text` and
+`caption.timeline.anchor_updated` are never emitted. Booth Diagnostic's "admin on
+the configured admin subnet" is admin on the whole patron interface instead.
+§9.5's Wi-Fi spec is unenforced prose.
+
+**§10 models (4).** `last_timeline_anchor_monotonic_ns` is declared and never
+populated. Two of §10.8's four compatibility revisions are never written, so
+"what changed since this last worked?" is half-answered. `update_channel` has no
+staged-rollout meaning.
+
+**§11 test layers (4).** Every no-forwarding/no-reachability claim is derived
+from configuration the appliance generated rather than probed; there is no
+network test harness. The soak does not run multi-hour with device hot-plug, and
+the Wi-Fi soak (N concurrent patrons) has never run — the D11 caps are enforced
+arithmetically and the capacity behind them is untested.
+
+**§12 profiles (3).** Low-Cost Replacement does not enforce its mandatory
+calibration wizard, so an operator can select the profile reserved for venues
+running CaptionBridge in lieu of a professional receiver system without it.
+§12.5's Loaner overlay cannot be configured by a venue. Admin-subnet handling is
+partial.
+
 An adversarial review of the five slices above (2026-08-21) confirmed 17 defects
 and refuted 2. They are fixed; the three worth carrying forward as a LESSON are
 recorded in JOURNAL.md, because they were all the same shape: a feature that
