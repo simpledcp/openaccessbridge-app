@@ -83,6 +83,8 @@ func TestDashboardRendersTheFactsTheAPIAlreadyMeasured(t *testing.T) {
 		"tunnel_established",          // §9.4 a window is not a connection
 		"ab_supported",                // §9.4 verified is not the same as installable
 		"trusted_keys",                // §9.4 an appliance with none can verify nothing
+		"password_set",                // §9.5 a passphrase is on file, not what it is
+		"hex_ambiguity",               // §9.5 a value some scanners misread
 	} {
 		if !strings.Contains(script, field) {
 			t.Errorf("admin.js never reads %q — the fact is measured and invisible", field)

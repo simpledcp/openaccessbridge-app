@@ -62,6 +62,16 @@ const (
 	SettingUpdateTrustedKeys = "update_trusted_keys"
 	// SettingUpdateMediaDir is the mount point removable update media appears at.
 	SettingUpdateMediaDir = "update_media_dir"
+	// §9.5 patron Wi-Fi onboarding. The passphrase IS stored, and that is a
+	// deliberate decision (D35): a patron network's passphrase is handed to every
+	// person in the room and printed on a lobby sign, so it is not a secret in the
+	// security sense — and §9.5 asks plainly for a QR that carries it. It is never
+	// logged, never served on the patron listener, and appears only in the Wi-Fi
+	// QR and on the authenticated admin page.
+	SettingPatronWiFiSSID     = "patron_wifi_ssid"
+	SettingPatronWiFiPassword = "patron_wifi_password"
+	SettingPatronWiFiSecurity = "patron_wifi_security" // WPA | WEP | nopass
+	SettingPatronWiFiHidden   = "patron_wifi_hidden"
 	// SettingApplianceTier is the §4.3 HARDWARE tier this appliance is —
 	// "standard" or "hardened" — which a §9.4 bundle may target. Empty means an
 	// operator has not said, and a bundle that targets a tier is then refused

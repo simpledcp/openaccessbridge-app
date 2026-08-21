@@ -777,6 +777,53 @@
     el("update-note").textContent = rep.ab_note || "";
   }
 
+  /* §9.5. The passphrase is deliberately NOT rendered here: the code carries it
+   * because a phone needs it, and a dashboard does not. "On file" is the honest
+   * thing to show — it says the appliance has what it needs without putting a
+   * credential on a screen that may be facing a foyer. */
+  function renderWiFi(rep) {
+    var wrap = el("wifi-qr-wrap"), img = el("wifi-qr");
+    var rows = [
+      row("Network", rep.ssid || "not configured", rep.ssid ? null : STATE_UNKNOWN),
+      row("Security", rep.security || "not set", null),
+      row("Passphrase", rep.password_set ? "on file" : "none",
+        rep.password_set || rep.security === "nopass" ? null : STATE_WARN)
+    ];
+    if (rep.hidden) rows.push(row("Hidden network", "yes", null, "the code tells the phone so it can find it"));
+    if (rep.hex_ambiguity) {
+      rows.push(row("Scanner ambiguity", "all-hexadecimal value", STATE_WARN,
+        "some scanners read an all-hex name or passphrase as raw data rather than text"));
+    }
+    dl(el("wifi-detail"), rows);
+    el("wifi-note").textContent = rep.note || "";
+    if (rep.configured && rep.qr_url) {
+      wrap.hidden = false;
+      img.src = rep.qr_url + "?t=" + Date.now();
+    } else {
+      wrap.hidden = true;
+      img.removeAttribute("src");
+    }
+  }
+
+  function refreshWiFi() {
+    fetch("/api/admin/wifi", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 503) return null;
+        if (!r.ok) throw new Error("status " + r.status);
+        return r.json();
+      })
+      .then(function (rep) {
+        if (!rep) {
+          dl(el("wifi-detail"), [row("Patron Wi-Fi", "not available on this appliance", STATE_UNKNOWN)]);
+          return;
+        }
+        renderWiFi(rep);
+      })
+      .catch(function () {
+        dl(el("wifi-detail"), [row("Patron Wi-Fi", "not answering", STATE_BAD)]);
+      });
+  }
+
   function refreshUpdate() {
     fetch("/api/admin/update", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) {
@@ -941,4 +988,8 @@
    * inserted or an update is applied, not continuously. */
   refreshUpdate();
   setInterval(refreshUpdate, 60000);
+
+  /* §9.5. Changes when an installer changes the AP, which is rarely. */
+  refreshWiFi();
+  setInterval(refreshWiFi, 60000);
 })();

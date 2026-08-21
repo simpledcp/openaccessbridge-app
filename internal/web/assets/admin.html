@@ -91,6 +91,16 @@
       <dl id="checklist-detail"></dl>
       <p><a id="checklist-print" href="/api/admin/preshow?format=text" target="_blank" rel="noopener">Printable sheet for the booth →</a></p>
     </div>
+    <!-- §9.5 patron Wi-Fi onboarding: a SECOND code, printed beside the show's.
+         One code cannot be both a network join and a URL. -->
+    <div class="tile">
+      <h2>Patron Wi-Fi code <span class="muted small">(§9.5)</span></h2>
+      <div id="wifi-qr-wrap" hidden>
+        <img id="wifi-qr" alt="QR code a patron scans to join the patron Wi-Fi" width="244" height="244">
+      </div>
+      <dl id="wifi-detail"></dl>
+      <p class="muted small" id="wifi-note"></p>
+    </div>
     <!-- §10.4 per-show patron access. The QR is a bearer credential for the
          show, which is why it only ever appears on this listener (§8.4). -->
     <div class="tile">

@@ -984,3 +984,50 @@ stream to `InputDeviceID` puts both feeds under the wrong device.
 
 None of this clears B3/B4. There is still no capture backend for a real device,
 and every one of these paths refuses one.
+
+## §9.5's Wi-Fi code, and the question it was really waiting on (D35)
+
+This was recorded as "not built" because it is not a rendering job: it turns on
+whether the appliance should hold a network credential at all. Answering that was
+the work.
+
+**It should, and the reason is what kind of credential it is.** A patron
+network's passphrase is given to every person in the auditorium and printed on a
+lobby sign. It is a shared access token for a deliberately untrusted BYOD network
+the appliance does not even operate. Refusing to store it would block a stated
+requirement in order to protect something that is public by design. What it is,
+though, is a credential this appliance did not previously hold — so it is never
+logged, never returned in the status document a dashboard polls (that reports
+`password_set`, not the value), never on the patron listener, and cleared when
+the network is cleared so no passphrase outlives its network.
+
+**One QR cannot be both a network join and a URL**, so this is a second code
+printed beside the show's. §9.5's "one scan" is really "one scan each", and
+saying so beats shipping a code that does neither.
+
+**The interesting part was the escaping, and it was settled by cross-checking
+rather than by reasoning.** The `WIFI:` grammar is de facto — ZXing's — not a
+standard. My first implementation escaped the comma, reasoning from the related
+MECARD contact grammar where it separates fields. Comparing against an
+independent implementation showed it escapes `\\ ; " :` and not the comma, and
+thinking it through afterwards the asymmetry is the point: an UNNECESSARY escape
+is the more dangerous error, because a parser that does not strip it hands the
+phone a passphrase with a literal backslash in it and the join fails, whereas
+omitting an escape for a character that never terminates a field costs nothing.
+
+The all-hex rule could not be settled that way. ZXing's documentation says to
+quote a value made entirely of hex digits, so a scanner does not read it as raw
+bytes; the independent implementation does not quote. Both readings break for
+somebody — quoting fails on a parser that does not strip quotes — and neither can
+be tested without phones (B2). So the appliance does neither silently: it FLAGS
+the ambiguity to the one party who can remove it, because a venue can change one
+character of its passphrase and the question disappears.
+
+Four behaviours were mutation-confirmed, and two of the first attempts proved
+nothing, which was worth chasing. Adding the passphrase to the status struct did
+not fail because a later assignment overwrote the field I set. Logging it under a
+field named `password` did not fail either — because `internal/logging` already
+redacts field names containing "password", a real mechanism I had not known was
+protecting this. Re-run with an innocuous field name (`detail`), the test failed
+as it should. A mutation that is silently neutralised proves nothing, and the
+second one was worth understanding rather than working around.

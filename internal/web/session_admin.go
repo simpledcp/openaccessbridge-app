@@ -54,6 +54,9 @@ func (s *Server) adminSurface() http.Handler {
 	// are no A/B slots to install into (BLOCKERS B8).
 	mux.HandleFunc("/api/admin/update", s.requireAdmin(s.handleAdminUpdate))
 	mux.HandleFunc("/api/admin/update/verify", s.requireAdmin(postOnly(s.handleAdminUpdateVerify)))
+	// §9.5 patron Wi-Fi onboarding (wifi.go): a SECOND code, beside the show's.
+	mux.HandleFunc("/api/admin/wifi", s.requireAdmin(s.handleAdminWiFi))
+	mux.HandleFunc("/api/admin/wifi-qr.png", s.requireAdmin(s.handleAdminWiFiQR))
 	mux.Handle("/", s.adminMux())
 	return securityHeaders(mux)
 }
@@ -226,6 +229,16 @@ func (s *Server) handleAdminSessionQR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "this join URL cannot be encoded as a QR", http.StatusInternalServerError)
 		return
 	}
+	writePNG(w, sym, scale)
+}
+
+// writePNG renders a symbol as the HTTP response.
+//
+// no-store is not per-route politeness: a cached per-show QR is §8.5's stale-code
+// failure, and a cached network code outlives a changed passphrase. Both fail by
+// SUCCEEDING — the scan works and sends the patron somewhere wrong — so the rule
+// lives here rather than being remembered at each call site.
+func writePNG(w http.ResponseWriter, sym *qr.Symbol, scale int) {
 	var buf bytes.Buffer
 	if err := sym.PNG(&buf, scale); err != nil {
 		http.Error(w, "could not render the QR", http.StatusInternalServerError)

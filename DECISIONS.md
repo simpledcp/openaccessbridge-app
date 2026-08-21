@@ -613,3 +613,47 @@ backend, not just the first: a pairing naming one synthetic and one real device
 would otherwise have had half of it served by a tone under the real device's
 identity — the same fabrication the single-device refusal exists to prevent. The
 hardware refusal itself is unchanged (B3/B4).
+
+### D35. The appliance stores the patron Wi-Fi passphrase, and the Wi-Fi code is a SECOND code [§9.5, §9.4]
+§9.5: "QR onboarding carries SSID + password + URL where the platform allows, so
+a patron joins the network and the page in one scan." That requirement was
+recorded as not built because it turns on a question this project takes
+seriously: should the appliance hold a network credential at all?
+
+**It should, and the reason is what kind of credential it is.** A patron
+network's passphrase is handed to every person in the auditorium and printed on a
+sign in the lobby. It is not a secret in the security sense; it is a shared
+access token for a deliberately untrusted BYOD network the appliance does not
+even operate (§9.5's "dedicated external AP"). Refusing to store it would block a
+stated requirement in order to protect something that is, by design, public.
+
+What it IS is a credential this appliance did not previously hold, so it gets the
+handling one deserves: never logged (the logger already redacts fields named
+`password`, and a test proves the value does not reach a log under an innocuous
+field name either), never returned in the status document a dashboard polls —
+which reports `password_set` rather than the value — never served on the patron
+listener, and cleared when the network is cleared, so no passphrase outlives the
+network it belonged to.
+
+**One QR cannot be both a network join and a URL.** `WIFI:` is a distinct grammar
+that phones hand to their Wi-Fi settings. So this is a SECOND code, printed
+beside the show's: network first, page second. §9.5's "in one scan" is really "in
+one scan each", and saying so is better than shipping a code that does neither.
+
+**Two escaping decisions, and both were settled by cross-checking rather than by
+reasoning.** The format is de facto (ZXing's), not a standard.
+
+  - The COMMA is not escaped. The first implementation escaped it, reasoning from
+    the related MECARD contact grammar where it is a separator. It is not a field
+    terminator here, and an unnecessary escape is the more dangerous error: a
+    parser that does not strip it hands the phone a passphrase containing a
+    literal backslash and the join fails. An independent implementation agreed
+    with ZXing and not with us.
+  - An all-hexadecimal value is NOT quoted, and is FLAGGED instead. ZXing's
+    documentation says to quote it so a scanner does not read the hex as raw
+    bytes — but quoting is the same gamble pointed the other way, since a parser
+    that does not strip the quotes puts literal quote marks in the passphrase.
+    Both readings break for somebody and neither can be tested here (no phones,
+    B2). So the appliance reports the ambiguity to the one party who can remove
+    it: the venue, by changing one character. Guessing silently on a patron's
+    behalf is the only option that helps nobody.

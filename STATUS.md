@@ -101,6 +101,7 @@ green.
 | 25 | §9.4 signed offline updates: a bundle format whose signature covers the bytes that arrived, a trust store the bundle cannot add to, refusal to downgrade or replay, and the full A/B rollback state machine in which the NEW image confirms its own health — verify-only on this image, and it says so (D32, B8) | `internal/update`, `internal/web/update.go`, `cmd/captionbridge-core/update.go` |
 | 26 | §6.5 multi-device rooms: a per-stream device assignment the profile can hold, validated against the three ways it can be recorded wrongly, built one device at a time through the wizard, and honoured per stream by the media process (D34) | `internal/model/profile.go`, `internal/web/calibration.go`, `cmd/captionbridge-media` |
 | 27 | §6.7 encode-path latency corrected to ONE accumulation: the smallest whole number of capture periods that holds an Opus frame, which at the shipped settings is 10 ms rather than the 20 ms the estimate used to claim (D33) | `internal/audio/pipeline` |
+| 28 | §9.5 Wi-Fi onboarding: a `WIFI:` code beside the show's, the patron network stored as the shared credential it is — never logged, never in a status document, cleared with the network — and the format's ambiguities cross-checked or flagged rather than guessed (D35) | `internal/qr/wifi.go`, `internal/web/wifi.go` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -211,13 +212,12 @@ writer, and that the build number is stamped.
   only and can never sign (asserted in `internal/invariants`), but where the
   private half lives, how it rotates, and what happens if it leaks are process
   questions nobody has answered.
-- **§9.5's Wi-Fi onboarding QR is not built.** §9.5 wants onboarding to carry
-  "SSID + password + URL where the platform allows", which in practice is a
-  SECOND QR in the `WIFI:` form — one code cannot be both a network join and a
-  URL. `internal/qr` already encodes that payload (there is a fixture for it),
-  but nothing stores the patron SSID or its passphrase, and adding a place to
-  keep a shared network password is a decision about what this appliance holds,
-  not a rendering change. Left for that decision.
+- **The Wi-Fi code's escaping cannot be verified against a real phone.** The
+  `WIFI:` grammar is de facto, and two of its rules are genuinely ambiguous (see
+  D35). The comma question was settled by agreeing with an independent
+  implementation; the all-hex question cannot be settled here at all, so the
+  appliance flags it rather than guessing. Confirming either needs a phone fleet
+  (B2).
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
 - **The ICE scope row is as fresh as the last posture reconcile** (15 s), not as
