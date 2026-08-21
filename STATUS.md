@@ -83,6 +83,7 @@ green.
 | 20 | §6.7 audio delivery, end to end: streaming Opus/RTP encode per named stream, a Pion peer hub that fans ONE encoder out to N subscribers, the SDP/ICE relay across all three processes, and patron availability driven by a measured encoder state (D20) | `internal/audio/{encode,webrtcpeer,pipeline}`, `internal/web/audio.go`, `cmd/*` |
 | 21 | ICE gathering confined to the configured patron interface, refused by name when that interface is absent, and the networks a patron was really offered MEASURED off the emitted SDP and shown on the dashboard (§6.7, §9.1, §8.2, D28) | `internal/audio/webrtcpeer`, `internal/ipc/network.go`, `cmd/*` |
 | 22 | §10.4 QR onboarding: an in-tree pure-Go QR encoder verified module-for-module against independent implementations across all 160 version/level combinations and decoded by zxing-cpp, served per-show on the admin surface with a computed minimum print size (D29) | `internal/qr`, `internal/web/session_admin.go` |
+| 23 | §11.5 pre-show QA checklist codified as a staff procedure: explicit three-state pass/fail per item, a remedy on every item, staff steps printed but never recorded, and a printable booth sheet (D30) | `internal/model/checklist.go`, `internal/readiness/checklist.go`, `internal/web/checklist.go` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 
@@ -174,7 +175,6 @@ the audit lanes' own reports.
 - **Support mode (§9.4)** — off by default, outbound-only, time-limited,
   audited — is still only a config key.
 - **Signed offline updates + A/B rollback (§9.4)** are not built.
-- **§11.5 pre-show QA checklist** is not codified as a staff-facing procedure.
 - **The ACSP supervisor has no production caller**: `cmd/captionbridge-core`
   still runs the self-advancing demo, because the real transport is B1-gated.
 - **The ICE scope row is as fresh as the last posture reconcile** (15 s), not as

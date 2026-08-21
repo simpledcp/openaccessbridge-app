@@ -658,6 +658,50 @@
     dl(el("session-detail"), rows);
   }
 
+  /* §11.5. Every item is rendered with its state SPELLED OUT — "NOT CHECKED"
+   * and "CANNOT BE CHECKED HERE" are not abbreviated into anything that could be
+   * mistaken for a tick, because this is the page someone reads at speed while
+   * wanting to open the house. Staff steps are labelled as theirs: the appliance
+   * has no idea whether they were done and must never look as though it does. */
+  function renderChecklist(cl) {
+    var rows = (cl.checks || []).map(function (c) {
+      var state = c.state === "pass" ? STATE_OK
+        : c.state === "fail" ? STATE_BAD
+        : STATE_WARN;
+      var label = c.state === "pass" ? "PASS"
+        : c.state === "fail" ? "FAIL"
+        : c.state === "unmeasurable" ? "CANNOT BE CHECKED HERE"
+        : "NOT CHECKED";
+      if (c.source === "staff") label += " — staff step";
+      if (c.blocking && c.state !== "pass") label += " · BLOCKING";
+      var note = c.detail;
+      if (c.state !== "pass" && c.remedy) note += " — " + c.remedy;
+      return row(c.title, label, state, note);
+    });
+    dl(el("checklist-detail"), rows);
+    var summary = cl.appliance_ready
+      ? "Every blocking check this appliance can make is passing."
+      : "NOT READY: " + (cl.blocking_problems || []).join(", ");
+    /* The appliance's verdict must never be read as "the room is ready". */
+    summary += " " + (cl.staff_steps_outstanding || 0) +
+      " step(s) above are yours; the appliance does not know whether they were done.";
+    el("checklist-summary").textContent = summary;
+  }
+
+  function refreshChecklist() {
+    fetch("/api/admin/preshow", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("status " + r.status);
+        return r.json();
+      })
+      .then(renderChecklist)
+      .catch(function () {
+        el("checklist-summary").textContent =
+          "The pre-show checklist is not answering; check captionbridge-core.";
+        dl(el("checklist-detail"), []);
+      });
+  }
+
   function refreshSession() {
     fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) {
@@ -734,4 +778,9 @@
   });
   refreshSession();
   setInterval(refreshSession, 15000);
+
+  /* §11.5, on the same slow cadence: this is a sheet a person reads, not a live
+   * meter, and it is derived from the status rows that refresh every 3 s. */
+  refreshChecklist();
+  setInterval(refreshChecklist, 15000);
 })();

@@ -77,6 +77,8 @@ func TestDashboardRendersTheFactsTheAPIAlreadyMeasured(t *testing.T) {
 		"ice_scope",                   // §6.7/D27 which networks a patron was really offered
 		"join_code",                   // §10.4 the patron who cannot scan
 		"print_width_mm",              // §10.4 a QR printed too small does not scan
+		"appliance_ready",             // §11.5 the appliance's own verdict, not the room's
+		"staff_steps_outstanding",     // §11.5 the half the appliance cannot answer
 	} {
 		if !strings.Contains(script, field) {
 			t.Errorf("admin.js never reads %q — the fact is measured and invisible", field)

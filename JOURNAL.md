@@ -656,3 +656,58 @@ requires, and fails as it should.
 **What this does not clear.** B2. No phone camera, no venue lighting, no printed
 card, no lobby. A scanner library reading a PNG on a build host is not a patron
 scanning a card in a dark foyer, and nothing on either surface says otherwise.
+
+## §11.5: a pre-show checklist that refuses to tick a box nobody checked (D30)
+
+The readiness measurements have existed for several passes. What §11.5 asks for
+is different from a dashboard, and the difference is the second half of its
+sentence: "define **what staff do when a check fails** before a show — readiness
+checks are only useful if they're tied to a procedure." A page that says
+`audio_ready: false` has moved the problem to a person who now has a red line
+and no instruction.
+
+So every item carries a remedy, and the remedies are specific enough to act on:
+the wrong-room item says *stop*; the caption-assets item distinguishes "the
+playlist is not loaded" (ask the projectionist) from "the playlist is loaded and
+its assets are not" (a content problem in the DCP, and the show will play with
+blank captions); the seat-level Wi-Fi item says that working at the rack and
+failing in the seats means AP placement, which is §9.5's named failure.
+
+**Three states, because two would have to lie.** On this host the firewall
+ruleset cannot be read without root, so "firewall active" is neither pass nor
+fail — it is *not checked*, and it blocks the house exactly as a failure does. The
+latency item is a fourth thing again: nothing on this appliance can ever measure
+glass-to-ear latency (B2/B3), so it reads CANNOT BE CHECKED HERE and does not
+block, because refusing to open a house over a measurement that cannot be taken
+here would make the sheet unusable, and an unusable sheet is an ignored one.
+
+**The sharpest line is the audio one.** A synthetic test tone qualifies
+*perfectly* — present, streaming, excellent. Passing that item would send a booth
+to open a house on a 440 Hz tone. It reports CANNOT BE CHECKED HERE and names the
+tone.
+
+**Three items are the staff's, and the appliance records nothing about them.**
+Loading the patron page from a seat, checking the admin surface from the patron
+SSID, and the loaner kit. It prints the step and the pass criterion, and stores
+no attestation — deliberately. A tick the appliance cannot verify, stored and
+shown later, is indistinguishable from a measurement and ages far worse: last
+week's tick would sit on tonight's page. That exact bug has already shipped here
+once (a §10.8 stamp written by pressing "Complete"), which is why the sheet ends
+with a line saying in words that the appliance does not know whether those steps
+were done.
+
+There is no single "READY" verdict for the same reason. `ApplianceReady` is named
+for what it covers; the appliance cannot see the seats.
+
+The printable form is the actual deliverable — wrapped to 78 columns, remedies
+hanging-indented under the items that are not passing and only those, readable on
+a phone in a dark projection booth and printable for a binder. It works when the
+appliance is the thing that is broken.
+
+Four behaviours were mutation-confirmed: an unrun blocking check counting as a
+pass; a synthetic tone passing as this room's audio; a staff step reported as
+done; and the printed sheet dropping the line that says the staff steps are not
+recorded. The third of those is worth noting for a different reason — the first
+attempt at that mutation silently did not apply, because the pattern no longer
+matched after gofmt, and the test "passed". A mutation that does not apply proves
+nothing, so it was re-run with the target asserted before the edit.

@@ -44,6 +44,8 @@ func (s *Server) adminSurface() http.Handler {
 	mux.HandleFunc("/api/admin/session", s.requireAdmin(s.handleAdminSession))
 	mux.HandleFunc("/api/admin/session/end", s.requireAdmin(postOnly(s.handleAdminSessionEnd)))
 	mux.HandleFunc("/api/admin/session/qr.png", s.requireAdmin(s.handleAdminSessionQR))
+	// §11.5's staff pre-show gate (checklist.go).
+	mux.HandleFunc("/api/admin/preshow", s.requireAdmin(s.handleAdminPreShow))
 	mux.Handle("/", s.adminMux())
 	return securityHeaders(mux)
 }

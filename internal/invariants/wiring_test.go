@@ -157,6 +157,29 @@ func TestInvariant_TheQREncoderHasAProductionCaller(t *testing.T) {
 	}
 }
 
+// TestInvariant_ThePreShowChecklistIsServedAndPrintable: §11.5 asks for a
+// codified STAFF procedure, and a derivation with no route is not a procedure.
+// The printable form is part of the requirement rather than a nicety — the sheet
+// has to work when the appliance is the thing that is broken.
+//
+// The literals below are LOAD-BEARING.
+func TestInvariant_ThePreShowChecklistIsServedAndPrintable(t *testing.T) {
+	admin := readFile(t, filepath.Join(repoRoot(t), "internal", "web", "session_admin.go"))
+	if !strings.Contains(admin, `"/api/admin/preshow"`) {
+		t.Errorf("the §11.5 checklist has no route: it is a derivation nobody can reach")
+	}
+	sheet := readFile(t, filepath.Join(repoRoot(t), "internal", "web", "checklist.go"))
+	if !strings.Contains(sheet, `"text"`) || !strings.Contains(sheet, "renderChecklistText") {
+		t.Errorf("the checklist has no printable form (§11.5 wants a staff procedure, not a JSON document)")
+	}
+	// The sheet must never store a staff attestation. Recording that a person
+	// ticked a box the appliance cannot verify is the §10.8 button-press bug in a
+	// new place, and it ages worse: last week's tick sits on tonight's page.
+	if strings.Contains(sheet, "PutSetting") || strings.Contains(sheet, "LastReadinessCheck") {
+		t.Errorf("the checklist writes to the config store: a staff tick must not become a stored fact")
+	}
+}
+
 func hasCode(ws []model.Warning, code string) bool {
 	for _, w := range ws {
 		if w.Code == code {

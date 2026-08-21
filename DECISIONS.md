@@ -379,3 +379,52 @@ beside the code.
 **What this does NOT clear: B2.** No phone camera, no venue lighting, no lobby.
 Local decoding by a scanner library is not a patron scanning a printed card in a
 dark foyer, and nothing on the operator surface claims otherwise.
+
+### D30. A pre-show check has three states, and the ones only a person can do are never recorded [§11.5, §8.1, §9.3]
+§11.5 asks for two things, and the second is the one usually skipped: "Codify a
+staff pre-show checklist with explicit pass/fail … Crucially, define **what staff
+do when a check fails** before a show — readiness checks are only useful if
+they're tied to a procedure." So every item on the sheet carries a REMEDY. An
+item without one is a fact about the appliance, not a checklist item, and it does
+not belong on a page consulted ninety seconds before a house opens.
+
+**Three states, not two.** `pass`, `fail`, `not checked`, and `cannot be checked
+here` — the last two are different and lead a booth to do different things.
+"Nothing read the firewall ruleset" (D17) is not a failure and is certainly not a
+pass; "no glass-to-ear latency has ever been measured on this appliance" is
+structural and will not change by trying again. A blocking item that was never
+run counts against the appliance's verdict exactly as a failure does, because the
+entire purpose of the third state is that "we did not look" must not buy the same
+silence as "we looked and it was fine".
+
+**Staff steps are printed and never recorded.** Three items on the sheet can only
+be answered by a person: loading the patron page FROM A SEAT rather than at the
+rack (§9.5's RF-reality failure), confirming the admin surface is unreachable
+from the patron SSID (the appliance can answer for its BINDING, not for what the
+network permits), and the loaner kit. The appliance prints the step and the pass
+criterion and stores nothing about whether it was done.
+
+That is a deliberate refusal, not a missing feature. A tick box the appliance
+cannot verify, stored and shown back later, is indistinguishable from a
+measurement and ages far worse — last week's tick would sit on tonight's page.
+This repo has already shipped exactly that bug once, in the §10.8 readiness stamp
+written by pressing "Complete" rather than by a check that ran. So
+`StaffStepsOutstanding` is always the full count of staff items, and the sheet
+says in words that the appliance does not know whether they were done.
+
+**There is no single "ready" verdict.** `ApplianceReady` is named for what it
+covers. The appliance can answer for its own state; it cannot see the seats, the
+SSID list or the loaner drawer, and one composite boolean would let the half it
+knows vouch for the half it does not.
+
+**Two representations, and the plain-text one is the deliverable.** A checklist
+that exists only in a browser is not a procedure. `/api/admin/preshow?format=text`
+prints a wrapped, fixed-width sheet for a booth binder, with the remedy set under
+each item that is not passing — and only those, because a sheet that repeats an
+instruction under all sixteen lines is one nobody reads to the bottom. It is
+readable when the appliance is the thing that is broken.
+
+**Derived from the dashboard verdict, not beside it.** The checklist reads
+`model.SystemReadiness` — the same account of itself the operator is looking at —
+rather than re-deriving from `readiness.Inputs`. A parallel derivation could
+disagree with the page, and two truths on one screen is worse than either.
