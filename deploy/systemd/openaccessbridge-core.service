@@ -23,10 +23,15 @@ ExecStart=/usr/local/bin/openaccessbridge-core \
 Restart=on-failure
 RestartSec=2
 
-# 0750 + preserve: the three processes share this tmpfs runtime dir for their
-# loopback sockets, so it must outlive any single unit's stop (§3.5).
+# 0770 + preserve: the three processes share this tmpfs runtime dir for their
+# loopback sockets, so it must outlive any single unit's stop (§3.5). Group-
+# writable because systemd re-owns it for whichever unit starts, and the root
+# helper (whose capability set has no CAP_DAC_OVERRIDE) and this unprivileged
+# user must BOTH be able to create their socket in it whoever owns it at the
+# time; the processes leave a directory they did not create exactly as
+# provisioned (internal/ipc prepareSocketDir).
 RuntimeDirectory=openaccessbridge
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0770
 RuntimeDirectoryPreserve=yes
 # Only the SQLite CONFIG store is writable (configuration only — never content).
 StateDirectory=openaccessbridge

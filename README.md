@@ -55,6 +55,17 @@ CI (`.github/workflows/ci.yml`) runs vet, the race-enabled test suite (the ACSP
 simulator scenario suite is the caption-path regression backbone, §11.1), and
 builds all binaries on every push/PR.
 
+## Deploy
+
+Natively as three systemd units, or as three containers from one image — the
+same binaries, flags, accounts and privilege split either way (`deploy/README.md`).
+
+```sh
+make docker-build   # ghcr.io/simpledcp/openaccessbridge, stamped like the native build
+make docker-smoke   # build + prove the image (CI runs this)
+docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/simpledcp/openaccessbridge openaccessbridge-demo
+```
+
 ## Layout
 
 ```
@@ -69,6 +80,6 @@ internal/
   web/                   patron + admin HTTP surfaces (§7, §8)
   security/              firewall rule generation + verification (§9)
   sim/                   ST 430-10 simulator + scenario suite (§11.1)
-deploy/                  systemd units + deployment profiles (§12)
+deploy/                  systemd units, Docker image + compose files, deployment profiles (§12)
 testdata/                RPL + timed-text fixtures
 ```

@@ -259,6 +259,20 @@ func TestEnumerateMissingALSAIsAnError(t *testing.T) {
 	}
 }
 
+// TestEnumerateMaskedALSAIsAnError: a container runtime that masks /proc/asound
+// leaves an EMPTY directory in its place, which must not read as "no inputs
+// attached" (guardrail #7). The tree exists, the card list does not.
+func TestEnumerateMaskedALSAIsAnError(t *testing.T) {
+	e := &ALSAEnumerator{ProcRoot: t.TempDir(), DevRoot: t.TempDir()}
+	devs, err := e.Devices()
+	if err == nil {
+		t.Fatalf("an empty /proc/asound enumerated as %d devices with no error", len(devs))
+	}
+	if !strings.Contains(err.Error(), "hidden") {
+		t.Errorf("error does not say the subsystem is hidden: %v", err)
+	}
+}
+
 // TestEnumerateHost runs the enumerator against this machine's real ALSA state
 // when it has one. It asserts only invariants that must hold on any host — it
 // does not assume a particular card is present.

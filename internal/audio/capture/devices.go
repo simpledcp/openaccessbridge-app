@@ -105,6 +105,15 @@ func (e *ALSAEnumerator) Devices() ([]Device, error) {
 	if err != nil {
 		return nil, fmt.Errorf("capture: ALSA not available at %s: %w", root, err)
 	}
+	// A directory that is there but holds none of ALSA's own files is not an
+	// ALSA tree. A container runtime that masks /proc/asound mounts an empty,
+	// read-only tmpfs over it, and reading that as "no cards" would report a
+	// booth with no inputs attached when the sound subsystem was merely hidden
+	// — the exact confusion the error above exists to prevent (guardrail #7).
+	if _, err := os.Stat(filepath.Join(root, "cards")); err != nil {
+		return nil, fmt.Errorf("capture: %s holds no ALSA card list — the sound subsystem is hidden from this process "+
+			"(a container runtime masking /proc/asound? see deploy/README.md): %w", root, err)
+	}
 	longNames := readCardNames(filepath.Join(root, "cards"))
 	byID := readLinkDir(filepath.Join(e.devRoot(), "by-id"))
 	byPath := readLinkDir(filepath.Join(e.devRoot(), "by-path"))

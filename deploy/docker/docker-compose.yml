@@ -1,0 +1,196 @@
+# OpenAccessBridge — the APPLIANCE deployment as three containers from one image.
+#
+# This file mirrors deploy/systemd/*.service one-to-one: the same three
+# processes, the same flags, the same users, the same capability split (only
+# the firewall helper is privileged — buildplan §3.5), the same tmpfs runtime
+# directory shared for the loopback sockets, and only the SQLite CONFIG store on
+# persistent storage (§9.4: caption text and audio are never written to disk).
+#
+#   make docker-build                                  # stamps VERSION/BUILD_NUMBER from git
+#   docker compose -f deploy/docker/docker-compose.yml up -d
+#
+# READ deploy/README.md ("Docker") FIRST. The three services run on the HOST
+# network, so the appliance host must be a dedicated two-NIC box whose Docker
+# daemon runs with deploy/docker/daemon.json (`"bridge": "none"`,
+# `"ip-forward": false`, no Docker iptables): otherwise dockerd creates a
+# bridge device and re-enables IP forwarding, both of which §9.3's verification
+# flags as critical and the setup wizard refuses to complete over. And once the
+# ruleset is loaded, nothing on this host can `docker pull`: images travel to
+# an appliance as files (`docker save` / `docker load`).
+#
+# For a laptop or CI, use docker-compose.dev.yml (bridge network, published
+# ports, dry-run firewall) or the single-container `openaccessbridge-demo`.
+
+name: openaccessbridge
+
+x-openaccessbridge: &openaccessbridge
+  image: ${OPENACCESSBRIDGE_IMAGE:-ghcr.io/simpledcp/openaccessbridge:latest}
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile
+    args:
+      # `docker compose build` needs these in the environment; the Dockerfile
+      # refuses to build without them (D32). `make docker-build` supplies them.
+      VERSION: ${VERSION:-}
+      BUILD_NUMBER: ${BUILD_NUMBER:-}
+  # Host network, for all three, and not as a convenience. The helper writes
+  # ip_forward=0 and applies nftables to the HOST's namespace, and the ruleset
+  # it applies admits patron traffic only at the host's input hook by NIC name
+  # with a forward chain that never accepts — so a bridge-networked container
+  # behind Docker's NAT would receive nothing once the appliance is configured
+  # (§9.1). media hands phones ICE candidates on the patron NIC, not a bridge
+  # address (§6.7); core binds the patron NIC on :80 and admin on loopback,
+  # exactly as its unit does (§8.4).
+  network_mode: host
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  # LimitCORE=0 in the units: a core dump could carry caption text or audio.
+  ulimits:
+    core: 0
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+  stop_grace_period: 10s
+
+# RuntimeDirectory= equivalent: the tmpfs volume below, mounted by all three.
+# nocopy: nothing from the image's (empty) directory is copied onto it.
+x-run-volume: &run-volume
+  type: volume
+  source: oab-run
+  target: /run/openaccessbridge
+  volume:
+    nocopy: true
+
+services:
+  # openaccessbridge-firewall.service — the ONLY privileged component. Root,
+  # with exactly the capabilities nftables and the forwarding sysctls need.
+  firewall:
+    <<: *openaccessbridge
+    command:
+      - openaccessbridge-firewall
+      - --socket-dir=/run/openaccessbridge
+      # Apply is gated on root AND this flag; without it the helper is a dry-run
+      # that generates and verifies but never touches the host (B5).
+      - --allow-apply
+    # root with the SHARED GROUP as primary group (Group=openaccessbridge in
+    # the unit): the helper's socket is handed to that group so the
+    # unprivileged core can reach it, and core is admitted by its gid (§3.5).
+    user: root:openaccessbridge
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW]
+    security_opt:
+      - no-new-privileges:true
+      # Docker mounts /proc/sys read-only and its default AppArmor profile
+      # denies writes under /proc/sys/net; the helper must set ip_forward=0 and
+      # the IPv6 equivalent on the HOST (guardrail #2). Both are lifted for this
+      # one container only; it still runs under the default seccomp profile
+      # with every other capability dropped, on a read-only root.
+      - apparmor=unconfined
+      - systempaths=unconfined
+    volumes:
+      - *run-volume
+    healthcheck:
+      # "The helper got past Listen since the volume was last empty" — not
+      # "the helper answers". Liveness as the operator sees it is core's
+      # per-process row on the dashboard (§3.5).
+      test: ["CMD", "test", "-S", "/run/openaccessbridge/firewall.sock"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # openaccessbridge-media.service — unprivileged. No writable disk at all.
+  media:
+    <<: *openaccessbridge
+    command:
+      - openaccessbridge-media
+      - --socket-dir=/run/openaccessbridge
+    user: openaccessbridge
+    group_add: [audio]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      # Docker hides /proc/asound from every unprivileged container (an empty
+      # tmpfs over it), and that is where the §6.4 wizard's device list comes
+      # from; media would report a booth with no sound subsystem. Lifted for
+      # this container, which still runs as the service account with every
+      # capability dropped on a read-only root.
+      - systempaths=unconfined
+    volumes:
+      - *run-volume
+      # The host's LIVE /dev/snd, symlink directories included: the stable §6.1
+      # device identity is read from /dev/snd/by-id and by-path, which a
+      # `devices:` entry would not carry (it copies device nodes only, once, at
+      # create). Access to the nodes comes from the cgroup rule for ALSA's
+      # character major, below. This is device LISTING for the wizard — this
+      # build has no capture backend and refuses a real device by name (B3);
+      # Docker changes nothing about that.
+      - /dev/snd:/dev/snd
+    device_cgroup_rules:
+      - "c 116:* rwm"
+    depends_on:
+      firewall:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/openaccessbridge/media.sock"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # openaccessbridge-core.service — unprivileged, CAP_NET_BIND_SERVICE for :80
+  # (kept in the bounding set here; carried across exec by the file capability
+  # the Dockerfile sets on the binary). Requires the firewall helper; Wants (not
+  # Requires) media, so a media fault never stops captions (§2, §3.5).
+  core:
+    <<: *openaccessbridge
+    command:
+      - openaccessbridge-core
+      - --config=/var/lib/openaccessbridge/config.db
+      - --patron-bind=0.0.0.0:80
+      # Loopback only: production profiles refuse an admin surface reachable
+      # from the patron network (§8.4). Reach it from the appliance console or
+      # over an SSH tunnel opened BEFORE the ruleset closes new connections —
+      # see deploy/README.md "First boot".
+      - --admin-bind=127.0.0.1:8443
+      - --socket-dir=/run/openaccessbridge
+    user: openaccessbridge
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - oab-state:/var/lib/openaccessbridge
+      - *run-volume
+    depends_on:
+      firewall:
+        condition: service_started
+      media:
+        condition: service_started
+        required: false
+    healthcheck:
+      # No curl in the image: bash's /dev/tcp is enough for GET /healthz.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/80 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  # Only the SQLite config store persists (StateDirectory=). Back it up with
+  # core stopped — see deploy/README.md "What persists".
+  oab-state: {}
+  # RuntimeDirectory= equivalent: real tmpfs, shared by all three containers.
+  # Root's, group-writable for the service account and sticky
+  # (RuntimeDirectoryMode=1770): core and media create their socket and the
+  # §9.4 debug-capture sink in it, and cannot remove the root helper's socket
+  # to put an impostor in its place. Real tmpfs matters: core refuses to start
+  # a debug capture anywhere it cannot prove is memory-backed
+  # (debugcapture.RequireTmpfs).
+  oab-run:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "uid=0,gid=1901,mode=1770,size=64m"

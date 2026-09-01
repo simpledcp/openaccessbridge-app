@@ -24,10 +24,12 @@ Restart=on-failure
 RestartSec=2
 
 # Runtime dir is tmpfs (sockets/transient state only — never content; §9.4).
-# 0750 so the shared group can traverse to the socket; preserved so stopping any
-# one unit does not delete the directory the other two are still using.
+# 0770 so the shared group can create its sockets beside this one whichever
+# unit owns the directory at the time (see openaccessbridge-core.service);
+# preserved so stopping any one unit does not delete the directory the other
+# two are still using.
 RuntimeDirectory=openaccessbridge
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0770
 RuntimeDirectoryPreserve=yes
 
 # Hardening.

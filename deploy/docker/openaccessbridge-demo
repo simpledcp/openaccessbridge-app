@@ -1,0 +1,75 @@
+#!/bin/bash
+# openaccessbridge-demo — the three supervised processes in ONE container, for a
+# laptop, a CI smoke test, or a first look:
+#
+#   docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/simpledcp/openaccessbridge openaccessbridge-demo
+#
+# This is the container equivalent of DEVELOPMENT.md §3 ("run the whole
+# appliance locally"): a self-advancing ACSP demo drives the caption path, the
+# media process serves synthetic HI/VI-N tones, and the firewall helper runs in
+# DRY-RUN. It is not the appliance deployment — that is docker-compose.yml, one
+# container per process with the privilege separation §3.5 requires. Here the
+# only separation is uid: started as root, the helper stays root (so the socket
+# posture matches the appliance) and core/media are dropped to the service
+# account; started as any other user, all three run as that user, exactly as the
+# native dev recipe does.
+#
+# One container is one supervised unit: when the first process exits, the rest
+# are stopped and the container exits with that process's status, so Docker's
+# restart policy restarts the trio together.
+set -euo pipefail
+
+RT="${OPENACCESSBRIDGE_RUNTIME_DIR:-/run/openaccessbridge}"
+ST="${OPENACCESSBRIDGE_STATE_DIR:-/var/lib/openaccessbridge}"
+PATRON_BIND="${OAB_PATRON_BIND:-0.0.0.0:8080}"
+# 0.0.0.0 so the published port reaches it; only the non-production profiles
+# accept an admin surface reachable from the patron side (§8.4), which is what
+# a demo runs under (Booth Diagnostic by default, D13).
+ADMIN_BIND="${OAB_ADMIN_BIND:-0.0.0.0:8090}"
+DEMO="${OAB_DEMO:-true}"
+SYNTHETIC="${OAB_SYNTHETIC:-true}"
+FIREWALL_ARGS=("--socket-dir=$RT")
+if [ "${OAB_ALLOW_APPLY:-false}" = "true" ]; then
+  # Only meaningful with --network host and CAP_NET_ADMIN; see deploy/README.md.
+  FIREWALL_ARGS+=("--allow-apply")
+fi
+
+mkdir -p "$RT" "$ST"
+# exec, so the pid recorded below IS the Go process and the TERM forwarded on
+# `docker stop` reaches its signal handler rather than a shell wrapped around it.
+if [ "$(id -u)" = 0 ]; then
+  # The runtime dir in the compose files' posture: root's, group-writable for
+  # the service account and sticky, so the unprivileged pair can create their
+  # socket beside the helper's but not remove the helper's (deploy/README.md,
+  # "The shared runtime directory").
+  chown root:openaccessbridge "$RT"
+  chmod 1770 "$RT"
+  chown openaccessbridge:openaccessbridge "$ST"
+  chmod 0700 "$ST"
+  unpriv() { exec setpriv --reuid=openaccessbridge --regid=openaccessbridge --init-groups "$@"; }
+  # The helper keeps root but takes the shared group as its primary group, as
+  # Group=openaccessbridge does in its unit, so its socket can be handed to it.
+  helper() { exec setpriv --reuid=0 --regid=openaccessbridge --init-groups "$@"; }
+else
+  unpriv() { exec "$@"; }
+  helper() { exec "$@"; }
+fi
+
+pids=()
+start() { "$@" & pids+=("$!"); }
+
+start helper openaccessbridge-firewall "${FIREWALL_ARGS[@]}"
+start unpriv openaccessbridge-media --socket-dir="$RT" --synthetic="$SYNTHETIC"
+start unpriv openaccessbridge-core --config="$ST/config.db" --socket-dir="$RT" \
+  --patron-bind="$PATRON_BIND" --admin-bind="$ADMIN_BIND" --demo="$DEMO"
+
+stop_all() { kill -TERM "${pids[@]}" 2>/dev/null || true; }
+trap stop_all TERM INT
+
+set +e
+wait -n
+status=$?
+set -e
+stop_all
+wait
+exit "$status"

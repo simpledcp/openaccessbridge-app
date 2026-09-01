@@ -42,7 +42,27 @@ RT=/tmp/oab; mkdir -p $RT
 
 make soak         # §11.6 long soak (default 2000 show cycles)
 make latency      # §11.4 appliance-side latency pass (default 60 s sampling window)
+
+# Docker (D45): one image, the same three processes. deploy/README.md "Docker".
+make docker-build # ghcr.io/simpledcp/openaccessbridge:<git describe>, stamped like the native build
+make docker-smoke # build + the container smoke test CI runs (three-container stack + one-container demo)
+docker compose -f deploy/docker/docker-compose.dev.yml up      # laptop: ports 8080/8090, dry-run helper
+docker compose -f deploy/docker/docker-compose.yml up -d       # APPLIANCE: host network, privileged helper — read the README first
 ```
+
+**Verified live (Docker, 2026-08-27):** `make docker-smoke` passes on this host —
+three containers from the image under two accounts on a shared root-owned
+sticky tmpfs, all healthy with zero restarts, core's own status reporting both
+helpers alive across container boundaries, both helper sockets with the unit
+modes, the helper restarting cleanly into the shared directory, patron and
+admin surfaces answering, captions and two real `gst-launch` Opus encoders
+offered, no ERROR-level log line; the single-container demo serving and
+stopping on SIGTERM in 0.25 s; and core serving on `:80` on the host network as
+the service account (the file capability the review found missing). The
+appliance stack (host network, `--allow-apply`) was NOT run here: it would
+apply a default-deny ruleset to this development machine (B5). Its exact
+option set was measured to be sufficient for the sysctl writes and the `nft`
+reads (D45).
 
 **Verified live (all three processes, 2026-08-21):** the five newest slices were
 each exercised against the running appliance, not only in tests. Configuring the
@@ -105,6 +125,7 @@ green.
 | 29 | §5.4 D8 steps (3)/(4) on BOTH sides of the seam: a closed-caption track outranks a subtitle track for the default and the fetch order, and the offer list reaches `internal/web` in that order — so a patron with no stated preference is served the track that carries the sound cues (D43) | `internal/caption/rpl`, `internal/caption/acsp`, `internal/web/patron.go` |
 | 30 | §5.3 unresolved locators classified BY SERVER FAMILY, with the announced family plumbed from a wire field nothing read, the tally surfaced on the §8.2 caption panel, and the five caption dependencies rebuilt as one constructor both `main()` and the tests use (D43) | `internal/caption/resolver`, `internal/caption/acsp`, `cmd/openaccessbridge-core/status.go` |
 | 31 | Project-wide rename to **OpenAccessBridge**: module path, three binaries, systemd units, nftables table, state/runtime paths, env prefix, update-bundle magic, patron cookie and every brand string; GitHub repo now `simpledcp/openaccessbridge-app`. Verified by six adversarial lenses, which found the sweep had rewritten the build host's real directories (D44) | tree-wide, `go.mod`, `cmd/`, `deploy/systemd/` |
+| 32 | **Docker packaging (D45):** one image with all four binaries, the appliance as three containers mirroring the systemd units (host network, helper with exactly `NET_ADMIN`/`NET_RAW`, core/media unprivileged on read-only roots, a root-owned sticky tmpfs runtime volume, config-only volume, `daemon.json` for the host), a laptop/CI stack, a single-container demo, `make docker-build`/`docker-save`/`docker-smoke`, CI build+smoke on every push and GHCR publish on version tags — plus what it surfaced: the shared-runtime-directory contract (`internal/ipc`: leave a provisioned directory alone, create sockets at their final mode, verify before serving), the enumerator's silent empty-`/proc/asound` path, core's exit status on a refused bind, and CI's shallow-clone build number | `deploy/docker/`, `internal/ipc`, `internal/audio/capture`, `cmd/openaccessbridge-core`, `deploy/systemd/`, `Makefile`, `.github/` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 

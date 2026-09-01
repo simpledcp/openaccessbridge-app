@@ -1504,3 +1504,134 @@ The local working directory keeps its old name, at the operator's choice; both
 D0 and STATUS.md now say why, so the next reader does not mistake it for residue.
 
 `make check` green: 34 packages, 753 top-level Go tests, 23 browser cases.
+
+## Docker, and the directory three processes could not agree on (D45)
+
+The ask was to deploy via Docker as well as natively. The interesting part was
+not the Dockerfile.
+
+### What was built
+
+One image, all four binaries, stamped exactly as the native build is — the
+Dockerfile refuses to build without a version and a build number, because an
+image that quietly stamped build 0 would ship an update surface that cannot be
+used (D32). The appliance runs it as three containers that mirror the systemd
+units line for line: the helper as `root:openaccessbridge` with `NET_ADMIN` and
+`NET_RAW` and nothing else, core and media as the service account on read-only
+roots, all three on the host network, one tmpfs volume for the sockets and one
+persistent volume for the config store. A second compose file runs the same
+three on a laptop or in CI with no privileges, and one script runs all three in
+a single container for a first look. `make docker-smoke` builds the image and
+proves it; CI runs that on every push and publishes to GHCR only on a version
+tag.
+
+### What was measured rather than assumed
+
+Whether the helper can do its job from a container was settled by experiment,
+not by reading Docker's documentation. In host-network mode with `NET_ADMIN`,
+`/proc/sys` is read-only; lift that with `systempaths=unconfined` and the write
+is still refused, by the default AppArmor profile; lift both and the forwarding
+sysctls are writable and `nft` reads and would load the host's tables, with a
+read-only root and the default seccomp profile still in force. The test wrote
+the host's current value back to itself, so the dev machine's forwarding state
+never changed. `privileged: true` was never needed and is not used.
+
+Two facts about the appliance host fell out of the same measurements: in host
+mode `/sys/class/net` shows `docker0`, which the §9.3 bridge scan flags as
+critical, and dockerd sets `ip_forward=1` at every start, which the watchdog
+would flip back every 30 s. So the appliance's daemon must run with `bridge:
+none` and `ip-forward: false` (and no Docker iptables), and that is written
+down as a requirement, not left for an installer to discover on a dashboard.
+
+### The defect
+
+The first three-container run died in the helper: `chmod /run/openaccessbridge:
+operation not permitted`. `ipc.ListenWithOptions` set the socket directory's
+mode on every start — media to 0700, the helper to 0750 — and root without
+`CAP_FOWNER` cannot chmod a directory it does not own. The units grant the
+helper the same two capabilities. The native install had never hit this only
+because `RuntimeDirectory=` re-owns the directory to each unit's user on every
+start, so each process happened to own it at the moment it started; and even so
+`core` could not create the debug-capture sink after a helper restart, because
+the directory was root's by then. Two processes each "correcting" a shared
+directory to its own default is a contradiction, and a supervisor that papered
+over it was the only reason it looked like a working design.
+
+The contract now is one every platform can provision the same way: the
+directory is the service account's and group-writable (0770), the helper runs
+with the shared group as its primary group, and a process that finds the
+directory already there leaves it alone after checking it is not a symlink, not
+world-writable, and owned by itself, root or the shared group. A process that
+creates the directory still applies its own mode, so nothing changes on a dev
+host. The ownership policy is a pure function with a table of cases, because
+the cases that matter — a root-owned directory, one owned by the shared group —
+need accounts a test does not have. With that in place the helper restarts into
+the shared directory cleanly, and the smoke test asserts both sockets' modes.
+
+### Two smaller things the smoke test caught
+
+The demo script wrapped each process in a shell function that did not `exec`,
+so `docker stop` signalled the shell and the Go process never saw SIGTERM;
+Docker would have killed it after the grace period. Fixed with `exec`; the stop
+now takes a quarter of a second and core logs its shutdown phase, and the smoke
+test checks for that line. And the admin smoke check first assumed the wizard
+would demand credentials; at first boot it does not, by design (`requireAdmin`
+opens the setup surface until a credential exists), so the check now asserts
+what is true — the wizard is served openly on a fresh volume.
+
+### Deliberately not done
+
+The appliance stack was not started on this machine: with `--allow-apply` it
+would install a default-deny ruleset and turn forwarding off on a development
+host that is not an appliance (B5, D0). Its option set is proven sufficient;
+the stack itself is proven only as far as the unprivileged dev stack proves the
+same containers, which is everything but the kernel writes. No `/dev/snd` device
+was passed through to a real capture (B3). The image is ~390 MB, most of it
+`gstreamer1.0-plugins-good`'s dependency chain, and a leaner base was left for a
+day when size costs something — the encoder stays on the stack that was measured.
+
+`make check` green: 34 packages. `make docker-smoke` green.
+
+### What the review round added
+
+Six lenses attacked the design in parallel and two skeptics tried to refute
+every finding. The refutations were the useful half: most findings were written
+against the draft prose or the committed HEAD and were already answered by the
+working tree, and the skeptics said so, with line numbers. What survived was
+worth the round.
+
+The one that would have shipped broken: core could not bind :80 on the
+appliance. A container runtime gives a non-root user no ambient capability set,
+so `cap_add` is lost at exec; the first test seemed to pass because Docker
+lowers `ip_unprivileged_port_start` to 0 in a bridge namespace, and the
+appliance is on the host's. Measured in host mode: `bind: permission denied`.
+A file capability on the binary is what survives exec, and now does. Core also
+exited 0 on that refused bind — a "failure" `Restart=on-failure` would never
+restart — and exits 1 now.
+
+The one that pattern-matched to a rule the code claims: Docker masks
+`/proc/asound` with an empty tmpfs, and the enumerator's "ALSA absent is an
+error, never an empty list" guarantee read the empty tree as an empty list. It
+now refuses a tree with no card list and names the likely cause.
+
+The one I had reasoned about wrongly: the runtime directory owned by the
+service account lets a compromised core or media replace the helper's socket,
+and a chmod by path after bind follows a symlink dropped in that window. Under
+Docker the directory is root-owned and sticky now; sockets are created at their
+final mode by umask and verified before they are served. Under systemd the
+per-unit re-owning that masked the original defect also prevents the sticky
+posture without restructuring the units, and that is recorded as open rather
+than done blind on a host with no systemd to test against.
+
+And the ones about the operator: `docker pull` cannot work behind the
+appliance's own output chain (images travel as files); the wizard cannot be
+completed on a stock Docker host (`docker0` is a bridge, and the bridge check is
+critical in every profile — `daemon.json` ships now); and the ruleset closes
+every new inbound connection, including the installer's next SSH session, the
+moment the wizard's network and server steps are saved — so the tunnel is opened
+first and kept, and the README now says so for both deployments.
+
+`make check` green; `make docker-smoke` green with its new checks: zero
+restarts, core reporting both helpers alive, the directory's provisioned
+identity, a clean helper restart, and core serving on :80 on the host network
+as the service account.

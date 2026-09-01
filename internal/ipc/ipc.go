@@ -13,8 +13,10 @@ package ipc
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -138,7 +140,9 @@ type Server struct {
 
 // Listen binds a Unix domain socket at path (removing any stale socket first) and
 // restricts it to the owner (0700 dir / 0600 socket) so only local, same-user
-// processes can connect.
+// processes can connect. The directory mode applies when this call creates the
+// directory; a directory that already exists is shared, and is left as the
+// platform provisioned it (see prepareSocketDir).
 func Listen(path string, h Handler) (*Server, error) {
 	return ListenWithOptions(path, h, ListenOptions{})
 }
@@ -171,37 +175,29 @@ func ListenWithOptions(path string, h Handler, opts ListenOptions) (*Server, err
 	if mode == 0 {
 		mode = 0o600
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, dirMode); err != nil {
-		return nil, fmt.Errorf("mkdir socket dir: %w", err)
-	}
-	// MkdirAll is a no-op on an existing dir, so set the mode explicitly — the
-	// runtime dir may have been created by whichever process started first.
-	if err := os.Chmod(dir, dirMode); err != nil {
-		return nil, fmt.Errorf("chmod socket dir: %w", err)
-	}
-	if opts.GroupGID != 0 {
-		if err := os.Chown(dir, -1, opts.GroupGID); err != nil {
-			return nil, fmt.Errorf("chgrp socket dir: %w", err)
-		}
+	if err := prepareSocketDir(filepath.Dir(path), dirMode, opts.GroupGID); err != nil {
+		return nil, err
 	}
 
 	_ = os.Remove(path) // clear a stale socket from a prior crash
-	ln, err := net.Listen("unix", path)
+	ln, err := listenUnixWithMode(path, mode)
 	if err != nil {
 		return nil, fmt.Errorf("listen unix %s: %w", path, err)
 	}
-	// Chown before chmod: widening the mode first would briefly expose the
-	// socket to the wrong group.
+	// Lchown, never Chown: the path must not be followed into whatever a
+	// symlink dropped in its place points at (see listenUnixWithMode).
 	if opts.GroupGID != 0 {
-		if err := os.Chown(path, -1, opts.GroupGID); err != nil {
+		if err := os.Lchown(path, -1, opts.GroupGID); err != nil {
 			ln.Close()
 			return nil, fmt.Errorf("chgrp socket: %w", err)
 		}
 	}
-	if err := os.Chmod(path, mode); err != nil {
+	// Verify, never repair: what is at the path must be the socket this
+	// process just bound, with the identity it was given. Anything else means
+	// the path was swapped underneath us, and a listener there is not ours.
+	if err := verifySocketFile(path, mode, opts.GroupGID); err != nil {
 		ln.Close()
-		return nil, fmt.Errorf("chmod socket: %w", err)
+		return nil, err
 	}
 
 	allow := opts.AllowPeer
@@ -212,6 +208,121 @@ func ListenWithOptions(path string, h Handler, opts ListenOptions) (*Server, err
 	s.wg.Add(1)
 	go s.serve()
 	return s, nil
+}
+
+// prepareSocketDir creates the socket directory with mode and group when it
+// does not exist, and otherwise checks that the existing directory is one this
+// process may share (checkSharedSocketDir). It never changes the mode or the
+// ownership of a directory it did not create.
+//
+// On the appliance the runtime directory is provisioned by the platform —
+// systemd's RuntimeDirectory=, a tmpfs volume — and shared by three processes
+// under two accounts, the root helper and the unprivileged core/media user, each
+// of which must be able to create its own socket in it. A process that
+// "corrected" the shared directory to its own default would lock the others
+// out: media tightening it to owner-only leaves the helper (root, but with a
+// capability set of exactly CAP_NET_ADMIN and CAP_NET_RAW) unable to create its
+// socket after a restart, and the helper widening it to its group-traverse mode
+// leaves core unable to create the §9.4 debug-capture sink. Either way the
+// failure is "operation not permitted" at the next restart, on the appliance
+// only, and never on a dev host where the three run as one user.
+func prepareSocketDir(dir string, mode os.FileMode, gid int) error {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		if err := os.MkdirAll(dir, mode); err != nil {
+			return fmt.Errorf("mkdir socket dir: %w", err)
+		}
+		// MkdirAll applies the umask; the mode is a decision, not a suggestion.
+		if err := os.Chmod(dir, mode); err != nil {
+			return fmt.Errorf("chmod socket dir: %w", err)
+		}
+		if gid != 0 {
+			if err := os.Chown(dir, -1, gid); err != nil {
+				return fmt.Errorf("chgrp socket dir: %w", err)
+			}
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat socket dir: %w", err)
+	}
+	owner, group, known := fileOwner(info)
+	return checkSharedSocketDir(dir, dirIdentity{
+		Mode: info.Mode(), UID: owner, GID: group, OwnerKnown: known,
+	}, os.Getuid(), gid)
+}
+
+// verifySocketFile checks that path holds the socket this process just bound:
+// a socket, not a link; owned by this process; in the requested group when one
+// was requested; with exactly the requested permission bits. Where the platform
+// reports no ownership, only the type is judged.
+func verifySocketFile(path string, mode os.FileMode, gid int) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("verify socket: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("verify socket: %s is not a socket (mode %v); the path was replaced", path, info.Mode())
+	}
+	uid, fgid, known := fileOwner(info)
+	if !known {
+		return nil
+	}
+	if uid != os.Getuid() {
+		return fmt.Errorf("verify socket: %s is owned by uid %d, not this process (uid %d); the path was replaced", path, uid, os.Getuid())
+	}
+	if gid != 0 && fgid != gid {
+		return fmt.Errorf("verify socket: %s has gid %d, want %d", path, fgid, gid)
+	}
+	if got := info.Mode().Perm(); got != mode.Perm() {
+		return fmt.Errorf("verify socket: %s has mode %04o, want %04o", path, got, mode.Perm())
+	}
+	return nil
+}
+
+// dirIdentity is what checkSharedSocketDir judges an existing directory by.
+type dirIdentity struct {
+	Mode     os.FileMode // full mode, including the type and sticky bits
+	UID, GID int
+	// OwnerKnown is false where the platform reports no owner (dirOwner);
+	// ownership is then not judged.
+	OwnerKnown bool
+}
+
+// checkSharedSocketDir decides whether an existing directory may hold this
+// process's socket. It is a pure function of the directory's identity so the
+// policy is testable without a second account or root.
+//
+// Accepted: a directory owned by this process, by root, or by the shared group
+// the listener was configured with (the appliance's runtime directory is owned
+// by the unprivileged account and group-shared with the root helper). Refused:
+// a symlink — a socket path must not be redirectable; anything world-writable
+// — any local user could replace the socket; and any other owner — a directory
+// that is not ours, not the platform's and not the shared group's is a
+// misconfiguration, and the answer to one is a named refusal, not a listener
+// in somebody else's directory.
+func checkSharedSocketDir(dir string, d dirIdentity, self, sharedGID int) error {
+	if d.Mode&os.ModeSymlink != 0 {
+		return fmt.Errorf("socket dir %s is a symlink; refusing to follow it", dir)
+	}
+	if !d.Mode.IsDir() {
+		return fmt.Errorf("socket dir %s is not a directory", dir)
+	}
+	if d.Mode.Perm()&0o002 != 0 {
+		return fmt.Errorf("socket dir %s is world-writable (mode %04o); any local user could replace the socket",
+			dir, d.Mode.Perm())
+	}
+	if !d.OwnerKnown {
+		return nil
+	}
+	switch {
+	case d.UID == self, d.UID == 0:
+		return nil
+	case sharedGID != 0 && d.GID == sharedGID:
+		return nil
+	}
+	return fmt.Errorf("socket dir %s is owned by uid %d, not by this process (uid %d), root, or the shared group; "+
+		"it must be provisioned for the appliance's accounts (see deploy/README.md)", dir, d.UID, self)
 }
 
 // Rejected returns how many connections were refused by the admission policy.

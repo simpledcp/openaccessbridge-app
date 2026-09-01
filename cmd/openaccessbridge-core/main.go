@@ -203,16 +203,26 @@ func main() {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	failed := false
 	select {
 	case <-sig:
 	case err := <-errCh:
 		log.Error(logging.EvProcessUnhealthy, logging.Field("error", err.Error()))
+		failed = true
 	}
 	cancel()
 	sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer scancel()
 	_ = srv.Shutdown(sctx)
 	log.Info(logging.EvStateTransition, logging.Field("phase", "shutdown"))
+	if failed {
+		// A surface that could not be served is a failed start, and the
+		// supervisor has to see it as one: the unit's Restart=on-failure does not
+		// restart an exit status of 0, so a refused bind would otherwise leave
+		// the appliance quietly down. The deferred closers are skipped; the
+		// process is ending either way and the config store is WAL-consistent.
+		os.Exit(1)
+	}
 }
 
 // runACSPDemo drives the ACSP machine through the canonical sequence and then lets

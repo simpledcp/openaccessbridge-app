@@ -53,6 +53,10 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
 - **Seam in code:** capture is an interface with a synthetic-tone source; the
   qualifier/mapper are unit-tested on synthetic fixtures. No real-device latency
   is asserted.
+- **Under Docker (D45, 2026-08-27):** the media container gets the host's live
+  `/dev/snd` and an unmasked `/proc/asound`, which buys device LISTING for the
+  §6.4 wizard and nothing more — media still refuses to open a real device by
+  name. Docker changes nothing about this blocker.
 - **Clears:** known-good hardware kit (§6.2), compatibility matrix (§11.3),
   gates G2a/G2b.
 - **Now audible, which raises the stakes (2026-08-20):** the §6.7 path delivers
@@ -106,6 +110,13 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   ruleset and introspects forwarding/routes; `apply` is gated behind a dry-run
   mode when not root, and unit-tested by asserting generated rules, not by
   mutating this machine's live firewall.
+- **Under Docker (D45, 2026-08-27):** the helper container carries exactly
+  `NET_ADMIN`/`NET_RAW` plus `apparmor=unconfined` and `systempaths=unconfined`
+  on the host network, and that set was MEASURED sufficient here for the
+  forwarding-sysctl writes and the `nft` reads (by writing the host's current
+  value back). The appliance stack was still not brought up on this machine,
+  for the same reason as above: `--allow-apply` would install a default-deny
+  ruleset on a development host. The gate is unchanged — a real appliance.
 
 ### B6. Real cinema-server lab test (Phase 4, gate G1) and field pilot (Phase 9, G5)
 - Hardware/venue/legal-gated by definition; out of scope. The caption path is

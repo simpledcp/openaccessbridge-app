@@ -1072,3 +1072,197 @@ could change the symbol version the test's geometry asserts.
 outside this repo. It was renamed with everything else; if the actual file is
 still named for the old brand, that citation now points at a name that does not
 exist.
+
+## D45 — Docker is a second packaging of the same appliance, not a different one
+
+**What was asked.** Deploy the application via Docker in addition to the native
+Linux install.
+
+**What was built.** One image (`deploy/docker/Dockerfile`) carrying all four
+binaries, run three ways from the same files: the appliance as three containers
+(`docker-compose.yml`), a laptop/CI stack (`docker-compose.dev.yml`), and one
+container for a first look (`openaccessbridge-demo`). The appliance file mirrors
+the systemd units one-to-one — same flags, same accounts, same capability split
+— so a reader of either can predict the other.
+
+**Decisions, and why each was taken.**
+
+1. *Three containers, not one, for the appliance.* §3.5's privilege separation
+   is a property of the process boundary: only the helper is privileged, and a
+   media fault must not take the caption lease with it. Three containers keep
+   each of those as a container-level fact (its own capability set, its own
+   restart policy, its own health), which one container with an in-process
+   supervisor would reduce to a promise. The single-container demo exists for
+   the case where none of that is the point.
+
+2. *Host networking, required.* The helper applies nftables and the forwarding
+   sysctls to the host's network namespace; media hands phones host ICE
+   candidates on the patron NIC, which behind Docker's NAT would be a bridge
+   address no phone can reach; core binds the patron NIC on :80 and admin on
+   loopback as the unit does. A bridge network would make every posture claim
+   about the wrong namespace.
+
+3. *The helper's privileges are the measured minimum, not `privileged: true`.*
+   `cap_drop: ALL` + `NET_ADMIN`/`NET_RAW`, with `apparmor=unconfined` and
+   `systempaths=unconfined` lifted for that one container. Measured on this
+   host: Docker mounts `/proc/sys` read-only, and with that lifted the default
+   AppArmor profile (`deny /proc/sys/[^k]** w`) still refuses the write; with
+   both lifted the forwarding sysctls are writable and `nft` lists and loads the
+   host's tables, under the default seccomp profile, a read-only root and
+   `no-new-privileges`. `privileged: true` also works and grants device access
+   and every capability; it was not used.
+
+4. *The appliance host's dockerd must run with `bridge: none`, `ip-forward:
+   false`, `iptables: false`, `ip6tables: false`.* Measured: in host mode
+   `/sys/class/net` shows `docker0`, which §9.3's bridge scan flags as critical;
+   dockerd sets `ip_forward=1` at start, which the watchdog would flip back every
+   30 s while the dashboard screams; and Docker's own FORWARD/NAT rules do not
+   belong beside a forward chain that never accepts. This makes the host unable
+   to run bridge-networked containers, which is the correct shape for a
+   single-purpose appliance and is documented as such.
+
+5. *Ubuntu 24.04 as the runtime base.* It is the base the audio path was verified
+   on (GStreamer 1.24.2, BLOCKERS B4; nftables 1.0.9). The image is ~400 MB, most
+   of it `gstreamer1.0-plugins-good`'s dependency chain (pulse/gudev/dbus →
+   systemd; libxml2 → ICU), and that package is not optional: it carries
+   `level`, `rtpopuspay` and `udpsink`. A leaner base (Alpine's GStreamer is a
+   fraction of the size) was considered and rejected for now — it would put the
+   encoder on a stack nothing here has measured. Revisit if image size ever
+   costs something.
+
+6. *The service account is pinned to uid/gid 1901.* Volume ownership and the
+   SO_PEERCRED admission checks (§3.5) have to agree across three containers and
+   with whatever the host's account database says, so the number is fixed in the
+   image rather than allocated.
+
+7. *Build stamps are mandatory.* The Dockerfile refuses to build without
+   `VERSION` and `BUILD_NUMBER`; `make docker-build` supplies them from git,
+   exactly as the native build does. The alternative — defaulting the build
+   number to 0 — would produce an image whose update surface silently reports
+   "cannot judge" (D32), which is the unstamped-binary failure the invariants
+   suite exists to catch. Consequence: `docker build .` by hand fails with the
+   reason. CI's checkout is now full-depth for the same reason; a shallow clone
+   stamped every CI binary as build 1.
+
+8. *Publishing is on version tags only.* CI builds and smoke-tests the image on
+   every push and PR, and pushes to GHCR only on a `v*` tag: a release is a
+   deliberate act with its own numbering, never a side effect of merging.
+
+**The defect this surfaced in the native deployment, and the contract that
+replaces it.** The first three-container run died in the helper with
+`chmod /run/openaccessbridge: operation not permitted`. `ipc.ListenWithOptions`
+forced the socket directory's mode on every start — media to 0700, the helper to
+0750 — and the helper, root but with a capability set of exactly `NET_ADMIN` and
+`NET_RAW` (no `CAP_FOWNER`, no `CAP_DAC_OVERRIDE`), cannot chmod a directory it
+does not own, nor create a socket in one that is not group-writable. The systemd
+units have the same capability set. The native install only worked because
+`RuntimeDirectory=` re-owns the directory to each unit's user on every unit
+start; even so, `core` could not create the §9.4 debug-capture sink after a
+helper restart (the directory was then root's, mode 0750). Under any other
+supervisor the helper died on its next restart.
+
+The contract now: the directory is provisioned by the platform as
+`openaccessbridge:openaccessbridge` **0770** (`RuntimeDirectoryMode=0770` in all
+three units, the tmpfs volume's mount options under Docker, the demo
+entrypoint); the helper runs with the shared group as its **primary** group
+(`Group=`, `user: root:openaccessbridge`); and a process that finds the
+directory already there leaves its mode and ownership alone after checking it is
+not a symlink, not world-writable, and owned by itself, root or the shared
+group (`ipc.prepareSocketDir`, `checkSharedSocketDir`). A process that creates
+the directory applies its own mode as before, so a dev host is unchanged. The
+policy is a pure function with its own table of cases, because the real cases
+need accounts a test does not have.
+
+**What an adversarial review of the design added (2026-08-27).** Six lenses
+attacked the draft and two skeptics tried to refute each finding; twenty-six
+survived, most already answered by the working tree, and these changed what was
+built:
+
+- *core could not bind :80 on the appliance.* A container runtime hands a
+  non-root user no ambient capability set, so `cap_add: [NET_BIND_SERVICE]` is
+  lost at exec; Docker's own relaxation (`ip_unprivileged_port_start=0`) applies
+  to a bridge namespace, not the host's. Measured: `bind: permission denied` in
+  host mode, and serving after the Dockerfile set `cap_net_bind_service=+ep` on
+  the binary. And core then exited 0 on that refused bind, which
+  `Restart=on-failure` would not restart; it exits 1 now.
+- *Docker masks `/proc/asound`* (an empty read-only tmpfs) in every
+  unprivileged container, and `capture.ALSAEnumerator` read that as "no cards"
+  with no error — the exact confusion its own error branch exists to prevent.
+  The enumerator now refuses a tree with no card list, naming the likely cause,
+  and the media container gets `systempaths=unconfined` (still the service
+  account, no capabilities, read-only root).
+- *`devices: /dev/snd` drops `by-id`/`by-path`*, the symlink directories the
+  stable §6.1 identity is read from, and freezes the node set at create. The
+  host's `/dev/snd` is bind-mounted live instead, with access from a cgroup
+  rule for ALSA's character major. Device listing only — B3 stands.
+- *`ca-certificates` is needed*: core resolves `https` caption locators with the
+  system trust store; `ubuntu:24.04` ships none. Installed, for parity with a
+  native host.
+- *`docker pull` cannot work on a configured appliance*: the output chain
+  drops every new outbound flow but ACSP and a support window's one address.
+  Upgrades are `make docker-save` → `docker load` → `up -d`, documented with the
+  schema-downgrade caveat; publication to GHCR (tags only) serves build hosts.
+- *The dev stack's posture rows lied green.* With the helper on a bridge
+  network the SSH row measured the container's empty `/proc/net/tcp` — "SSH
+  disabled" while the laptop's sshd listened — and the bridge row saw none. The
+  helper is on the host network in the dev file now, so every row describes the
+  laptop as a native dev run's does. Its published ports are loopback-only by
+  default, since the wizard answers without a credential at first boot.
+- *A 1901-owned shared directory lets a compromised core or media replace the
+  helper's socket*, and a chmod/chown by path after bind follows a symlink
+  dropped in that window. The directory is now provisioned root-owned and
+  sticky (1770) under Docker and in the demo; sockets are created at their
+  final mode by umask, their group set with `Lchown`, and what is at the path
+  verified to be this process's own socket before it is served. Under systemd
+  `RuntimeDirectory=` re-owns the directory per unit, so the units stay at
+  0770 — see the open item below.
+- *The wizard cannot be completed on a stock Docker host*: `docker0` is a
+  bridge device, the bridge check is critical in every profile, and setup
+  refuses to complete over any critical warning. `deploy/docker/daemon.json`
+  now ships with install steps, and the README's first-boot sequence says
+  what the ruleset does to the operator's own connection: no new inbound
+  connections in any profile once it loads, so the tunnel is opened first and
+  kept; both NICs static, since no DHCP is admitted; the profile chosen in the
+  wizard takes effect on core's next start.
+- Smaller: `make` refuses to stamp from a shallow clone (CI had been stamping
+  build 1); native `make build` is now `CGO_ENABLED=0 -trimpath` too, so the
+  README's "no cgo" is a setting rather than an observation; the Dockerfile
+  asserts every GStreamer element at build time, drops the unused ALSA plugin
+  and the base image's spare uid-1000 account, and tightens the stamp guard to
+  a positive integer; the smoke test now checks that no container restarted,
+  that core itself reports both helpers alive, the directory's provisioned
+  identity, and a clean helper restart.
+
+**Verified live on this host (2026-08-27).** `make docker-smoke`: three
+containers from the image, helper `root:openaccessbridge` on the host network,
+core and media as 1901 on a bridge, on the shared root-owned sticky tmpfs; all
+healthy with zero restarts; core's own status reporting both helpers alive
+across container boundaries; both sockets with the unit modes; the helper
+restarted into the shared directory and seen alive again; `/healthz`,
+`/accessibility`, the setup wizard, caption languages and
+`playback_available:true` with two real `gst-launch` Opus encoders; no
+ERROR-level line. The single-container demo: the same, and a clean `docker
+stop` in 0.25 s with core logging its shutdown phase. On the host network as the
+service account with the file capability: core serving on `:80`. `make check`
+green. The helper's sysctl write and `nft` read under the appliance container's
+exact option set, measured by writing the host's current value back.
+
+**Open, and recorded rather than half-built.**
+
+- *core does not verify the helper's identity at Dial.* `SO_PEERCRED` on the
+  client side would tell core the listener's uid; today an impostor socket at
+  the helper's path would be believed. The sticky directory closes the
+  replacement route under Docker; the code-level check belongs with a
+  dashboard row that says whether the helper is privileged (the D17 stance:
+  measured, not assumed), and that is a feature, not packaging.
+- *The systemd units keep 0770 with per-unit ownership.* The sticky posture
+  needs only the helper's unit to own `RuntimeDirectory=` and the other two to
+  take `ReadWritePaths=` on it instead; that restructuring was not made on a
+  host where systemd cannot be exercised.
+
+**Not verified, and why.** The appliance stack itself — host network, the helper
+with `--allow-apply` — was not brought up here: it would apply a default-deny
+ruleset and `ip_forward=0` to this development machine, which is not an
+appliance (B5, D0). The `/dev/snd` bind was exercised only as far as listing
+this host's cards (B3). Podman was not tried. Nothing about phones, venues or
+cinema servers changed (B1–B8).

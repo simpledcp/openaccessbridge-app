@@ -1,0 +1,140 @@
+# OpenAccessBridge — three containers on a laptop or in CI. NOT the appliance
+# deployment (that is docker-compose.yml); this is DEVELOPMENT.md §3 "run the
+# whole appliance locally" as containers:
+#
+#   make docker-build
+#   docker compose -f deploy/docker/docker-compose.dev.yml up
+#   # Patron page:  http://127.0.0.1:8080/accessibility
+#   # Admin board:  http://127.0.0.1:8090/admin   (first boot: create credentials)
+#
+# A separate Compose project, not an override of the appliance file: the two
+# differ in ways a merge cannot express (no devices, no capabilities, no host
+# network for core/media), so each is complete on its own.
+#
+# Same image, same three processes, same account split and shared sticky tmpfs
+# socket directory as the appliance file — so what this exercises is the
+# container packaging itself. What it deliberately does NOT do:
+#
+#   - The firewall helper has no --allow-apply and no NET_ADMIN: it is the same
+#     dry-run it is on any dev host (B5). It stays on the HOST network so the
+#     posture rows it measures — forwarding knobs, bridge devices, the SSH
+#     listener, the loaded ruleset — describe the laptop, exactly as a native
+#     dev run does; on a Docker host they read forwarding ENABLED and a bridge
+#     PRESENT (docker0), which is true, and the ruleset row reads "could not be
+#     confirmed" (no root). That is the honest answer, not a fault to fix.
+#   - core and media are on a bridge network with their ports published on
+#     loopback only by default (OAB_PUBLISH_ADDR=0.0.0.0 to open them to the
+#     LAN — the wizard answers without a credential until one is created). The
+#     admin surface is on 0.0.0.0 inside the container so the published port
+#     reaches it, which only the non-production profiles allow (§8.4); the
+#     default posture is Booth Diagnostic (D13).
+#   - WebRTC audio hands out the container's bridge address as its host
+#     candidate, so it plays only from the Docker host itself (Linux). Captions
+#     work from anything that can reach the patron port.
+#   - No /dev/snd: media serves its synthetic tones (B3). /proc/asound is
+#     unmasked as in the appliance file, so the wizard lists this host's cards
+#     — which media then refuses to open, as it does natively (B3).
+
+name: openaccessbridge-dev
+
+x-openaccessbridge: &openaccessbridge
+  image: ${OPENACCESSBRIDGE_IMAGE:-ghcr.io/simpledcp/openaccessbridge:latest}
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile
+    args:
+      VERSION: ${VERSION:-}
+      BUILD_NUMBER: ${BUILD_NUMBER:-}
+  read_only: true
+  tmpfs:
+    - /tmp
+  ulimits:
+    core: 0
+  stop_grace_period: 10s
+
+x-run-volume: &run-volume
+  type: volume
+  source: oab-run
+  target: /run/openaccessbridge
+  volume:
+    nocopy: true
+
+services:
+  firewall:
+    <<: *openaccessbridge
+    command:
+      - openaccessbridge-firewall
+      - --socket-dir=/run/openaccessbridge
+    network_mode: host
+    user: root:openaccessbridge
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - *run-volume
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/openaccessbridge/firewall.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+  media:
+    <<: *openaccessbridge
+    command:
+      - openaccessbridge-media
+      - --socket-dir=/run/openaccessbridge
+    user: openaccessbridge
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - systempaths=unconfined
+    volumes:
+      - *run-volume
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/openaccessbridge/media.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+  core:
+    <<: *openaccessbridge
+    command:
+      - openaccessbridge-core
+      - --config=/var/lib/openaccessbridge/config.db
+      - --patron-bind=0.0.0.0:8080
+      - --admin-bind=0.0.0.0:8090
+      - --socket-dir=/run/openaccessbridge
+    user: openaccessbridge
+    cap_drop: [ALL]
+    # Not needed for port 8080; needed to EXECUTE the binary at all: it carries
+    # the file capability the appliance's :80 bind relies on, and the kernel
+    # refuses to run a file whose effective file capabilities it cannot grant.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${OAB_PUBLISH_ADDR:-127.0.0.1}:${OAB_PATRON_PORT:-8080}:8080"
+      - "${OAB_PUBLISH_ADDR:-127.0.0.1}:${OAB_ADMIN_PORT:-8090}:8090"
+    volumes:
+      - oab-state:/var/lib/openaccessbridge
+      - *run-volume
+    depends_on:
+      firewall:
+        condition: service_started
+      media:
+        condition: service_started
+        required: false
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  oab-state: {}
+  oab-run:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "uid=0,gid=1901,mode=1770,size=64m"

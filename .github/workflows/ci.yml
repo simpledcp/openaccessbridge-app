@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -12,6 +13,10 @@ jobs:
       GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the §9.4 build number is the commit count (Makefile),
+          # and a shallow clone would stamp every CI binary as build 1.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -51,3 +56,43 @@ jobs:
           # built without it refuses to judge an update rather than guessing
           # which way to fail (D32, buildinfo.BuildNumber).
           make build
+
+  # The container image (deploy/docker, D45): built with the same stamps as the
+  # native binaries, then proven by the smoke test — the three-container stack
+  # comes up healthy across container boundaries, the surfaces serve, the
+  # single-container demo stops cleanly, and nothing logs an error.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The runner's own Docker (BuildKit, `docker` driver) is used on purpose:
+      # a docker-container builder would not load the image into the daemon the
+      # smoke test runs it from.
+      - name: Build the image and run the container smoke test
+        run: make docker-smoke
+
+  # Publish to GHCR on a version tag only: a release is a deliberate act with
+  # its own numbering (Makefile BUILD_NUMBER), never a side effect of a push to
+  # main. The image is tagged with the git describe output and `latest`.
+  publish:
+    needs: [build-and-test, docker]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          make docker-build
+          docker push --all-tags ghcr.io/simpledcp/openaccessbridge

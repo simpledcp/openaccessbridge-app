@@ -14,18 +14,33 @@ BINARIES := openaccessbridge-core openaccessbridge-media openaccessbridge-firewa
 # its own numbering overrides it. A binary built WITHOUT it refuses to judge an
 # update rather than guessing — see buildinfo.BuildNumber.
 BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
-LDFLAGS := -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev) \
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
+LDFLAGS := -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Version=$(VERSION) \
            -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Build=$(BUILD_NUMBER)
 
-.PHONY: all build test vet race cover sim soak latency qr-verify clean tidy fmt check
+.PHONY: all build test vet race cover sim soak latency qr-verify clean tidy fmt check \
+        docker-build docker-save docker-smoke docker-up docker-down docker-dev-up docker-dev-down
 
 all: check build
 
 build: $(BINARIES)
 
-$(BINARIES):
+# Static and path-stripped, exactly as the container image builds them: the
+# README's "no cgo, no system libraries" is a build setting here, not an
+# observation. (The test suite is unaffected — the race detector needs cgo and
+# keeps it.)
+$(BINARIES): export CGO_ENABLED=0
+$(BINARIES): stamp-check
 	@mkdir -p $(BIN)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN)/$@ ./cmd/$@
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/$@ ./cmd/$@
+
+# A shallow clone counts ONE commit, which stamps a build number that is known
+# and wrong — the failure D32's refusal exists to prevent, and one CI produced
+# for a while. Refuse to stamp from one unless BUILD_NUMBER was given outright.
+.PHONY: stamp-check
+stamp-check:
+	@if [ "$(origin BUILD_NUMBER)" = file ] && [ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then \
+	  echo "refusing to stamp a build number from a shallow clone (it would count 1 commit); run 'git fetch --unshallow' or pass BUILD_NUMBER=<n>" >&2; exit 1; fi
 
 test:
 	$(GO) test ./...
@@ -102,6 +117,48 @@ qr-verify:
 # Run the ACSP simulator standalone (dev convenience).
 sim: acsp-simulator
 	$(BIN)/acsp-simulator
+
+# --- Docker (deploy/docker, D45) ------------------------------------------------
+# One image carrying all four binaries; the appliance runs it as three
+# containers (deploy/docker/docker-compose.yml), mirroring the systemd units.
+# The image gets the SAME version and build-number stamps as the native build:
+# the Dockerfile refuses to build without them, for the reason above (D32).
+IMAGE ?= ghcr.io/simpledcp/openaccessbridge
+COMPOSE     := docker compose -f deploy/docker/docker-compose.yml
+COMPOSE_DEV := docker compose -f deploy/docker/docker-compose.dev.yml
+
+docker-build: stamp-check
+	@docker buildx version >/dev/null 2>&1 || { \
+	  echo "docker buildx is required: the Dockerfile is a BuildKit one (Ubuntu: apt install docker-buildx; or drop the plugin into ~/.docker/cli-plugins/)" >&2; exit 1; }
+	docker build -f deploy/docker/Dockerfile \
+	    --build-arg VERSION=$(VERSION) --build-arg BUILD_NUMBER=$(BUILD_NUMBER) \
+	    -t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
+
+# Ship an image to an appliance as a file: the appliance's own output chain
+# drops `docker pull` (§9.1), so images travel offline (deploy/README.md).
+docker-save: docker-build
+	@mkdir -p dist
+	docker save -o dist/openaccessbridge-$(VERSION).tar $(IMAGE):$(VERSION)
+	@ls -la dist/openaccessbridge-$(VERSION).tar
+
+# Build the image, then prove it: the three-container dev stack comes up
+# healthy, the patron and admin surfaces answer, captions and audio are
+# offered, the single-container demo works, and nothing logged an error.
+# Ports 18080/18090 so a natively running appliance on 8080/8090 is not in the way.
+docker-smoke: docker-build
+	OPENACCESSBRIDGE_IMAGE=$(IMAGE):$(VERSION) deploy/docker/smoke.sh
+
+# Appliance stack (host network, privileged helper) — read deploy/README.md first.
+docker-up:
+	$(COMPOSE) up -d
+docker-down:
+	$(COMPOSE) down
+
+# Laptop/CI stack (bridge network, published ports, dry-run helper).
+docker-dev-up:
+	$(COMPOSE_DEV) up -d
+docker-dev-down:
+	$(COMPOSE_DEV) down -v
 
 clean:
 	rm -rf $(BIN) coverage.txt coverage.html

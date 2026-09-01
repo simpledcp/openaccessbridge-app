@@ -1,0 +1,9 @@
+# The image build needs the Go sources and nothing else. Everything is excluded
+# and the inputs are listed back in, so a stray local artifact (a populated
+# config.db, bin/, a worktree, an editor swap file) can never end up in a layer.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!deploy/docker/

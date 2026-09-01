@@ -86,6 +86,26 @@ RT=/tmp/oab; mkdir -p "$RT"
 Run the ACSP simulator scenario suite on its own: `./bin/acsp-simulator --list`
 then `./bin/acsp-simulator`.
 
+### … or in Docker
+
+The same three processes package as one image (`deploy/docker/`, D45). It needs
+Docker Engine 25+ with Compose v2.20+ and BuildKit — on Ubuntu's `docker.io`
+package BuildKit's CLI is the separate `docker-buildx` package (or drop the
+plugin binary into `~/.docker/cli-plugins/`).
+
+```sh
+make docker-build                                             # stamps version + build number from git
+docker compose -f deploy/docker/docker-compose.dev.yml up     # three containers, ports 8080/8090
+# or, one container:
+docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/simpledcp/openaccessbridge openaccessbridge-demo
+make docker-smoke                                             # what CI runs against the image
+```
+
+That is this section's recipe as containers: dry-run firewall, synthetic audio,
+the self-advancing demo show. The appliance deployment (host network, privileged
+helper) is `deploy/docker/docker-compose.yml`; read `deploy/README.md` before
+using it — it is not for a laptop.
+
 ## 4. Where to look next
 
 - `README.md` — architecture, hard invariants, package layout.
