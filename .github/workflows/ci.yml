@@ -39,6 +39,16 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # The §6.7 audio e2e and the encode smoke drive a REAL gst-launch Opus
+      # encoder; without these packages they skip honestly (the suite is pure
+      # Go), and CI must exercise the path, not skip it.
+      - name: Install the GStreamer runtime (the D20 encoder seam)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+          gst-inspect-1.0 --exists opusenc
+
       # The full suite includes the ST 430-10 simulator scenario suite — the
       # caption-path regression backbone (§11.1) — and the security/invariant
       # tests (§11.6). These run headless on every push/PR.

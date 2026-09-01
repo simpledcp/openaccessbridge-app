@@ -42,6 +42,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pion/webrtc/v4"
+	"github.com/simpledcp/openaccessbridge/internal/audio/encode"
 	"github.com/simpledcp/openaccessbridge/internal/logging"
 	"github.com/simpledcp/openaccessbridge/internal/model"
 	"github.com/simpledcp/openaccessbridge/internal/web"
@@ -50,6 +51,15 @@ import (
 func TestAudioPathEndToEndAcrossTheThreeProcesses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs the three appliance processes")
+	}
+	// The Opus encoder is a gst-launch subprocess (D20). Without it the media
+	// process runs the Null backend, playback never becomes available, and this
+	// test would spend its full timeout failing on a host that was never going
+	// to pass — so skip honestly, as the encode smoke test does
+	// (DEVELOPMENT.md: GStreamer is an optional runtime seam; CI installs it so
+	// this path stays exercised there).
+	if !encode.NewGStreamerBackend().Available() {
+		t.Skip("no gst-launch-1.0/opusenc on this host: nothing can encode, so there is no §6.7 end-to-end audio path to prove")
 	}
 	requireRoutableInterface(t)
 	goBin := goCommand(t)

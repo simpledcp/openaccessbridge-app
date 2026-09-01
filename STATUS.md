@@ -25,7 +25,7 @@ with no production caller. See JOURNAL.md for the narrative and
 export PATH=/home/libserv-2/go-sdk/bin:$PATH      # local Go 1.26 toolchain
 cd /home/libserv-2/captionbridge-app
 
-make check        # gofmt + go vet + full race test suite (CI gates on this)
+make check        # gofmt + go vet + full test suite (CI gates on this, plus `make race`)
 make build        # all four binaries → ./bin
 make cover        # coverage summary
 
