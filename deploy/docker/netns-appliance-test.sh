@@ -365,18 +365,18 @@ posture() {
     || fail "unexpected warnings: $warns"
 
   # §9.3's theater-scope check only means something if the theater interface's
-  # reachable scope really is the allowlist — which requires that it carry no
-  # DEFAULT route. Docker happens to put the default on the second-connected
-  # network, so the theater side is left with its on-link route alone; that is
-  # a precondition of the check being exercised rather than skipped, so it is
-  # asserted here instead of relied upon. (If it ever flips, the scope warning
-  # would appear and the "only the DNS warning" assertion above would fail —
-  # loudly, but for a reason that reads like a mystery without this line.)
+  # reachable scope really is the allowlist, and routes.go fails it outright
+  # when that interface carries a DEFAULT route — its scope would then be
+  # everything. Which interface holds the default is Docker's business and
+  # varies (this host puts it on the second-attached network; a GitHub runner
+  # names and orders them differently, which is why every interface here is
+  # resolved by MAC and never by position). What the check requires is only
+  # this, so this is what is asserted.
   local defiface
   defiface="$(docker exec "$FW" awk 'NR>1 && $2=="00000000"{print $1; exit}' /proc/net/route)"
-  [ "$defiface" = "$PATRON_IFACE" ] \
-    && pass "the default route is on the patron interface, so the theater side's scope IS the allowlist" \
-    || fail "the default route is on '$defiface'; §9.3's theater-scope check is not being exercised as intended"
+  [ "$defiface" != "$THEATER_IFACE" ] \
+    && pass "the theater interface carries no default route, so its scope IS the allowlist (default is on ${defiface:-none})" \
+    || fail "the default route is on the theater interface ($defiface); §9.3's scope check cannot pass, and this environment cannot host the test as written"
 
   step "The zones, proven by behaviour rather than by configuration"
   local pip tip

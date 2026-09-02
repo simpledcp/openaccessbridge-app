@@ -1333,6 +1333,21 @@ then STARTED. The earlier draft checked the namespace from inside the running
 container, which is confirmation after the fact. Every gate is an abort, never
 a warning.
 
+**Interface names are not stable, and that was measured rather than assumed.**
+Docker's `ethN` assignment for a container on two networks is
+non-deterministic: three identical runs on this host produced theater=eth0,
+then theater=eth1, then theater=eth0, and a GitHub runner produced the
+opposite of the first. A test that assumed positional ordering would fail
+roughly half the time, at random, and the failure would look like a firewall
+defect — the ruleset would admit patron traffic on the theater side. So every
+interface in the harness is resolved by the MAC Docker assigned to each
+network, matched against `/sys/class/net`, and never by position. The same
+reasoning applies to the one route fact the scope check needs: what §9.3
+requires is that the THEATER interface carry no default route, so that is what
+is asserted — not the stronger, environment-dependent claim about which
+interface does carry it. (On the appliance itself this is moot: the interfaces
+are real NICs named by the installer in the wizard.)
+
 **One warning remains, and it is named rather than tolerated:**
 `dns_internet_leak_across_interfaces`, because the namespace's resolver is
 Docker's own on 127.0.0.11, which belongs to neither zone's plan. It is a
