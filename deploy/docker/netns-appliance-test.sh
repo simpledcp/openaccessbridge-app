@@ -344,6 +344,7 @@ posture() {
   }
   check firewall_active true            "the firewall is active"
   check firewall_introspected true      "…and that was PROVEN by reading the kernel, not asserted"
+  check forwarding_disabled true        "forwarding is off across every knob the pass enumerates"
   check bridges_present false           "no bridge device (the check a stock Docker host fails)"
   check admin_isolated true             "the admin surface is isolated from the patron network"
   check ssh_introspected true           "the SSH row was measured"
@@ -362,6 +363,20 @@ posture() {
   [ "$warns" = dns_internet_leak_across_interfaces ] || [ -z "$warns" ] \
     && pass "remaining warnings are the expected container artifact only (${warns:-none})" \
     || fail "unexpected warnings: $warns"
+
+  # §9.3's theater-scope check only means something if the theater interface's
+  # reachable scope really is the allowlist — which requires that it carry no
+  # DEFAULT route. Docker happens to put the default on the second-connected
+  # network, so the theater side is left with its on-link route alone; that is
+  # a precondition of the check being exercised rather than skipped, so it is
+  # asserted here instead of relied upon. (If it ever flips, the scope warning
+  # would appear and the "only the DNS warning" assertion above would fail —
+  # loudly, but for a reason that reads like a mystery without this line.)
+  local defiface
+  defiface="$(docker exec "$FW" awk 'NR>1 && $2=="00000000"{print $1; exit}' /proc/net/route)"
+  [ "$defiface" = "$PATRON_IFACE" ] \
+    && pass "the default route is on the patron interface, so the theater side's scope IS the allowlist" \
+    || fail "the default route is on '$defiface'; §9.3's theater-scope check is not being exercised as intended"
 
   step "The zones, proven by behaviour rather than by configuration"
   local pip tip
