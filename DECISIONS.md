@@ -1355,6 +1355,21 @@ property of the sandbox, it is a warning rather than a critical outside the
 production profiles, and it does not block setup. The test asserts that it is
 the ONLY remaining warning, so a second one appearing is a failure.
 
+**Two assertions the review round added after the fact, both about not
+believing a green answer too easily.** §9.3 reporting "no bridge device
+present" is only worth something if `/sys` is namespace-scoped — a leaked host
+sysfs would show `docker0` and the scan would say the opposite — so the test
+now asserts, in both processes that run the pass, that the visible netdevs are
+exactly this namespace's (built from the MAC-resolved names, not from a
+positional guess) and that none has a `bridge/` subdirectory, which is
+byte-for-byte what `scanBridges` reads. And the containment check is now
+labelled for what it is: it reads a FRESH container namespace, which would
+never hold the host's tables anyway, so it proves the table did not follow the
+image — not that the host's ruleset is clean. Reading the host's own tables
+needs root, which this script deliberately does not take; the strong evidence
+that the host was untouched is the namespace identity, the forwarding knob that
+never moved while the appliance zeroed its own, and the host's interface list.
+
 **What is still not proven.** The appliance runs all three on the HOST's
 network with `deploy/docker/daemon.json` in force; that arrangement, the
 systemd units, and real NICs remain unexercised, as does every hardware blocker

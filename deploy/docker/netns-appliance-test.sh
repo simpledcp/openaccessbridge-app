@@ -232,6 +232,25 @@ topology() {
   [ "$ns_fw" != "$HOST_NETNS" ] || die "the shared namespace IS the host's — refusing to continue"
   pass "all three processes share $ns_fw, which is not the host's"
 
+  # §9.3 reports "no bridge device present", and that answer is only worth
+  # anything if /sys is netns-scoped — a leaked host sysfs would show docker0
+  # and the scan would say the opposite. Assert it the way scanBridges reads
+  # it: the netdevs visible to the processes that RUN the pass are exactly
+  # this namespace's, and none of them has a bridge/ subdirectory. Built from
+  # the MAC-resolved names, so this check does not reintroduce the positional
+  # assumption the rest of the script refuses to make.
+  local c devs want bridged
+  want="$(printf '%s\n' lo "$THEATER_IFACE" "$PATRON_IFACE" | sort | tr '\n' ' ')"
+  for c in "$FW" "$CORE"; do
+    devs="$(docker exec "$c" sh -c 'ls /sys/class/net' | sort | tr '\n' ' ')"
+    [ "$devs" = "$want" ] || die "$c sees netdevs [$devs], want [$want] — /sys is not namespace-scoped here"
+    # `: ;` at the end: finding no bridge is the SUCCESS case, and a bare
+    # `[ -d … ] && basename` would leave the shell exiting 1 on it.
+    bridged="$(docker exec "$c" sh -c 'for d in /sys/class/net/*; do [ -d "$d/bridge" ] && basename "$d"; done; :' | tr '\n' ' ')"
+    [ -z "$bridged" ] || die "$c sees bridge device(s) [$bridged] — the §9.3 bridge scan would be measuring the host"
+  done
+  pass "/sys is namespace-scoped for both processes that run the pass: netdevs [$want], no bridge devices"
+
   local i
   for i in $(seq 1 30); do
     [ "$(api_open GET /healthz | cut -d' ' -f1)" = 200 ] && break
@@ -428,10 +447,25 @@ aftermath() {
   [ "$now_ns" = "$HOST_NETNS" ] && pass "still in the host namespace $now_ns" || fail "host namespace changed"
   [ "$now_fwd" = "$HOST_FWD" ] && pass "host ip_forward is still $now_fwd" \
     || fail "HOST ip_forward changed from $HOST_FWD to $now_fwd"
+  # The host's own interface list is direct evidence: a ruleset applied to this
+  # namespace cannot add or remove one, and the two test bridges must be gone
+  # once the networks are removed.
+  local ifaces
+  ifaces="$(ls /sys/class/net | tr '\n' ' ')"
+  case "$ifaces" in *oabtheater*|*oabpatron*) fail "test bridge devices are still on the host: $ifaces" ;;
+    *) pass "no test bridge devices left on the host" ;; esac
+
+  # A weaker check, and labelled as one: this reads a FRESH container
+  # namespace, which would never hold the host's tables anyway, so it proves
+  # the table did not follow the image or leak between namespaces — not that
+  # the host's ruleset is clean. Reading the host's own tables needs root,
+  # which this script deliberately does not take. The strong evidence that the
+  # host was untouched is the two assertions above it: same namespace, and a
+  # forwarding knob that never moved while the appliance was zeroing its own.
   local t
   t="$(docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN "$IMAGE" nft list tables 2>/dev/null | tr '\n' ' ')"
-  case "$t" in *openaccessbridge*) fail "an openaccessbridge table leaked outside the test namespace" ;;
-    *) pass "no openaccessbridge table outside the test namespace (sees: ${t:-none})" ;; esac
+  case "$t" in *openaccessbridge*) fail "an openaccessbridge table appeared in an unrelated namespace" ;;
+    *) pass "no openaccessbridge table in a fresh namespace (sees: ${t:-none}) — a proxy, not a host-ruleset read" ;; esac
 }
 
 main() {
