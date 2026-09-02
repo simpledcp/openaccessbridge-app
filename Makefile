@@ -19,7 +19,7 @@ LDFLAGS := -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Version=$
            -X github.com/simpledcp/openaccessbridge/internal/buildinfo.Build=$(BUILD_NUMBER)
 
 .PHONY: all build test vet race cover sim soak latency qr-verify clean tidy fmt check \
-        docker-build docker-save docker-smoke docker-up docker-down docker-dev-up docker-dev-down
+        docker-build docker-save docker-smoke docker-posture docker-up docker-down docker-dev-up docker-dev-down stamp-check
 
 all: check build
 
@@ -147,6 +147,13 @@ docker-save: docker-build
 # Ports 18080/18090 so a natively running appliance on 8080/8090 is not in the way.
 docker-smoke: docker-build
 	OPENACCESSBRIDGE_IMAGE=$(IMAGE):$(VERSION) deploy/docker/smoke.sh
+
+# The §9.1/§9.3/§3.3 posture, EXECUTED rather than generated (D46): the helper
+# applies the ruleset and zeroes the forwarding knobs for real, inside a
+# two-NIC network namespace that is not this machine's. It aborts unless it has
+# proven that first — read the header of the script before changing it.
+docker-posture: docker-build
+	OPENACCESSBRIDGE_IMAGE=$(IMAGE):$(VERSION) deploy/docker/netns-appliance-test.sh
 
 # Appliance stack (host network, privileged helper) — read deploy/README.md first.
 docker-up:

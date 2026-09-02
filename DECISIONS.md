@@ -1266,3 +1266,82 @@ ruleset and `ip_forward=0` to this development machine, which is not an
 appliance (B5, D0). The `/dev/snd` bind was exercised only as far as listing
 this host's cards (B3). Podman was not tried. Nothing about phones, venues or
 cinema servers changed (B1–B8).
+
+## D46 — The appliance posture, executed: a network namespace stands in for the appliance
+
+**What was unproven.** Everything §9.1 and §9.3 promise about the network — a
+default-deny ruleset actually loaded, IPv4 and IPv6 forwarding actually zero,
+the posture MEASURED back off the kernel rather than asserted, §3.3's watchdog
+actually restoring a flipped knob, and §8.1's wizard actually completing over a
+green posture — had never been executed anywhere. B5 says why: applying the
+ruleset needs root on a machine that can afford to lose its network, and this
+development host is not one (D0). Every test to date asserted the GENERATED
+rules; nothing had ever handed them to a kernel.
+
+**Why not a VM.** The obvious answer was a two-NIC guest. This host cannot run
+one: the CPU is an i7-5820K, which has VT-x, but the flag is absent from
+`/proc/cpuinfo` and `kvm-ok` reports no KVM extensions — it is disabled in
+firmware, and enabling it needs a reboot and console access on a box with six
+weeks of uptime and other people's sessions on it. Emulation without KVM was
+rejected as slow and, worse, a different kernel path than the one that matters.
+
+**What was built instead** (`deploy/docker/netns-appliance-test.sh`, `make
+docker-posture`). The three processes run in three containers that share ONE
+network namespace — exactly as they share the host's on an appliance — and that
+namespace has two interfaces of its own, one per Docker network standing in for
+the theater and patron zones. The helper gets the capability set the shipped
+compose file gives it and `--allow-apply`. What it then does is not simulated:
+`nft -f` loads a real table into a real kernel, `applySysctls` writes real
+`/proc/sys/net` knobs, and `verify.Run` reads back the same kernel. A namespace
+is not an appliance, but it is the same kernel, and every mechanism under test
+is per-namespace.
+
+**Measured, on the first full run (2026-09-02).**
+
+- The ruleset loads: `table inet openaccessbridge` with `policy drop` on input
+  and output, an **empty** forward chain, patron web admitted only as
+  `iif "eth1" tcp dport { 80, 443 }`, WebRTC only as `udp dport 10000-20000`,
+  and ACSP egress only as `oif "eth0" ip daddr <server> tcp dport 4170`. The
+  interface assignment made in the wizard reached the kernel rules intact.
+- All five forwarding knobs read 0 — v4 and v6, `all` and `default`.
+- The appliance's own report says `firewall_active:true` **and**
+  `firewall_introspected:true`: proven by reading the kernel, which is the
+  distinction D17 exists to preserve. `firewall_profile_version` is
+  `booth_diagnostic@b33c1937`, which core leaves empty unless the helper
+  answered `applied:true` — the decisive evidence that a kernel accepted it.
+- The zones are separated BY BEHAVIOUR, not by configuration: the patron page
+  answers on the patron network and the same port is dropped on the theater
+  network.
+- §8.1's gate held in both directions: completion was refused while the posture
+  was red (`forwarding_enabled, firewall_inactive, default_password_set`) and
+  succeeded once it was green, latching setup mode closed.
+- §3.3's watchdog put a deliberately flipped `ip_forward` back in 8 seconds and
+  said so — `forwarding_enabled_detected`, `source:runtime_watchdog`,
+  `reasserted:"sysctls"`. Both halves of the sentence, not just the repair.
+- This host was untouched throughout: same namespace, `ip_forward` still 1, no
+  `openaccessbridge` table anywhere outside the test namespace.
+
+**The safety property is the ordering, and a review is what found it.** The
+helper's watchdog calls `applySysctls()` unconditionally 30 seconds after it
+starts — no core, no wizard, no apply request needed, because on a fresh boot
+the posture reads flipped. So a helper started in the wrong namespace would
+zero this machine's forwarding knobs half a minute later, whatever the script
+checked afterwards. The container is therefore CREATED, its configuration
+gated (network mode not `host`/`none`/`container:`, attached to exactly the two
+test networks, no shared host PID/UTS/IPC namespace, not privileged), and only
+then STARTED. The earlier draft checked the namespace from inside the running
+container, which is confirmation after the fact. Every gate is an abort, never
+a warning.
+
+**One warning remains, and it is named rather than tolerated:**
+`dns_internet_leak_across_interfaces`, because the namespace's resolver is
+Docker's own on 127.0.0.11, which belongs to neither zone's plan. It is a
+property of the sandbox, it is a warning rather than a critical outside the
+production profiles, and it does not block setup. The test asserts that it is
+the ONLY remaining warning, so a second one appearing is a failure.
+
+**What is still not proven.** The appliance runs all three on the HOST's
+network with `deploy/docker/daemon.json` in force; that arrangement, the
+systemd units, and real NICs remain unexercised, as does every hardware blocker
+in BLOCKERS.md. What changed is the size of the gap: it is now "the host
+namespace and real hardware", not "the entire network posture".

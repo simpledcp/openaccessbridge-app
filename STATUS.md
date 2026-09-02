@@ -64,6 +64,21 @@ apply a default-deny ruleset to this development machine (B5). Its exact
 option set was measured to be sufficient for the sysctl writes and the `nft`
 reads (D45).
 
+**Verified live (the appliance POSTURE, 2026-09-02):** `make docker-posture`
+(`deploy/docker/netns-appliance-test.sh`, also a CI job) executes what §9.1/§9.3
+had only ever generated. In a two-NIC container network namespace, the helper
+really loads `table inet openaccessbridge` (input/output `policy drop`, an EMPTY
+forward chain, patron web only on the patron interface, ACSP egress only to the
+allowlisted server on the theater interface), really zeroes all five forwarding
+knobs, and the appliance reports `firewall_active:true` **with**
+`firewall_introspected:true` and `firewall_profile_version:booth_diagnostic@…`
+— which core leaves empty unless the helper answered `applied:true`. The wizard
+was refused while the posture was red and completed once it was green; the
+patron page answers on the patron network and is dropped on the theater
+network; §3.3's watchdog put a flipped `ip_forward` back in 8 s and logged that
+it had. This dev host was untouched throughout (D46). Still gated by B5: the
+HOST namespace, the systemd units, and real NICs.
+
 **Verified live (all three processes, 2026-08-21):** the five newest slices were
 each exercised against the running appliance, not only in tests. Configuring the
 patron interface through the setup API confined the WebRTC answer to that one
@@ -126,6 +141,7 @@ green.
 | 30 | §5.3 unresolved locators classified BY SERVER FAMILY, with the announced family plumbed from a wire field nothing read, the tally surfaced on the §8.2 caption panel, and the five caption dependencies rebuilt as one constructor both `main()` and the tests use (D43) | `internal/caption/resolver`, `internal/caption/acsp`, `cmd/openaccessbridge-core/status.go` |
 | 31 | Project-wide rename to **OpenAccessBridge**: module path, three binaries, systemd units, nftables table, state/runtime paths, env prefix, update-bundle magic, patron cookie and every brand string; GitHub repo now `simpledcp/openaccessbridge-app`. Verified by six adversarial lenses, which found the sweep had rewritten the build host's real directories (D44) | tree-wide, `go.mod`, `cmd/`, `deploy/systemd/` |
 | 32 | **Docker packaging (D45):** one image with all four binaries, the appliance as three containers mirroring the systemd units (host network, helper with exactly `NET_ADMIN`/`NET_RAW`, core/media unprivileged on read-only roots, a root-owned sticky tmpfs runtime volume, config-only volume, `daemon.json` for the host), a laptop/CI stack, a single-container demo, `make docker-build`/`docker-save`/`docker-smoke`, CI build+smoke on every push and GHCR publish on version tags — plus what it surfaced: the shared-runtime-directory contract (`internal/ipc`: leave a provisioned directory alone, create sockets at their final mode, verify before serving), the enumerator's silent empty-`/proc/asound` path, core's exit status on a refused bind, and CI's shallow-clone build number | `deploy/docker/`, `internal/ipc`, `internal/audio/capture`, `cmd/openaccessbridge-core`, `deploy/systemd/`, `Makefile`, `.github/` |
+| 33 | **The appliance posture EXECUTED (D46):** the §9.1 ruleset loaded into a real kernel and the §9.3 pass reading it back, in a two-NIC network namespace standing in for the appliance — plus §8.1's gate refusing and then allowing completion, the zones proven separate by behaviour, and §3.3's watchdog restoring a flipped knob; gated behind a pre-START configuration check, because the watchdog writes the sysctls 30 s after start unprompted | `deploy/docker/netns-appliance-test.sh`, `Makefile`, `.github/` |
 
 ## §6.7 audio delivery — what is real, and what a patron would actually get
 

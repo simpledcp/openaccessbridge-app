@@ -114,9 +114,23 @@ machine, and exactly what is needed to clear it. Per the kickoff: these are
   `NET_ADMIN`/`NET_RAW` plus `apparmor=unconfined` and `systempaths=unconfined`
   on the host network, and that set was MEASURED sufficient here for the
   forwarding-sysctl writes and the `nft` reads (by writing the host's current
-  value back). The appliance stack was still not brought up on this machine,
-  for the same reason as above: `--allow-apply` would install a default-deny
-  ruleset on a development host. The gate is unchanged — a real appliance.
+  value back).
+- **Largely cleared in software (D46, 2026-09-02).** The apply itself is no
+  longer unexercised. `deploy/docker/netns-appliance-test.sh` (`make
+  docker-posture`, and a CI job) runs the three processes in one container
+  network namespace with two interfaces of its own and `--allow-apply`, where a
+  real `nft -f` loads the ruleset, the five forwarding knobs really go to zero,
+  `verify.Run` reads that kernel back (`firewall_active` AND
+  `firewall_introspected`), the wizard completes over the green posture, the
+  zones are proven separate by reaching the patron page on one interface and
+  not the other, and §3.3's watchdog restores a flipped knob in 8 s and says so.
+  A VM was not an option here: VT-x is disabled in this host's firmware
+  (`kvm-ok`: no KVM extensions).
+- **What B5 still gates:** the HOST namespace. The shipped appliance runs all
+  three on the host's network with `deploy/docker/daemon.json` in force, and
+  that arrangement, the systemd units, and real NICs remain unexercised. The
+  gap is now "the host namespace and real hardware" rather than "the entire
+  network posture".
 
 ### B6. Real cinema-server lab test (Phase 4, gate G1) and field pilot (Phase 9, G5)
 - Hardware/venue/legal-gated by definition; out of scope. The caption path is

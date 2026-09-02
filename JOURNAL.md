@@ -1635,3 +1635,90 @@ first and kept, and the README now says so for both deployments.
 restarts, core reporting both helpers alive, the directory's provisioned
 identity, a clean helper restart, and core serving on :80 on the host network
 as the service account.
+
+## The posture, finally executed — in a namespace, because the BIOS said no (D46)
+
+The plan was a two-NIC VM. The machine said otherwise: an i7-5820K with no
+`vmx` flag in `/proc/cpuinfo` and `kvm-ok` reporting no KVM extensions. The
+silicon has VT-x; the firmware has it switched off, and turning it on means a
+reboot and a console on a box with six weeks of uptime and other people's
+sessions. Emulation without KVM would have been slow and, worse, a different
+path than the one that matters.
+
+So the appliance got a namespace instead. Three containers sharing ONE network
+namespace — the same arrangement as three processes sharing the host's — with
+two interfaces of its own standing in for the theater and patron zones. Every
+mechanism under test is per-namespace: nftables tables hang off `struct net`,
+and the five forwarding knobs are the namespace's own. What runs there is not a
+simulation of the apply. It is the apply.
+
+### What it took to be allowed to run it
+
+The dangerous version of this test is the one that quietly runs in the host's
+namespace and zeroes this machine's forwarding knobs. Guarding against that
+turned out to need more care than "check the namespace after starting":
+
+The helper's §3.3 watchdog calls `applySysctls()` **unconditionally**, thirty
+seconds after it starts. Not in response to core, not in response to the
+wizard — on a fresh boot the posture reads flipped, so it re-asserts. A helper
+started in the wrong namespace would therefore take out the host half a minute
+later no matter what the script checked afterwards. The container is now
+CREATED, its configuration gated — network mode not `host`, attached to exactly
+the two test networks, no shared host PID/UTS/IPC namespace, not privileged —
+and only then STARTED. A check from inside a running container is confirmation
+after the fact, which is not the same thing as a gate.
+
+That came out of the review round, not out of writing the script. So did the
+subnet check: `docker network create --subnet` installs a route on the host,
+and a collision could blackhole live traffic — and on this machine the check
+has to read *all* routing tables, because Tailscale keeps its peer routes in a
+policy table that `ip route show` does not list.
+
+### What it proved
+
+The ruleset loads. `table inet openaccessbridge`, `policy drop` on input and
+output, an empty forward chain, patron web admitted only as
+`iif "eth1" tcp dport { 80, 443 }`, ACSP egress only as
+`oif "eth0" ip daddr 10.77.10.9 tcp dport 4170`. The interface assignment an
+installer makes in the wizard arrives intact in the kernel rules, which is a
+sentence nothing in this repository could previously write.
+
+All five forwarding knobs read zero. The appliance's own report says
+`firewall_active:true` **and** `firewall_introspected:true` — the distinction
+D17 exists to preserve, now exercised on both sides. `firewall_profile_version`
+came back `booth_diagnostic@b33c1937`, and that field is the real evidence:
+core leaves it empty unless the helper answered `applied:true`, and the helper
+only says that after nft accepted the script.
+
+The zones were proven separate by behaviour rather than by reading the
+configuration that claims it: the patron page answers on the patron network and
+the same port is dropped on the theater network.
+
+§8.1's gate held in both directions — refused while the posture was red
+(`forwarding_enabled, firewall_inactive, default_password_set`), then completed
+once it was green and latched setup closed. And §3.3's watchdog put a
+deliberately flipped `ip_forward` back in eight seconds and *said so*, with the
+knobs named and `reasserted:"sysctls"`. Both halves of that sentence matter;
+a watchdog that repairs silently is the failure mode the spec's wording exists
+to forbid.
+
+The host, throughout: same namespace, `ip_forward` still 1, no
+`openaccessbridge` table anywhere outside the test.
+
+### The one warning left, named rather than tolerated
+
+`dns_internet_leak_across_interfaces`, because the namespace's resolver is
+Docker's own on 127.0.0.11, which belongs to neither zone's plan. It is a
+property of the sandbox, not of the appliance, and it is a warning rather than
+a critical outside the production profiles, so it does not block setup. The
+test asserts it is the ONLY remaining warning — a second one appearing is a
+failure, not a shrug.
+
+### What did not change
+
+A namespace is not an appliance. The shipped compose file runs all three on the
+HOST's network with `daemon.json` in force, and that arrangement, the systemd
+units and real NICs are still unexercised, as is every hardware blocker. What
+changed is the size of the gap: it is now "the host namespace and real
+hardware" rather than "the entire network posture". B5 is updated to say
+exactly that.

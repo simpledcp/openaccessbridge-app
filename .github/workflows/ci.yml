@@ -83,6 +83,13 @@ jobs:
       - name: Build the image and run the container smoke test
         run: make docker-smoke
 
+      # The §9.1/§9.3/§3.3 appliance posture, EXECUTED (D46): the helper really
+      # loads the ruleset and zeroes the forwarding knobs, in a two-NIC network
+      # namespace of its own. It refuses to run unless it has first proven the
+      # namespace is not the runner's own.
+      - name: Appliance posture in a network namespace
+        run: deploy/docker/netns-appliance-test.sh
+
   # Publish to GHCR on a version tag only: a release is a deliberate act with
   # its own numbering (Makefile BUILD_NUMBER), never a side effect of a push to
   # main. The image is tagged with the git describe output and `latest`.
